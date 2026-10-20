@@ -1,0 +1,11 @@
+{
+  "name": "metroventure-3d",
+  "private": true,
+  "version": "0.2.0",
+  "description": "GTA-style 3D open-world occupation & startup tycoon for the browser (Three.js, no build step).",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080 --bind 0.0.0.0 --directory web-openworld-game",
+    "test": "node --test web-openworld-game/tests/*.test.mjs"
+  }
+}
