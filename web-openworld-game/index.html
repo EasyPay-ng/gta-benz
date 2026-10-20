@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>MetroVenture 3D — Work, Build, Hire, Drive</title>
+  <meta name="description" content="A GTA-style 3D open-world tycoon in your browser: work jobs, launch startups, hire citizens and drive across the city." />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene"></canvas>
+
+    <!-- ===== HUD ===== -->
+    <div id="hud" class="glass">
+      <div class="brand">Metro<span>Venture</span> 3D</div>
+      <div class="stat cash"><span class="label">Cash</span><span id="hud-cash">$0</span></div>
+      <div class="stat"><span class="label">Occupation</span><span id="hud-job">Unemployed</span></div>
+      <div class="xpbar" id="hud-xpwrap"><div id="hud-xp"></div></div>
+      <div class="stat"><span class="label">Startups built</span><span id="hud-startups">0 / 4</span></div>
+      <div class="stat"><span class="label">City employment</span><span id="hud-employment">0 / 12 citizens hired</span></div>
+      <div class="stat"><span class="label">Garage</span><span id="hud-vehicles">1 vehicle</span></div>
+      <div class="stat small"><span class="label" id="hud-day">Day 1</span><span id="hud-payday">Payday in 30s</span></div>
+    </div>
+
+    <div id="task-banner" class="glass hidden">
+      <div class="task-title" id="task-title">Express Courier</div>
+      <div class="task-step" id="task-step">Pick up the parcel</div>
+      <div class="task-meta"><span id="task-dist">120 m</span><span id="task-pay">$220</span></div>
+    </div>
+
+    <div id="side" >
+      <canvas id="minimap" width="200" height="200" class="glass"></canvas>
+      <div class="side-buttons">
+        <button id="btn-creator" title="Character creator (C)">👤 Look</button>
+        <button id="btn-clockout" class="hidden" title="Clock out of your current job">⏹ Clock out</button>
+        <button id="btn-save" title="Save (F5)">💾 Save</button>
+        <button id="btn-load" title="Load (F9)">📂 Load</button>
+        <button id="btn-help" title="Controls (H)">❔ Help</button>
+        <button id="btn-mute" title="Toggle sound (M)">🔊</button>
+        <button id="btn-reset" class="danger" title="Delete save and restart">↺ Reset</button>
+      </div>
+    </div>
+
+    <div id="prompt" class="hidden"><kbd id="prompt-key">E</kbd><span id="prompt-text"></span></div>
+
+    <div id="vehicle-hud" class="glass hidden">
+      <div class="speed"><span id="veh-speed">0</span><small>km/h</small></div>
+      <div class="veh-name" id="veh-name">Rusty Hatchback</div>
+      <div class="veh-keys">W/S drive · A/D steer · Space handbrake · G horn · F exit</div>
+    </div>
+
+    <div id="toasts"></div>
+
+    <!-- ===== Touch controls ===== -->
+    <div id="touch" class="hidden">
+      <div id="joystick"><div id="joystick-knob"></div></div>
+      <div id="touch-buttons">
+        <button data-key="interact">E</button>
+        <button data-key="vehicle">F</button>
+        <button data-key="sprint">⇧</button>
+        <button data-key="horn">📯</button>
+      </div>
+    </div>
+
+    <!-- ===== Generic modal ===== -->
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-card glass">
+        <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- ===== Character creator (side panel; camera frames the player) ===== -->
+    <div id="creator" class="glass hidden">
+      <h2>Character Creator</h2>
+      <label class="field">Name <input id="cc-name" maxlength="16" /></label>
+      <div class="field"><span>Skin tone</span><div class="swatches" id="cc-skin"></div></div>
+      <div class="field"><span>Shirt</span><div class="swatches" id="cc-shirt"></div></div>
+      <div class="field"><span>Pants</span><div class="swatches" id="cc-pants"></div></div>
+      <div class="field"><span>Hair colour</span><div class="swatches" id="cc-hair"></div></div>
+      <div class="field"><span>Hair style</span><div class="chips" id="cc-hairstyle"></div></div>
+      <div class="field"><span>Body build</span><div class="chips" id="cc-build"></div></div>
+      <p class="hint">Uniforms and job headgear are applied automatically when you clock in.</p>
+      <div class="row">
+        <button id="cc-random">🎲 Randomize</button>
+        <button id="cc-done" class="primary">Done</button>
+      </div>
+    </div>
+
+    <!-- ===== Help / welcome ===== -->
+    <div id="help" class="modal hidden">
+      <div class="modal-card glass help-card">
+        <h1>Metro<span>Venture</span> 3D</h1>
+        <p class="lead">Work jobs → buy lots → launch startups → hire citizens → <b>grow city employment</b>. Now with cars you can drive!</p>
+        <div class="help-grid">
+          <div>
+            <h3>On foot</h3>
+            <ul>
+              <li><kbd>W A S D</kbd> / arrows: move</li>
+              <li><kbd>Shift</kbd>: sprint</li>
+              <li>Mouse drag / <kbd>Q</kbd> <kbd>R</kbd>: orbit camera · wheel: zoom</li>
+              <li><kbd>E</kbd> / <kbd>Space</kbd>: interact</li>
+              <li><kbd>F</kbd>: get in/out of your car</li>
+              <li><kbd>V</kbd>: valet. Brings your last car to you</li>
+              <li><kbd>C</kbd>: character creator</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Driving</h3>
+            <ul>
+              <li><kbd>W</kbd>/<kbd>S</kbd>: gas / brake &amp; reverse</li>
+              <li><kbd>A</kbd>/<kbd>D</kbd>: steer</li>
+              <li><kbd>Space</kbd>: handbrake (drift!)</li>
+              <li><kbd>G</kbd>: horn · <kbd>E</kbd>: complete waypoints</li>
+              <li><kbd>F5</kbd> save · <kbd>F9</kbd> load · <kbd>M</kbd> mute</li>
+            </ul>
+          </div>
+        </div>
+        <ol class="howto">
+          <li>Your free <b>Rusty Hatchback</b> is parked at the curb. Walk up and press <kbd>F</kbd>.</li>
+          <li>Clock in at the <b>Express Courier Depot</b>, <b>City Security HQ</b> or <b>Metro Cab Co.</b> (glowing rings).</li>
+          <li>Buy a <b>FOR SALE</b> lot to launch a startup. Each one unlocks a new occupation.</li>
+          <li>Walk up to unemployed citizens (or use the startup menu) to <b>hire</b> them. Collect profit every payday.</li>
+          <li>Visit <b>Metro Motors</b> to buy faster cars, vans and taxis.</li>
+        </ol>
+        <button id="help-close" class="primary big">Start playing</button>
+      </div>
+    </div>
+  </div>
+
+  <noscript>MetroVenture 3D needs JavaScript and WebGL.</noscript>
+  <script type="module" src="game.js"></script>
+</body>
+</html>
