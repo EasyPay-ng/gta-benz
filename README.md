@@ -22,8 +22,10 @@ npm run dev          # game + city server on http://localhost:8080
 npm run dev:offline  # game only
 ```
 
-Open two tabs on the same machine and you will see each other walking, driving and on
-the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
+Players sign in with a **display name and a PIN** (no email), so a name stays theirs
+across sessions and devices; guests can play without one. Open two tabs on the same
+machine — use two browsers or a private window, since one browser holds one session —
+and you will see each other walking, driving and on the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
 Workers free plan (no card, no bill); `npm run deploy`-style instructions, the protocol,
 the cost maths and the honest list of what is *not* synced yet are in
 [`MULTIPLAYER.md`](MULTIPLAYER.md).

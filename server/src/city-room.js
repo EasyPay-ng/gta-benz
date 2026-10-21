@@ -1,9 +1,10 @@
 // CityRoom — one Durable Object per city instance.
 //
-// Responsibilities are intentionally minimal for v1 (see MULTIPLAYER.md):
-//   * authenticate nothing (anonymous, id per connection) — accounts are a later phase
+// Responsibilities for v1 (see MULTIPLAYER.md):
+//   * name-based accounts: register/login with a PIN, session tokens, lockout
+//     (see accounts.js for the threat model)
 //   * relay positions between players, with per-socket throttling and interest culling
-//   * keep a tiny bit of presence state in storage so a reconnect lands where you left
+//   * keep a little presence state in storage so a reconnect lands where you left
 //   * never trust client data: clamp/validate everything that comes off the wire
 //
 // It uses the WebSocket **Hibernation API** (`state.acceptWebSocket`) and no timers,
@@ -11,18 +12,32 @@
 // trick that keeps a real-time game server inside Cloudflare's free tier: you are not
 // billed for duration while the room is idle.
 
+import {
+  normalizeName,
+  createAccount,
+  verifyLogin,
+  issueToken,
+  resolveToken,
+  revokeToken,
+  accountCount,
+} from './accounts.js';
+
 const MAX_MESSAGE_BYTES = 2048;   // hard cap per inbound frame
 const BROADCAST_MS = 200;         // 5 Hz snapshot rate
 const ABSENT_AFTER_MS = 10_000;   // stop showing a player who stopped sending
 const DROP_AFTER_MS = 60_000;     // close the socket of a player who vanished
 const STATE_SAVE_MS = 30_000;     // persist positions at most this often per player
 const MSG_BUDGET_PER_SEC = 30;    // per-socket inbound budget
-const INTEREST_RADIUS = 160;      // metres; matches roughly one screen of city
-const NAME_MAX = 24;
+const AUTH_BUDGET_PER_SEC = 6;    // register/login attempts per socket per second
+const INTEREST_RADIUS = 160;      // metres; roughly one screen of city
+const NAME_MAX = 16;
 
 const blankSession = () => ({
   id: null,
   name: null,
+  playerId: null,
+  account: null,      // lowercase account name, or null for a guest
+  token: null,        // session token this socket joined with (accounts only)
   app: null,
   x: 0,
   z: 0,
@@ -35,6 +50,8 @@ const blankSession = () => ({
   lastSnapAt: 0,
   budgetStart: 0,
   budgetUsed: 0,
+  authStart: 0,
+  authUsed: 0,
   warned: 0,
 });
 
@@ -104,15 +121,20 @@ export class CityRoom {
       return this._send(ws, { t: 'error', code: 'rate_limited' });
     }
 
+    // ---- identity -----------------------------------------------------------
+    if (msg.t === 'register' || msg.t === 'login') {
+      return this._auth(ws, s, msg, now);
+    }
+    if (msg.t === 'logout') {
+      return this._logout(ws, s);
+    }
     if (msg.t === 'join') {
       if (s.id) return; // already joined, ignore duplicates
-      await this._join(ws, s, msg, now);
-      return;
+      return this._join(ws, s, msg, now);
     }
 
+    // ---- gameplay (requires a joined session) -------------------------------
     if (!s.id) return this._send(ws, { t: 'error', code: 'join_first' });
-
-    s.lastSeen = now;
 
     switch (msg.t) {
       case 'pos': {
@@ -125,7 +147,7 @@ export class CityRoom {
         this._maybeBroadcast(now);
         if (now - s.lastSave > STATE_SAVE_MS) {
           s.lastSave = now;
-          this.state.storage.put(`player:${s.id}`, this._persistable(s));
+          this._persistPosition(s, ws);
         }
         return;
       }
@@ -138,7 +160,6 @@ export class CityRoom {
         return;
       }
       case 'look': {
-        // Later phases: outfits/vehicles changing without a reconnect.
         if (msg.app && typeof msg.app === 'object') s.app = sanitizeApp(msg.app);
         ws.serializeAttachment(s);
         this._broadcastAll({ t: 'look', id: s.id, app: s.app });
@@ -158,24 +179,109 @@ export class CityRoom {
   }
 
   // ---------------------------------------------------------------------------
+  // Identity
+  // ---------------------------------------------------------------------------
+  async _auth(ws, s, msg, now) {
+    if (now - s.authStart >= 1000) {
+      s.authStart = now;
+      s.authUsed = 0;
+    }
+    if (++s.authUsed > AUTH_BUDGET_PER_SEC) {
+      return this._send(ws, { t: 'auth', ok: false, code: 'slow_down' });
+    }
+    ws.serializeAttachment(s);
+
+    const name = normalizeName(msg.name);
+    if (!name) return this._send(ws, { t: 'auth', ok: false, code: 'bad_name' });
+
+    const isRegister = msg.t === 'register';
+    const result = isRegister
+      ? await createAccount(this.state.storage, name, msg.pin, `u_${crypto.randomUUID().slice(0, 8)}`)
+      : await verifyLogin(this.state.storage, name, msg.pin);
+
+    if (!result.ok) {
+      return this._send(ws, { t: 'auth', ok: false, code: result.code, attemptsLeft: result.attemptsLeft, retryAfter: result.retryAfter });
+    }
+
+    const account = result.account;
+    const token = await issueToken(this.state.storage, account);
+
+    this._send(ws, {
+      t: 'auth',
+      ok: true,
+      name,
+      playerId: account.playerId,
+      token,
+      created: isRegister,
+      accounts: await accountCount(this.state.storage),
+    });
+  }
+
+  async _logout(ws, s) {
+    if (s.playerId) {
+      const token = s.token;
+      const acc = s.account ? await this.state.storage.get(`account:${s.account}`) : null;
+      await revokeToken(this.state.storage, token, acc);
+    }
+    this._send(ws, { t: 'auth', ok: true, loggedOut: true });
+  }
+
+  // ---------------------------------------------------------------------------
   // Join / leave
   // ---------------------------------------------------------------------------
   async _join(ws, s, msg, now) {
+    let account = null;
+    let token = null;
+
+    if (typeof msg.token === 'string') {
+      const res = await resolveToken(this.state.storage, msg.token);
+      if (!res.ok) return this._send(ws, { t: 'error', code: 'unknown_token' });
+      account = res.account;
+      token = msg.token;
+    }
+
+    if (account) {
+      const clash = this._sessionByName(account.nameLower, ws);
+      if (clash) return this._send(ws, { t: 'error', code: 'already_online' });
+      s.name = account.name;
+      s.playerId = account.playerId;
+      s.account = account.nameLower;
+      s.token = token;
+    } else {
+      // Guests: no persistence, no reserved name. Colliding display names get a suffix
+      // so two people called "Benz" are never ambiguous on screen.
+      const base = (normalizeName(msg.name) || 'Guest').slice(0, NAME_MAX);
+      s.name = this._uniqueGuestName(base);
+      s.playerId = `g_${crypto.randomUUID().slice(0, 8)}`;
+      s.account = null;
+      s.token = null;
+    }
+
     s.id = `p_${crypto.randomUUID().slice(0, 8)}`;
-    s.name = String(msg.name || 'Citizen').slice(0, NAME_MAX);
     s.app = sanitizeApp(msg.app);
-    s.x = clampNum(msg.x, -400, 400, 0);
-    s.z = clampNum(msg.z, -400, 400, 0);
-    s.yaw = clampNum(msg.yaw, -10, 10, 0);
     s.joinedAt = now;
     s.lastSeen = now;
     s.lastSave = now;
+    s.x = clampNum(msg.x, -400, 400, 0);
+    s.z = clampNum(msg.z, -400, 400, 0);
+    s.yaw = clampNum(msg.yaw, -10, 10, 0);
+
+    // Returning players resume where they logged off.
+    let restore = null;
+    if (account) {
+      const saved = await this.state.storage.get(`pos:${account.nameLower}`);
+      if (saved && Number.isFinite(saved.x)) {
+        s.x = clampNum(saved.x, -400, 400, 0);
+        s.z = clampNum(saved.z, -400, 400, 0);
+        restore = { x: s.x, z: s.z, yaw: clampNum(saved.yaw, -10, 10, 0) };
+      }
+    }
+
     ws.serializeAttachment(s);
-    this.state.storage.put(`player:${s.id}`, this._persistable(s));
 
     const peers = this._sessions()
       .filter((o) => o.ws !== ws && o.s.id && now - o.s.lastSeen < DROP_AFTER_MS)
-      .map(({ s: o }) => ({ id: o.id, name: o.name, app: o.app, x: o.x, z: o.z, yaw: o.yaw, veh: o.veh }));
+      .map(({ s: o }) => ({ id: o.id, name: o.name, app: o.app, x: o.x, z: o.z, yaw: o.yaw, veh: o.veh, account: !!o.account }));
 
     this._send(ws, {
       t: 'welcome',
@@ -183,11 +289,13 @@ export class CityRoom {
       room: this.room,
       tick: BROADCAST_MS,
       peers,
+      you: { id: s.id, name: s.name, playerId: s.playerId, account: !!s.account },
+      restore,
       now,
     });
 
     this._broadcastAll(
-      { t: 'join', id: s.id, name: s.name, app: s.app, x: s.x, z: s.z, yaw: s.yaw, veh: s.veh },
+      { t: 'join', id: s.id, name: s.name, app: s.app, x: s.x, z: s.z, yaw: s.yaw, veh: s.veh, account: !!s.account },
       ws,
     );
 
@@ -198,8 +306,36 @@ export class CityRoom {
   async _leave(ws, code) {
     const s = ws.deserializeAttachment();
     if (!s?.id) return;
-    this.state.storage.put(`player:${s.id}`, { ...this._persistable(s), leftAt: Date.now() });
+    if (s.account) await this._persistPosition(s, ws);
     this._broadcastAll({ t: 'leave', id: s.id, code });
+  }
+
+  _persistPosition(s, ws) {
+    if (!s.account) return Promise.resolve();
+    return this.state.storage.put(`pos:${s.account}`, {
+      x: round(s.x, 1),
+      z: round(s.z, 1),
+      yaw: round(s.yaw, 2),
+      veh: s.veh,
+      at: Date.now(),
+    });
+  }
+
+  _sessionByName(nameLower, exceptWs) {
+    for (const { ws, s } of this._sessions()) {
+      if (ws !== exceptWs && s.account === nameLower && s.id) return s;
+    }
+    return null;
+  }
+
+  _uniqueGuestName(base) {
+    const taken = new Set(this._sessions().map(({ s }) => (s.name || '').toLowerCase()));
+    if (!taken.has(base.toLowerCase())) return base;
+    for (let i = 2; i < 100; i++) {
+      const candidate = `${base.slice(0, NAME_MAX - 3)} ${i}`;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
+    return `${base.slice(0, NAME_MAX - 6)} ${Math.floor(Math.random() * 999)}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -274,10 +410,6 @@ export class CityRoom {
     } catch {
       /* closed */
     }
-  }
-
-  _persistable(s) {
-    return { id: s.id, name: s.name, app: s.app, x: round(s.x), z: round(s.z), yaw: round(s.yaw, 2), veh: s.veh, updatedAt: Date.now() };
   }
 }
 

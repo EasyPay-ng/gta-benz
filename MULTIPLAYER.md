@@ -79,7 +79,10 @@ Client → server:
 
 | Message | Payload | Notes |
 |---|---|---|
-| `join` | `{name, app}` | must be first; `app` is the character creator colours |
+| `register` | `{name, pin}` | creates the account; `name_taken` / `bad_name` / `bad_pin` |
+| `login` | `{name, pin}` | `no_account` / `bad_pin` / `locked`; issues a session token |
+| `join` | `{token}` or `{guest:true, name}`, plus `app` | must be first; guests skip accounts entirely |
+| `logout` | `{}` | revokes the current token |
 | `pos` | `{x, z, yaw, mv, veh}` | ≤10/s, validated and clamped server-side |
 | `look` | `{app}` | appearance change without reconnecting |
 | `chat` | `{m}` | ≤120 chars, broadcast to the room |
@@ -89,7 +92,8 @@ Server → client:
 
 | Message | Payload | Notes |
 |---|---|---|
-| `welcome` | `{id, room, tick, peers[]}` | full peer list with appearances |
+| `auth` | `{ok, name, playerId, token}` / `{ok:false, code}` | identity result |
+| `welcome` | `{id, room, tick, peers[], you, restore}` | full peer list, who you are, saved position |
 | `join` / `leave` | `{id, name, app, x, z, yaw}` | presence events |
 | `snap` | `{now, p: [[id,x,z,yaw,mv,veh], …]}` | full replacement, 5 Hz, distance-culled |
 | `chat` | `{id, name, m}` | |
@@ -106,6 +110,39 @@ Design choices that keep it free and simple:
 - **Server-side clamps** — coordinates are clamped to ±400 m, yaw to ±10, messages to
   2 KB, 30 messages/s per socket, then a close. Never trust the client, even before
   there is anything worth cheating for.
+
+---
+
+## 3b. Identity: display names and PINs
+
+Players identify themselves by name, the way you asked. First sign-in creates the
+account; a PIN is the only credential. No email, no OAuth, no password reset.
+
+| Rule | Value |
+|---|---|
+| Name | 3–16 characters: letters, numbers, spaces, `.` `-` `_`; case-insensitive, so `Amara` and `amara` are one account |
+| PIN | 4–32 letters/numbers, hashed with PBKDF2-SHA256 (10k iterations — see the CPU note) |
+| Session | 24-byte token in `localStorage`, 90-day expiry, up to 5 devices, revoked on sign-out |
+| Lockout | 5 wrong PINs → 60 s cool-down for that name |
+| Guests | "Play as guest" needs no PIN. Names are not reserved, collisions get a suffix (`Benz 2`), and nothing is saved |
+| Reconnect | Same token, same name, and you reappear where you logged off |
+| One session | Signing in twice with the same account is refused (`already_online`) |
+
+Why PBKDF2 at 10k iterations rather than 100k: the Workers **free** plan allows about
+10 ms of CPU per invocation, and hashing runs inside the request. The rate limiter
+(6 auth attempts/s per socket) plus the per-name lockout is what actually protects a
+4-digit PIN. If you move to Workers Paid and care, raise `PBKDF2_ITERATIONS` in
+`server/src/accounts.js` — existing hashes keep working only if you store the iteration
+count, so do it before you have real accounts.
+
+What this does **not** do: anyone who knows your PIN is you, and there is no recovery if
+you forget it. That is the deliberate trade for "no email required". When money, vehicle
+keys or property transfers matter, replace `accounts.js` with an OAuth provider — the
+`playerId` is already the stable join key, so nothing else has to change.
+
+The in-game sign-in card is in `index.html` (`#login`) and wired in `game.js`
+(`showLogin`, `startNet`, `AUTH_MESSAGES`). The browser stores only the token under
+`metroventure_identity`, never the PIN.
 
 ---
 
@@ -220,8 +257,9 @@ Being explicit, because the upgrade plan mixes them together:
 - **Traffic and the 12 citizens are simulated per client.** Two players in the same
   street see different cars. Making them shared means the server (or a host player) owns
   them — a real design step, not a flag.
-- **No accounts.** Ids are per connection; `player:<id>` in DO storage keeps a reconnect
-  tidy but nothing authorises it.
+- **Economy is not tied to the account.** Names, tokens and last position are per city;
+  cash, startups and vehicles are still `localStorage`. Account ownership of those
+  arrives with the timing/economy work.
 - **Positions are client-authoritative.** Fine for friends; exploitable the moment money
   is involved. Server-side movement validation is a phase-7 job.
 - **The economy is local.** Cash, startups, vehicles and employees still live in
@@ -250,8 +288,8 @@ Nothing in this code needs to change — it is the same Worker, just not throttl
 | Upgrade-plan item | What the server unlocks | Order |
 |---|---|---|
 | 11 — real-time clock (1 h = 24 h) | One clock Durable Object with an alarm; every client reads it, so day/night, needs and wages agree for everyone | **next** |
-| 1 — security operatives (AI) | Already possible single-player; player-employers need accounts | after accounts |
-| 5 & 6 — vehicle access + key transfer | Needs `ownerId` on vehicles and an authoritative inventory | after accounts |
+| 1 — security operatives (AI) | AI guards work single-player now; player-employers need the economy moved server-side | next |
+| 5 & 6 — vehicle access + key transfer | Needs `ownerId` on vehicles and an authoritative inventory (accounts exist, inventories don't) | after the clock |
 | 10 — real estate | Needs interior property records + ownership | after interiors |
 | 2 — emotes visible to nearby players | Trivial: add `emote` to the `pos`/`look` payload | anytime |
 

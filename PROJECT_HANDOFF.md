@@ -37,8 +37,12 @@ Local: `npm run dev` (game + server + WS proxy on :8080). Tests: `server/test/sm
 (protocol) and `server/test/client.mjs` (real client module). Full guide and limits:
 `MULTIPLAYER.md`.
 
+Identity: display name + PIN accounts (`server/src/accounts.js`), session tokens in
+`localStorage` under `metroventure_identity`, guests allowed, lockout after 5 wrong PINs.
+Sign-in card is `#login` in `index.html`.
+
 Still per-client (not synced): traffic, citizens, economy, vehicle ownership. Positions
-are client-authoritative; no accounts yet.
+are client-authoritative.
 
 ## Ideas for next steps
 - Bigger city with districts, plus day/night cycle with street lights and car headlights

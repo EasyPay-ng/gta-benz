@@ -186,3 +186,19 @@ button.big { padding: 12px 22px; font-size: 1.05rem; }
   .modal-card { padding: 14px 16px; max-height: 94vh; }
   #creator { width: 300px; left: auto; top: 8px; bottom: 8px; right: 8px; }
 }
+
+/* ===== Sign in ===== */
+.login-card { width: min(460px, 94vw); }
+.login-card .accent { color: var(--primary); }
+.login-card .hint { margin: 12px 0 0; }
+.login-error {
+  margin: 0 0 12px; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  background: rgba(244, 63, 94, 0.14); border: 1px solid rgba(244, 63, 94, 0.45); color: #fecdd3;
+}
+.login-error.info {
+  background: rgba(56, 189, 248, 0.12); border-color: rgba(56, 189, 248, 0.4); color: #bae6fd;
+}
+.login-alt { margin-top: 10px; }
+.login-alt button { flex: 1; font-size: 12px; opacity: 0.85; }
+#btn-account.on { border-color: var(--primary); color: var(--primary); }
+.peer-tag { color: #7dd3fc; }

@@ -5,32 +5,44 @@
 // snapshots arrive. No prediction, no rollback, no authority — see MULTIPLAYER.md
 // for why that is the right v1 and what changes in later phases.
 //
+// Identity: a display name + PIN, held by the server. The client never stores the
+// PIN — only a session token (see game.js). Guests can play without one.
+//
 // The module has no Three.js dependency so it can be exercised in Node too.
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 const SEND_HZ = 10;            // outbound position rate
 const KEEPALIVE_MS = 1000;     // resend even when standing still
 const PING_MS = 5000;
 const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 
+// Statuses surfaced to the UI:
+//   idle | connecting | auth_required | authenticating | online | reconnecting | offline
 export class NetClient {
   /**
    * @param {object} opts
    * @param {string} opts.url        ws:// or wss:// endpoint (…/ws?room=metro-1)
-   * @param {string} opts.name       display name
+   * @param {object} [opts.identity] {mode:'token'|'guest'|'credential', name, pin, token}
    * @param {object} opts.appearance character creator colours
-   * @param {object} [opts.handlers] { onStatus, onWelcome, onJoin, onLeave, onSnapshot, onChat }
+   * @param {object} [opts.handlers] {onStatus, onWelcome, onJoin, onLeave, onSnapshot,
+   *                                  onChat, onAuth, onAuthError, onAuthRequired, onToken}
    */
-  constructor({ url, name, appearance, handlers = {} }) {
+  constructor({ url, identity = null, appearance, handlers = {} }) {
     // Accept http(s) URLs too, so a server can just be configured as a path.
     this.url = String(url).replace(/^http(s?):/i, 'ws$1:');
-    this.name = name || 'Citizen';
+    this.identity = identity;
     this.appearance = appearance || null;
     this.handlers = handlers;
 
-    this.id = null;
-    this.status = 'idle'; // idle | connecting | online | reconnecting | offline
+    this.id = null;          // room presence id (per connection)
+    this.playerId = null;    // stable account id
+    this.name = null;        // display name as awarded by the server
+    this.account = false;    // signed in vs guest
+    this.token = identity?.token || null;
+    this.restore = null;     // saved position handed back on login
+
+    this.status = 'idle';
     this.rtt = null;
     this.peers = new Map(); // id -> { id, name, app, x, z, yaw, mv, veh, visible, tx, tz, tyaw }
     this.chat = [];         // last few messages, for the UI
@@ -44,12 +56,16 @@ export class NetClient {
     this.lastSent = null;
     this.sendCount = 0;
     this.recvCount = 0;
+    this.fatal = null;
   }
 
   get connected() { return this.status === 'online'; }
 
   connect() {
-    if (this.ws) return;
+    // A socket we already asked to close is dead weight; replace it.
+    if (this.ws && this.ws.readyState <= 1) return;
+    this.ws = null;
+    this.fatal = null;
     this._setStatus(this.attempt === 0 ? 'connecting' : 'reconnecting');
     let ws;
     try {
@@ -62,12 +78,7 @@ export class NetClient {
 
     ws.addEventListener('open', () => {
       this.attempt = 0;
-      this._send({
-        t: 'join',
-        v: PROTOCOL_VERSION,
-        name: this.name,
-        app: this.appearance,
-      });
+      this._enterRoom();
     });
 
     ws.addEventListener('message', (ev) => {
@@ -78,12 +89,22 @@ export class NetClient {
     });
 
     ws.addEventListener('close', () => {
+      if (this.ws !== ws) return; // superseded by a newer socket
       this.ws = null;
       this.id = null;
       for (const p of this.peers.values()) this.handlers.onLeave?.(p.id);
       this.peers.clear();
       if (this.closedByUs) {
         this._setStatus('offline');
+        return;
+      }
+      if (this.fatal) {
+        this._setStatus('offline');
+        return;
+      }
+      if (this.status === 'auth_required') {
+        this._setStatus('auth_required');
+        this.handlers.onAuthRequired?.();
         return;
       }
       this._setStatus('reconnecting');
@@ -95,6 +116,98 @@ export class NetClient {
     ws.addEventListener('error', () => {
       // 'close' follows and owns the retry logic.
     });
+  }
+
+  // Join with whatever identity we were given; ask the UI if we have none.
+  _enterRoom() {
+    const id = this.identity;
+    if ((id?.mode === 'credential' || id?.mode === 'register') && id.name && id.pin) {
+      this._setStatus('authenticating');
+      this._send({ t: id.mode === 'register' ? 'register' : 'login', v: PROTOCOL_VERSION, name: id.name, pin: id.pin });
+      return;
+    }
+    if (this.token) {
+      this._send({ t: 'join', v: PROTOCOL_VERSION, token: this.token, app: this.appearance });
+      return;
+    }
+    if (id?.mode === 'guest') {
+      this._send({ t: 'join', v: PROTOCOL_VERSION, guest: true, name: id.name || 'Guest', app: this.appearance });
+      return;
+    }
+    // No identity yet: let the game show the sign-in card.
+    this._setStatus('auth_required');
+    this.handlers.onAuthRequired?.();
+  }
+
+  // Switching identity mid-session (guest → account, or another account) needs a
+  // clean socket, because the room ties presence to the session that joined it.
+  _resetSocket() {
+    if (this.ws) {
+      const old = this.ws;
+      this.ws = null;
+      try { old.close(1000, 'switch'); } catch { /* already closed */ }
+    }
+    this.id = null;
+    for (const p of this.peers.values()) this.handlers.onLeave?.(p.id);
+    this.peers.clear();
+    this.attempt = 0;
+    this.reconnectAt = 0;
+    this.closedByUs = false;
+  }
+
+  /** Sign in; creates the account if the name is free (one-button first-run). */
+  signIn(name, pin) {
+    this.identity = { mode: 'credential', name, pin };
+    this.token = null;
+    if (this.id) { this._resetSocket(); this.connect(); return; }
+    if (this.ws?.readyState === 1) {
+      this._setStatus('authenticating');
+      this._send({ t: 'login', v: PROTOCOL_VERSION, name, pin });
+    } else {
+      this.closedByUs = false;
+      this.connect();
+    }
+  }
+
+  /** Create an account explicitly (used when the user picks "Create account"). */
+  register(name, pin) {
+    this.identity = { mode: 'register', name, pin };
+    this.token = null;
+    if (this.id) { this._resetSocket(); this.connect(); return; }
+    if (this.ws?.readyState === 1) {
+      this._setStatus('authenticating');
+      this._send({ t: 'register', v: PROTOCOL_VERSION, name, pin });
+    } else {
+      this.closedByUs = false;
+      this.connect();
+    }
+  }
+
+  /** Continue without an account: playable, but no reserved name and no saved spot. */
+  playAsGuest(name = 'Guest') {
+    this.identity = { mode: 'guest', name };
+    this.token = null;
+    this.closedByUs = false;
+    if (this.id) { this._resetSocket(); this.connect(); return; }
+    if (this.ws?.readyState === 1) {
+      this._send({ t: 'join', v: PROTOCOL_VERSION, guest: true, name, app: this.appearance });
+    } else {
+      this.connect();
+    }
+  }
+
+  /** Revoke the session token on the server and forget it locally. */
+  signOut(forgetOnly = false) {
+    if (!forgetOnly && this.ws?.readyState === 1) this._send({ t: 'logout' });
+    this.token = null;
+    this.identity = null;
+    this.name = null;
+    this.playerId = null;
+    this.account = false;
+    this.closedByUs = true;
+    try { this.ws?.close(1000, 'signout'); } catch { /* already closed */ }
+    this.ws = null;
+    this._setStatus('offline');
   }
 
   disconnect() {
@@ -166,10 +279,39 @@ export class NetClient {
   // ---------------------------------------------------------------------------
   _handle(msg) {
     switch (msg.t) {
+      case 'auth': {
+        if (!msg.ok) {
+          if (msg.code === 'no_account' && this.identity?.mode === 'credential') {
+            // First run: the name is free, so create it with the same PIN.
+            this._send({ t: 'register', v: PROTOCOL_VERSION, name: this.identity.name, pin: this.identity.pin });
+            return;
+          }
+          this._setStatus('auth_required');
+          this.handlers.onAuthError?.(msg.code, msg);
+          return;
+        }
+        if (msg.loggedOut) {
+          this.handlers.onAuthError?.('logged_out', msg);
+          return;
+        }
+        this.token = msg.token;
+        this.playerId = msg.playerId;
+        this.name = msg.name;
+        this.account = true;
+        this.identity = { mode: 'token', token: msg.token, name: msg.name };
+        this._setStatus('connecting');
+        this._send({ t: 'join', v: PROTOCOL_VERSION, token: msg.token, app: this.appearance });
+        this.handlers.onAuth?.({ name: msg.name, playerId: msg.playerId, token: msg.token, created: msg.created });
+        return;
+      }
       case 'welcome': {
         this.id = msg.id;
         this.peers.clear();
         for (const p of msg.peers || []) this.peers.set(p.id, this._peer(p));
+        this.name = msg.you?.name || this.name;
+        this.account = !!msg.you?.account;
+        this.playerId = msg.you?.playerId || this.playerId;
+        this.restore = msg.restore || null;
         this._setStatus('online');
         this.nextSend = 0;
         this.nextPing = performance.now(); // measure RTT straight after the handshake
@@ -177,7 +319,7 @@ export class NetClient {
         break;
       }
       case 'join': {
-        const p = this._peer({ id: msg.id, name: msg.name, app: msg.app, x: msg.x, z: msg.z, yaw: msg.yaw, veh: msg.veh });
+        const p = this._peer({ id: msg.id, name: msg.name, app: msg.app, x: msg.x, z: msg.z, yaw: msg.yaw, veh: msg.veh, account: msg.account });
         p.visible = true;
         this.peers.set(msg.id, p);
         this.handlers.onJoin?.(p);
@@ -218,7 +360,29 @@ export class NetClient {
         break;
       }
       case 'error': {
-        this.handlers.onError?.(msg);
+        switch (msg.code) {
+          case 'unknown_token': {
+            // Token expired or was revoked: drop it and ask who you are.
+            this.token = null;
+            this.identity = null;
+            this._setStatus('auth_required');
+            this.handlers.onAuthError?.('session_expired', msg);
+            this.handlers.onAuthRequired?.();
+            return;
+          }
+          case 'already_online':
+          case 'bad_name': {
+            this.fatal = msg.code;
+            const old = this.ws;
+            this.ws = null;
+            try { old?.close(4003, msg.code); } catch { /* closed */ }
+            this._setStatus('offline');
+            this.handlers.onAuthError?.(msg.code, msg);
+            return;
+          }
+          default:
+            this.handlers.onError?.(msg);
+        }
         break;
       }
       default:
@@ -231,6 +395,7 @@ export class NetClient {
       id: data.id,
       name: data.name || 'Citizen',
       app: data.app || null,
+      account: !!data.account,
       x: data.x || 0,
       z: data.z || 0,
       yaw: data.yaw || 0,

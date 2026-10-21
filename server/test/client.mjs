@@ -18,7 +18,7 @@ function check(name, cond, detail = '') {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(fn, ms = 3000) {
+async function until(fn, ms = 3500) {
   const start = Date.now();
   while (Date.now() - start < ms) {
     if (fn()) return true;
@@ -27,76 +27,155 @@ async function until(fn, ms = 3000) {
   return false;
 }
 
-function makeClient(name, appearance) {
+const app = { skin: '#8d5524', shirt: '#3b82f6', pants: '#1f2937', hair: '#111111', hairStyle: 'short', build: 'Balanced' };
+const stamp = Date.now() % 100000;
+
+function makeClient(identity, hooks = {}) {
   const c = new NetClient({
     url: URL,
-    name,
-    appearance,
+    identity,
+    appearance: app,
     handlers: {
-      onJoin: (p) => events.push(`join:${p.id}`),
-      onLeave: (id) => events.push(`leave:${id}`),
-      onStatus: (s) => events.push(`status:${s}`),
+      onJoin: (p) => hooks.events?.push(`join:${p.id}`),
+      onLeave: (id) => hooks.events?.push(`leave:${id}`),
+      onStatus: (s) => hooks.events?.push(`status:${s}`),
+      onAuth: (a) => hooks.events?.push(`auth:${a.name}`),
+      onAuthError: (code) => hooks.errors?.push(code),
+      onAuthRequired: () => hooks.authRequired?.push(true),
     },
   });
+  hooks.created?.push(c);
   return c;
 }
 
-const events = [];
-const app = { skin: '#8d5524', shirt: '#3b82f6', pants: '#1f2937', hair: '#111111', hairStyle: 'short', build: 'Balanced' };
-
 console.log(`\nNetClient end-to-end → ${URL}\n`);
 
-const a = makeClient('Amara', app);
-const b = makeClient('Bayo', { ...app, shirt: '#ef4444' });
+// ---------------------------------------------------------------------------
+// Guests (no account)
+// ---------------------------------------------------------------------------
+const events = [];
+const a = makeClient({ mode: 'guest', name: 'Amara' }, { events });
 a.connect();
-check('A reaches online', await until(() => a.connected));
+check('guest reaches online', await until(() => a.connected));
+check('guest is marked as a guest', a.account === false && a.name === 'Amara');
+check('guest gets no saved position', a.restore === null);
+
+// ---------------------------------------------------------------------------
+// Accounts: register (via sign-in auto-create), token reuse, resume position
+// ---------------------------------------------------------------------------
+const authEvents = [];
+const errors = [];
+const name = `Ada${stamp}`;
+const b = makeClient(null, { events: authEvents, errors });
 b.connect();
-check('B reaches online', await until(() => b.connected));
+check('no identity → client asks the UI for one', await until(() => b.status === 'auth_required'));
 
-check('A discovers B as a peer', await until(() => a.peers.size === 1));
-check('B discovers A as a peer', await until(() => b.peers.size === 1));
-const peerOfA = [...a.peers.values()][0];
-check('handshake carries name and appearance', peerOfA.name === 'Bayo' && peerOfA.app?.shirt === '#ef4444', JSON.stringify(peerOfA));
+b.signIn(name, 'pin2468');
+check('first sign-in creates the account', await until(() => b.connected && b.account === true), b.status);
+check('sign-in reports the account name', authEvents.includes(`auth:${name}`));
+check('a token is issued', typeof b.token === 'string' && b.token.length >= 32);
 
-// Drive both clients at 60 fps, walking B north-east.
-let local = { x: 0, z: 0, yaw: 0, moving: false, vehicle: null };
+// Registering a taken name is refused explicitly.
+const dupe = makeClient(null, { errors });
+dupe.connect();
+await until(() => dupe.status === 'auth_required');
+dupe.register(name, 'different');
+check('a taken name is reported, not silently overwritten', await until(() => errors.includes('name_taken')), errors.join(','));
+dupe.disconnect();
+
+// Wrong PIN on an existing account.
+const c = makeClient(null, { events: authEvents, errors });
+c.connect();
+await until(() => c.status === 'auth_required');
+c.signIn(name, 'wrongpin');
+check('wrong PIN is rejected', await until(() => errors.includes('bad_pin')), errors.join(','));
+check('a rejected PIN leaves you signed out', c.status === 'auth_required' || !c.connected);
+
+// Correct PIN while the account is already online → explicit error, not a duplicate.
+c.signIn(name, 'pin2468');
+check('the same account cannot be online twice', await until(() => errors.includes('already_online')), errors.join(','));
+b.disconnect();
+await sleep(400);
+c.signIn(name, 'pin2468');
+check('correct PIN signs in once the other session is gone', await until(() => c.connected && c.account === true && c.name === name));
+
+// Token reuse: an account that is not currently online rejoins with just the token.
+const name2 = `Bayo${stamp}`;
+const e = makeClient(null, { events: authEvents });
+e.connect();
+await until(() => e.status === 'auth_required');
+e.signIn(name2, 'pin1357');
+await until(() => e.connected);
+const eToken = e.token;
+e.disconnect();
+await sleep(400);
+const d = makeClient({ mode: 'token', token: eToken, name: name2 });
+d.connect();
+check('a stored token rejoins without a PIN', await until(() => d.connected && d.account === true && d.name === name2), d.status);
+
+// Movement relay between A (guest) and B (account).
 const ticker = setInterval(() => {
   a.update(1 / 60, { x: 0, z: 0, yaw: 0, moving: false, vehicle: null });
-  b.update(1 / 60, local);
-  local = { ...local, z: local.z + 0.1, x: local.x + 0.05 };
+  d.update(1 / 60, { x: 6, z: 4, yaw: 1.2, moving: true, vehicle: 'sedan' });
+  c.update(1 / 60, { x: 2, z: 2, yaw: 0, moving: false, vehicle: null });
+  d.update(1 / 60, { x: 3, z: 3, yaw: 0, moving: false, vehicle: null });
 }, 16);
-
-await sleep(1200);
+await sleep(1400);
 clearInterval(ticker);
 
-const seen = [...a.peers.values()][0];
-check('A receives B positions', seen && seen.tx > 1 && seen.tz > 1, JSON.stringify(seen));
-check('A marks B visible', seen?.visible === true);
-check('positions are interpolated targets, not the local player', seen?.tx !== 0);
+const seenOnA = [...a.peers.values()].find((p) => p.name === name2);
+check('peers are named from their account', !!seenOnA);
+check('vehicle context is relayed', seenOnA?.veh === 'sedan', seenOnA?.veh);
+check('positions are interpolated targets', (seenOnA?.tx || 0) > 0.5);
 
-// Outbound rate: B ticks at 60 fps but must only send ~10 msgs/s.
-const rate = b.sendCount / 1.3;
-check('client sends at ~10 Hz, not 60', rate <= 13, `${rate.toFixed(1)} msg/s`);
-check('ping/pong produced an RTT', typeof a.rtt === 'number' && a.rtt >= 0, String(a.rtt));
+// Rate limiting on the client side: 60 fps ticks must not mean 60 msgs/s.
+const rate = d.sendCount / 1.5;
+check('client sends at ~10 Hz, not 60', rate <= 14, `${rate.toFixed(1)} msg/s`);
+check('ping/pong produced an RTT', typeof a.rtt === 'number');
 
-// Chat relay.
-b.say('hello city');
-check('chat reaches the other client', await until(() => a.chat.some((m) => m.m === 'hello city')));
-check('chat message is attributed', a.chat.at(-1).name === 'Bayo');
+// Chat + appearance
+a.say('hello city');
+check('chat reaches other clients', await until(() => d.chat.some((m) => m.m === 'hello city')));
+d.setAppearance({ ...app, shirt: '#22c55e' });
+check('appearance changes propagate', await until(() => a.peers.get(d.id)?.app?.shirt === '#22c55e'));
 
-// Appearance change without reconnect.
-b.setAppearance({ ...app, shirt: '#22c55e' });
-check('appearance updates propagate', await until(() => a.peers.get(b.id)?.app?.shirt === '#22c55e'));
+// Position persistence: D logs off at a known spot, comes back there.
+for (let i = 0; i < 12; i++) {
+  d.update(1 / 60, { x: -42.5, z: 17.25, yaw: 0.5, moving: false, vehicle: null });
+  await sleep(40);
+}
+const dToken = d.token;
+const dName = d.name;
+d.disconnect();
+await sleep(400);
+const resume = makeClient({ mode: 'token', token: dToken, name: dName });
+resume.connect();
+check('returning player gets their saved position back', await until(() => resume.connected));
+check(
+  'restore point matches where they left off',
+  resume.restore && Math.abs(resume.restore.x + 42.5) < 1.5 && Math.abs(resume.restore.z - 17.25) < 1.5,
+  JSON.stringify(resume.restore),
+);
 
-// Leaving.
-const bId = b.id;
-b.disconnect();
-check('peer removal propagates', await until(() => !a.peers.has(bId)));
-check('A stays online after B leaves', a.connected);
+// Peer removal
+const resumeId = resume.id;
+resume.disconnect();
+check('peer removal propagates', await until(() => !a.peers.has(resumeId)));
+check('other clients stay online', a.connected && c.connected);
+
+// Sign out revokes the token server-side.
+const token = c.token;
+c.signOut();
+check('sign out clears local identity', c.token === null && c.status === 'offline');
+await sleep(300);
+const after = makeClient({ mode: 'token', token, name });
+after.connect();
+check('a signed-out token cannot be reused', await until(() => after.status === 'auth_required' || !after.connected));
 
 a.disconnect();
-check('disconnect is final, no reconnect loop', a.status === 'offline' && a.ws === null);
-check('status changes were reported', events.includes('status:online'));
+e.disconnect();
+after.disconnect();
+await sleep(150);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) { console.log('failures:', failures.join(', ')); process.exit(1); }

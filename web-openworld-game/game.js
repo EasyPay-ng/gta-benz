@@ -145,6 +145,7 @@ const game = {
   modal: null,
   creatorOpen: false,
   helpOpen: false,
+  loginOpen: false,
   time: 0,
   valetCooldown: 0,
   autosaveTimer: 60,
@@ -401,7 +402,7 @@ function resetGame() {
 const keys = new Set();
 const touchInput = { x: 0, y: 0, sprint: false };
 const isTyping = () => document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
-const anyOverlay = () => !!game.modal || game.helpOpen;
+const anyOverlay = () => !!game.modal || game.helpOpen || game.loginOpen;
 
 window.addEventListener('keydown', (e) => {
   sfx.ensure();
@@ -532,9 +533,15 @@ function updateHUD(force = false) {
   const netEl = $('hud-net');
   if (netEl) {
     if (!net) netEl.textContent = 'Single-player';
-    else if (net.connected) netEl.textContent = `Online · ${net.visiblePeers().length} nearby${net.rtt != null ? ` · ${net.rtt}ms` : ''}`;
-    else netEl.textContent = net.status === 'reconnecting' ? 'Reconnecting…' : 'Connecting…';
+    else if (net.connected) {
+      const name = net.name || 'Guest';
+      netEl.textContent = `${name}${net.account ? '' : ' (guest)'} · ${net.visiblePeers().length} nearby${net.rtt != null ? ` · ${net.rtt}ms` : ''}`;
+    } else if (net.status === 'auth_required' || net.status === 'authenticating') netEl.textContent = 'Signing in…';
+    else if (net.status === 'reconnecting') netEl.textContent = 'Reconnecting…';
+    else netEl.textContent = 'Connecting…';
   }
+  const acctBtn = $('btn-account');
+  if (acctBtn) acctBtn.classList.toggle('hidden', !net);
 }
 
 const modalEl = $('modal');
@@ -833,11 +840,13 @@ $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreato
 
 // Help
 function showHelp() { game.helpOpen = true; $('help').classList.remove('hidden'); }
+let pendingLogin = false;
 function hideHelp() {
   if (!game.helpOpen) return;
   game.helpOpen = false;
   $('help').classList.add('hidden');
   if (!game.state.seenHelp) { game.state.seenHelp = true; saveGame(true); }
+  if (pendingLogin) { pendingLogin = false; showLogin(); }
 }
 $('help-close').addEventListener('click', () => { sfx.ensure(); hideHelp(); });
 $('btn-help').addEventListener('click', showHelp);
@@ -1439,10 +1448,67 @@ function updateRemotes(dt) {
   }
 }
 
-function startNet(serverUrl) {
+// --- identity (name + PIN) -------------------------------------------------
+// The PIN is only sent to the server; the browser keeps a session token instead.
+const IDENTITY_KEY = 'metroventure_identity';
+let cityServerUrl = null;
+
+function loadIdentity() {
+  try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null'); } catch { return null; }
+}
+function saveIdentity(identity) {
+  try { localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity)); } catch { /* private mode */ }
+}
+function forgetIdentity() {
+  try { localStorage.removeItem(IDENTITY_KEY); } catch { /* private mode */ }
+}
+
+const AUTH_MESSAGES = {
+  bad_name: 'Names are 3–16 characters: letters, numbers, spaces, dots, dashes or underscores.',
+  bad_pin: 'PINs are 4–32 letters or numbers.',
+  name_taken: 'That name already belongs to someone. Try another, or use their PIN if it is yours.',
+  bad_credential: 'Wrong name or PIN.',
+  locked: 'Too many wrong PINs. Wait a minute and try again.',
+  slow_down: 'Slow down a moment, then try again.',
+  session_expired: 'Your session expired. Please sign in again.',
+  already_online: 'That account is already playing in this city. Close the other tab first.',
+  logged_out: 'Signed out.',
+  connect_failed: 'Could not reach the city server. Playing offline instead.',
+};
+
+function showLogin(message) {
+  game.loginOpen = true;
+  const saved = loadIdentity();
+  $('login-name').value = saved?.name || game.state.appearance.name || '';
+  $('login-pin').value = '';
+  loginError(message || '');
+  $('login').classList.remove('hidden');
+  setTimeout(() => { ($('login-name').value ? $('login-pin') : $('login-name')).focus(); }, 30);
+}
+function hideLogin() {
+  game.loginOpen = false;
+  $('login').classList.add('hidden');
+}
+function loginError(message, kind = '') {
+  const el = $('login-error');
+  el.textContent = message || '';
+  el.classList.toggle('hidden', !message);
+  el.classList.toggle('info', kind === 'info');
+}
+function applyPlayerName(name) {
+  if (!name) return;
+  game.state.appearance.name = name;
+  const field = $('cc-name');
+  if (field && document.activeElement !== field) field.value = name;
+  updateHUD(true);
+}
+
+function startNet(identity = null) {
+  if (!cityServerUrl) return;
+  if (net) { net.disconnect(); net = null; }
   net = new NetClient({
-    url: serverUrl,
-    name: game.state.appearance.name,
+    url: cityServerUrl,
+    identity,
     appearance: game.state.appearance,
     handlers: {
       onStatus(status) {
@@ -1450,20 +1516,82 @@ function startNet(serverUrl) {
         else if (status === 'reconnecting') toast('🌐 Connection lost — retrying…', 'bad');
         updateHUD(true);
       },
+      onAuth(auth) {
+        saveIdentity({ name: auth.name, token: auth.token });
+        applyPlayerName(auth.name);
+        loginError('');
+        $('btn-account').classList.add('on');
+        toast(auth.created ? `🪪 Account created — welcome, ${auth.name}` : `🪪 Signed in as ${auth.name}`, 'good');
+      },
+      onAuthError(code, msg) {
+        if (code === 'session_expired' || code === 'logged_out') forgetIdentity();
+        if (code === 'session_expired') return; // onAuthRequired will ask again
+        loginError(AUTH_MESSAGES[code] || `Sign-in failed (${code}).`);
+        if (!game.loginOpen) showLogin(AUTH_MESSAGES[code] || `Sign-in failed (${code}).`);
+        if (code === 'connect_failed') { /* handled below */ }
+        updateHUD(true);
+      },
+      onAuthRequired() { if (!game.loginOpen) showLogin(); },
       onWelcome(msg) {
         for (const p of msg.peers) ensureRemote(p);
-        toast(`🌐 City server: ${msg.room}`, 'good');
+        hideLogin();
+        applyPlayerName(msg.you?.name);
+        if (msg.restore && !game.player.vehicle) {
+          game.player.x = msg.restore.x; game.player.z = msg.restore.z;
+          game.player.yaw = msg.restore.yaw;
+          game.player.vx = game.player.vz = 0;
+          game.player.char.group.position.set(msg.restore.x, city.groundY(msg.restore.x, msg.restore.z), msg.restore.z);
+          cam.yaw = msg.restore.yaw;
+        }
+        toast(`🌐 ${msg.room} · ${msg.peers.length + 1} ${msg.peers.length ? 'players' : 'player'} online`, 'good');
+        updateHUD(true);
       },
       onJoin(peer) { ensureRemote(peer); },
       onLeave(id) { removeRemote(id); },
       onChat(msg) { toast(`${msg.name}: ${msg.m}`, ''); },
-      onError(err) { if (err.code !== 'rate_limited') console.warn('[net]', err); },
+      onError(err) {
+        if (err.code === 'rate_limited') return;
+        console.warn('[net]', err);
+        if (err.code === 'connect_failed') toast('City server unreachable — still playable offline.', 'bad');
+      },
     },
   });
   net.connect();
   window.__mv.net = net;
   window.__mv.remotes = remotes;
+  window.__mv.identity = () => loadIdentity();
 }
+
+// Sign-in card controls
+$('login-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('login-name').value.trim();
+  const pin = $('login-pin').value;
+  if (name.length < 3) return loginError(AUTH_MESSAGES.bad_name);
+  if (pin.length < 4) return loginError(AUTH_MESSAGES.bad_pin);
+  loginError('Connecting…', 'info');
+  applyPlayerName(name);
+  if (net) net.signIn(name, pin);
+  else startNet({ mode: 'credential', name, pin });
+});
+$('login-guest').addEventListener('click', () => {
+  const name = $('login-name').value.trim() || game.state.appearance.name || 'Guest';
+  hideLogin();
+  if (net) net.playAsGuest(name);
+  else startNet({ mode: 'guest', name });
+});
+$('login-offline').addEventListener('click', () => {
+  hideLogin();
+  if (net) net.disconnect();
+  net = null;
+  cityServerUrl = null;
+  toast('Playing offline. Reload to sign in again.', '');
+  updateHUD(true);
+});
+$('btn-account').addEventListener('click', () => {
+  if (game.loginOpen) return hideLogin();
+  showLogin(net?.account ? `Signed in as ${net.name}. Enter a PIN to sign in as someone else.` : '');
+});
 
 function netLocalState() {
   const p = game.player;
@@ -1632,7 +1760,14 @@ function boot() {
   if (!loaded) applyState();
   if (!game.state.seenHelp) showHelp();
   else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
-  discoverServerUrl().then((serverUrl) => { if (serverUrl) startNet(serverUrl); });
+  discoverServerUrl().then((serverUrl) => {
+    if (!serverUrl) return;
+    cityServerUrl = serverUrl;
+    const saved = loadIdentity();
+    if (saved?.token) startNet({ mode: 'token', token: saved.token, name: saved.name });
+    else if (game.helpOpen) pendingLogin = true; // ask once the welcome card is dismissed
+    else showLogin();
+  });
   camera.position.set(game.player.x - 6, 5, game.player.z - 6);
   frame();
 }
