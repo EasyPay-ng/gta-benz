@@ -310,10 +310,10 @@ class CitizenAgent {
   }
 
   dispose() {
-    scene.remove(this.char.group);
-    this.char.dispose();
-    if (this.labelMat.map) this.labelMat.map.dispose();
-    this.labelMat.dispose();
+    try { this.char.group.removeFromParent(); } catch { try { scene.remove(this.char.group); } catch {} }
+    try { this.char.dispose(); } catch {}
+    try { if (this.labelMat.map) this.labelMat.map.dispose(); } catch {}
+    try { this.labelMat.dispose(); } catch {}
   }
 }
 
@@ -323,29 +323,46 @@ class CitizenAgent {
 function applyState() {
   const s = game.state;
   cancelTask();
-  // lots
-  for (const id of Object.keys(BUSINESSES)) city.updateLot(id, s.businesses[id]);
-  city.rebuildColliderCache();
+  // lots — be tolerant if save references unknown business or city lost a lot
+  for (const id of Object.keys(BUSINESSES)) {
+    try { city.updateLot(id, s.businesses[id]); } catch (e) { console.warn('[applyState] lot', id, e); }
+  }
+  try { city.rebuildColliderCache(); } catch {}
   // player
   const p = game.player;
-  if (p.vehicle) detachFromVehicle();
-  p.char.setAppearance(s.appearance);
-  p.char.setOccupation(s.activeJob);
-  p.char.setCarrying(false);
-  p.x = s.player.x; p.z = s.player.z; p.yaw = s.player.yaw; p.vx = p.vz = 0;
+  try { if (p.vehicle) detachFromVehicle(); } catch {}
+  try { p.char.setAppearance(s.appearance); } catch (e) { console.warn('[applyState] appearance', e); p.char.setAppearance(Eco.createInitialState().appearance); }
+  try { p.char.setOccupation(s.activeJob); } catch {}
+  try { p.char.setCarrying(false); } catch {}
+  p.x = Number.isFinite(s.player.x) ? s.player.x : -12.5;
+  p.z = Number.isFinite(s.player.z) ? s.player.z : -15;
+  p.yaw = Number.isFinite(s.player.yaw) ? s.player.yaw : Math.PI * 0.8;
+  p.vx = p.vz = 0;
   cam.yaw = p.yaw;
-  // vehicles
-  for (const v of game.vehicles) v.dispose();
-  game.vehicles = s.vehicles.map((d) => new Vehicle(scene, d));
-  for (const v of game.vehicles) v.syncMesh(city.groundY(v.x, v.z));
+  // vehicles — filter out any entry that fails to construct
+  for (const v of game.vehicles) try { v.dispose(); } catch {}
+  game.vehicles = [];
+  for (const d of (s.vehicles || [])) {
+    try { game.vehicles.push(new Vehicle(scene, d)); } catch (e) { console.warn('[applyState] vehicle', d, e); }
+  }
+  for (const v of game.vehicles) try { v.syncMesh(city.groundY(v.x, v.z)); } catch {}
   // citizens
-  for (const c of game.citizens) c.dispose();
-  game.citizens = s.citizens.map((d) => new CitizenAgent(d));
+  for (const c of game.citizens) try { c.dispose(); } catch {}
+  game.citizens = [];
+  for (const d of (s.citizens || [])) {
+    try { game.citizens.push(new CitizenAgent(d)); } catch (e) { console.warn('[applyState] citizen', d, e); }
+  }
+  // if citizen list ended up empty due to corrupted save, repopulate
+  if (!game.citizens.length) {
+    const fresh = Eco.createInitialState();
+    s.citizens = fresh.citizens;
+    for (const d of s.citizens) try { game.citizens.push(new CitizenAgent(d)); } catch {}
+  }
   if (s.player.inVehicle) {
     const v = game.vehicles.find((x) => x.data.id === s.player.inVehicle);
-    if (v) enterVehicle(v, true);
+    if (v) try { enterVehicle(v, true); } catch {}
   }
-  if (s.activeJob) newTask();
+  if (s.activeJob) try { newTask(); } catch {}
   updateHUD(true);
 }
 
@@ -367,6 +384,7 @@ function saveGame(silent = false) {
     if (!silent) toast('💾 Game saved', 'good');
     return true;
   } catch (err) {
+    console.error('[save]', err);
     toast(`Save failed: ${err.message}`, 'bad');
     return false;
   }
@@ -375,13 +393,31 @@ function saveGame(silent = false) {
 function loadGame(silent = false) {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) { if (!silent) toast('No save found yet. Press F5 to save.', 'bad'); return false; }
+  // keep a copy of the last known-good state so a corrupted save doesn't brick the city
+  const prevState = game.state;
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (err) {
+    console.error('[load] JSON parse', err);
+    toast(`Load failed: Save is corrupted (bad JSON). Press Reset to start fresh.`, 'bad');
+    return false;
+  }
   try {
-    game.state = Eco.migrateState(JSON.parse(raw));
+    game.state = Eco.migrateState(parsed);
     applyState();
     if (!silent) toast('📂 Save loaded', 'good');
     return true;
   } catch (err) {
-    toast(`Load failed: ${err.message}`, 'bad');
+    console.error('[load] applyState', err);
+    // revert to previous working city so the player isn't stuck on a green void
+    try {
+      game.state = prevState || Eco.createInitialState();
+      applyState();
+    } catch (recoveryErr) {
+      console.error('[load] recovery', recoveryErr);
+      game.state = Eco.createInitialState();
+      try { applyState(); } catch {}
+    }
+    toast(`Load failed: ${err.message} — kept your previous city. Press Reset to clear the broken save if this repeats.`, 'bad');
     return false;
   }
 }
@@ -1395,16 +1431,16 @@ function ensureRemote(peer) {
 function removeRemote(id) {
   const r = remotes.get(id);
   if (!r) return;
-  scene.remove(r.char.group);
-  r.char.dispose();
-  r.label.mat.dispose();
-  r.label.tex.dispose?.();
+  try { r.char.group.removeFromParent(); } catch { try { scene.remove(r.char.group); } catch {} }
+  try { r.char.dispose(); } catch {}
+  try { r.label.mat.dispose(); } catch {}
+  try { r.label.tex.dispose?.(); } catch {}
   if (r.car) {
-    scene.remove(r.car);
-    r.car.traverse((o) => {
+    try { r.car.removeFromParent(); } catch { try { scene.remove(r.car); } catch {} }
+    try { r.car.traverse((o) => {
       if (o.geometry) o.geometry.dispose?.();
       if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose?.());
-    });
+    }); } catch {}
   }
   remotes.delete(id);
 }
@@ -1428,7 +1464,7 @@ function updateRemotes(dt) {
     if (inCar) {
       const color = peer.app?.shirt || '#38bdf8';
       if (!r.car || r.carModel !== inCar || r.carColor !== color) {
-        if (r.car) { scene.remove(r.car); r.car.traverse((o) => { o.geometry?.dispose?.(); }); }
+        if (r.car) { try { r.car.removeFromParent(); } catch { try { scene.remove(r.car); } catch {} } try { r.car.traverse((o) => { o.geometry?.dispose?.(); }); } catch {} }
         r.car = buildCarMesh(inCar, color).group;
         r.carModel = inCar;
         r.carColor = color;
@@ -1756,10 +1792,21 @@ function frame() {
 // ===========================================================================
 function boot() {
   game.state = Eco.createInitialState();
-  const loaded = localStorage.getItem(SAVE_KEY) ? loadGame(true) : false;
-  if (!loaded) applyState();
+  const hasSave = !!localStorage.getItem(SAVE_KEY);
+  let loaded = false;
+  if (hasSave) {
+    loaded = loadGame(true);
+    if (!loaded) updateHUD(true);
+  } else {
+    applyState();
+  }
   if (!game.state.seenHelp) showHelp();
-  else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
+  else if (loaded) toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
+  else if (hasSave && !loaded) {
+    // failure toast already shown by loadGame; no extra welcome
+  } else if (!hasSave) {
+    // fresh install with no save: welcome is the help card
+  }
   discoverServerUrl().then((serverUrl) => {
     if (!serverUrl) return;
     cityServerUrl = serverUrl;

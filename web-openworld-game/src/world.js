@@ -448,10 +448,18 @@ export class City {
   updateLot(bizId, bizState) {
     const def = BUSINESSES[bizId];
     const lot = this.lots[bizId];
+    if (!lot) return;
     if (lot.group) {
-      lot.group.parent.remove(lot.group);
+      // Be defensive: group may already have been detached (parent == null) if
+      // a previous load failed half-way. Use removeFromParent() when available.
+      if (typeof lot.group.removeFromParent === 'function') lot.group.removeFromParent();
+      else if (lot.group.parent) lot.group.parent.remove(lot.group);
       lot.group.traverse((o) => {
         if (o.material && o.material.map) o.material.map.dispose();
+        // dispose cloned textures created via makeTextTexture
+        if (o.material && o.material.map && o.material.map.dispose) {
+          try { o.material.map.dispose(); } catch {}
+        }
       });
     }
     this.dynamicColliders[bizId] = [];

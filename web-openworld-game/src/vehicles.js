@@ -263,8 +263,8 @@ export class Vehicle {
   }
 
   dispose() {
-    this.scene.remove(this.mesh);
-    this.parts.paint.dispose();
+    try { this.mesh.removeFromParent(); } catch { try { this.scene.remove(this.mesh); } catch {} }
+    try { this.parts.paint.dispose(); } catch {}
   }
 }
 

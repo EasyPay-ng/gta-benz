@@ -1,6 +1,6 @@
 // MetroVenture 3D — modular low-poly humanoid shared by the player, citizens and passengers.
 import * as THREE from 'three';
-import { BUILDS, OCCUPATIONS } from './data.js';
+import { BUILDS, OCCUPATIONS, DEFAULT_APPEARANCE } from './data.js';
 
 // Shared geometries (re-used by every character to keep memory low)
 const G = {
@@ -132,12 +132,21 @@ export class Character {
   }
 
   setAppearance(app) {
-    this.appearance = { ...app };
-    const b = BUILDS[app.build] || BUILDS.Balanced;
+    // Defensive: saves from older/corrupted localStorage may miss fields
+    // or contain nonsense values that would make THREE.Color.set() throw.
+    const safe = { ...DEFAULT_APPEARANCE, ...(app || {}) };
+    if (!BUILDS[safe.build]) safe.build = DEFAULT_APPEARANCE.build;
+    if (!safe.skin || typeof safe.skin !== 'string') safe.skin = DEFAULT_APPEARANCE.skin;
+    if (!safe.hair || typeof safe.hair !== 'string') safe.hair = DEFAULT_APPEARANCE.hair;
+    if (!safe.shirt || typeof safe.shirt !== 'string') safe.shirt = DEFAULT_APPEARANCE.shirt;
+    if (!safe.pants || typeof safe.pants !== 'string') safe.pants = DEFAULT_APPEARANCE.pants;
+    if (!safe.hairStyle || typeof safe.hairStyle !== 'string') safe.hairStyle = DEFAULT_APPEARANCE.hairStyle;
+    this.appearance = { ...safe };
+    const b = BUILDS[safe.build] || BUILDS.Balanced;
     this.body.scale.set(b.w, b.h, b.w > 1 ? 1.1 : 1);
     this.headGroup.scale.set(1 / b.w, 1 / b.h, b.w > 1 ? 1 / 1.1 : 1); // keep head proportional
-    this.mats.skin.color.set(app.skin);
-    this.mats.hair.color.set(app.hair);
+    try { this.mats.skin.color.set(safe.skin); } catch {}
+    try { this.mats.hair.color.set(safe.hair); } catch {}
     this._applyClothes();
     this._buildHair();
   }
@@ -151,14 +160,14 @@ export class Character {
   }
 
   _applyClothes() {
-    const app = this.appearance;
+    const app = this.appearance || DEFAULT_APPEARANCE;
     const uni = this.occupation ? OCCUPATIONS[this.occupation].uniform : null;
-    this.mats.shirt.color.set(uni ? uni.shirt : app.shirt);
-    this.mats.pants.color.set(uni ? uni.pants : app.pants);
+    try { this.mats.shirt.color.set(uni ? uni.shirt : (app.shirt || DEFAULT_APPEARANCE.shirt)); } catch {}
+    try { this.mats.pants.color.set(uni ? uni.pants : (app.pants || DEFAULT_APPEARANCE.pants)); } catch {}
     this.stripe.visible = !!uni;
     if (uni) {
-      this.mats.accent.color.set(uni.accent);
-      this.mats.hat.color.set(uni.hat);
+      try { this.mats.accent.color.set(uni.accent); } catch {}
+      try { this.mats.hat.color.set(uni.hat); } catch {}
     }
   }
 

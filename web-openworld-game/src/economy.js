@@ -78,31 +78,123 @@ export function createInitialState() {
 // Merge a loaded save onto a fresh state so missing fields (older saves) get defaults.
 export function migrateState(raw) {
   const base = createInitialState();
-  if (!raw || typeof raw !== 'object') return base;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
+
+  // shallow merge, but guard against raw containing null / non-object sub-fields
   const s = { ...base, ...raw };
-  s.appearance = { ...base.appearance, ...(raw.appearance || {}) };
-  s.jobXP = { ...base.jobXP, ...(raw.jobXP || {}) };
-  s.businesses = { ...base.businesses, ...(raw.businesses || {}) };
-  for (const id of Object.keys(s.businesses)) {
-    const b = s.businesses[id];
-    if (b) s.businesses[id] = { level: 1, storedProfit: 0, lifetimeProfit: 0, employees: [], ...b };
+
+  // --- appearance -----------------------------------------------------------
+  const rawApp = raw.appearance && typeof raw.appearance === 'object' ? raw.appearance : {};
+  s.appearance = { ...base.appearance, ...rawApp };
+  // sanitize appearance values so Character.setAppearance never receives
+  // undefined / invalid colours that would make THREE.Color.set() throw
+  for (const k of Object.keys(base.appearance)) {
+    if (s.appearance[k] == null || typeof s.appearance[k] !== 'string') s.appearance[k] = base.appearance[k];
   }
+  if (!BUILDS[s.appearance.build]) s.appearance.build = base.appearance.build;
+  if (!HAIR_STYLES.includes(s.appearance.hairStyle)) s.appearance.hairStyle = base.appearance.hairStyle;
+
+  // --- jobXP ---------------------------------------------------------------
+  const rawXP = raw.jobXP && typeof raw.jobXP === 'object' ? raw.jobXP : {};
+  s.jobXP = { ...base.jobXP };
+  for (const k of Object.keys(base.jobXP)) {
+    const v = rawXP[k];
+    s.jobXP[k] = Number.isFinite(v) ? v : base.jobXP[k];
+  }
+
+  // --- businesses ----------------------------------------------------------
+  const rawBiz = raw.businesses && typeof raw.businesses === 'object' ? raw.businesses : {};
+  s.businesses = { ...base.businesses };
+  for (const id of Object.keys(base.businesses)) {
+    const b = rawBiz[id];
+    if (b == null) { s.businesses[id] = null; continue; }
+    if (typeof b !== 'object' || Array.isArray(b)) { s.businesses[id] = null; continue; }
+    s.businesses[id] = {
+      level: Number.isFinite(b.level) ? Math.min(Math.max(1, Math.floor(b.level)), MAX_BUSINESS_LEVEL) : 1,
+      storedProfit: Number.isFinite(b.storedProfit) ? b.storedProfit : 0,
+      lifetimeProfit: Number.isFinite(b.lifetimeProfit) ? b.lifetimeProfit : 0,
+      employees: [], // recomputed below from citizen.employer
+    };
+    // preserve any extra future fields without letting them corrupt
+    for (const k of Object.keys(b)) if (!(k in s.businesses[id])) s.businesses[id][k] = b[k];
+  }
+  // drop unknown business keys that may have been injected by a corrupted save
+  for (const id of Object.keys(s.businesses)) if (!(id in BUSINESSES)) delete s.businesses[id];
+
+  // --- citizens ------------------------------------------------------------
+  const sanitizeCitizen = (c, i) => {
+    const b = base.citizens[i] || base.citizens[0];
+    if (!c || typeof c !== 'object' || Array.isArray(c)) return { ...b };
+    const app = c.appearance && typeof c.appearance === 'object' ? c.appearance : {};
+    const out = { ...b, ...c };
+    out.appearance = { ...b.appearance, ...app };
+    for (const k of Object.keys(b.appearance)) if (out.appearance[k] == null) out.appearance[k] = b.appearance[k];
+    if (out.id == null || typeof out.id !== 'string') out.id = b.id;
+    if (out.name == null || typeof out.name !== 'string') out.name = b.name;
+    // employer will be validated below; allow null
+    if (out.employer != null && typeof out.employer !== 'string') out.employer = null;
+    out.x = Number.isFinite(out.x) ? out.x : null;
+    out.z = Number.isFinite(out.z) ? out.z : null;
+    return out;
+  };
   if (!Array.isArray(raw.citizens) || raw.citizens.length !== base.citizens.length) {
     s.citizens = base.citizens;
   } else {
-    s.citizens = raw.citizens.map((c, i) => ({ ...base.citizens[i], ...c, appearance: { ...base.citizens[i].appearance, ...(c.appearance || {}) } }));
+    s.citizens = raw.citizens.map((c, i) => sanitizeCitizen(c, i));
   }
-  s.vehicles = Array.isArray(raw.vehicles) ? raw.vehicles.filter((v) => VEHICLE_MODELS[v.model]) : base.vehicles;
-  s.player = { ...base.player, ...(raw.player || {}) };
-  s.stats = { ...base.stats, ...(raw.stats || {}) };
+
+  // --- vehicles ------------------------------------------------------------
+  if (Array.isArray(raw.vehicles)) {
+    const filtered = raw.vehicles.filter((v) => v && typeof v === 'object' && VEHICLE_MODELS[v.model]);
+    s.vehicles = filtered.map((v, idx) => ({
+      id: typeof v.id === 'string' ? v.id : `v${idx + 1}`,
+      model: v.model,
+      color: typeof v.color === 'string' ? v.color : '#ffffff',
+      x: Number.isFinite(v.x) ? v.x : 0,
+      z: Number.isFinite(v.z) ? v.z : 0,
+      yaw: Number.isFinite(v.yaw) ? v.yaw : 0,
+    }));
+    if (!s.vehicles.length) s.vehicles = base.vehicles;
+  } else {
+    s.vehicles = base.vehicles;
+  }
+  // nextVehicleId / lastVehicleId sanity
+  s.nextVehicleId = Number.isFinite(raw.nextVehicleId) ? Math.max(1, Math.floor(raw.nextVehicleId)) : base.nextVehicleId;
+  if (s.nextVehicleId <= s.vehicles.length) s.nextVehicleId = s.vehicles.length + 1;
+  if (typeof raw.lastVehicleId !== 'string' || !s.vehicles.find((v) => v.id === raw.lastVehicleId)) {
+    s.lastVehicleId = s.vehicles[s.vehicles.length - 1]?.id || base.lastVehicleId;
+  } else {
+    s.lastVehicleId = raw.lastVehicleId;
+  }
+
+  // --- player & stats ------------------------------------------------------
+  const rawPlayer = raw.player && typeof raw.player === 'object' ? raw.player : {};
+  s.player = { ...base.player, ...rawPlayer };
+  s.player.x = Number.isFinite(s.player.x) ? s.player.x : base.player.x;
+  s.player.z = Number.isFinite(s.player.z) ? s.player.z : base.player.z;
+  s.player.yaw = Number.isFinite(s.player.yaw) ? s.player.yaw : base.player.yaw;
+  if (typeof s.player.inVehicle !== 'string' && s.player.inVehicle !== null) s.player.inVehicle = null;
+  if (s.player.inVehicle && !s.vehicles.find((v) => v.id === s.player.inVehicle)) s.player.inVehicle = null;
+
+  const rawStats = raw.stats && typeof raw.stats === 'object' ? raw.stats : {};
+  s.stats = { ...base.stats, ...rawStats };
+  s.stats.day = Number.isFinite(s.stats.day) ? Math.max(1, Math.floor(s.stats.day)) : base.stats.day;
+  s.stats.payrollTimer = Number.isFinite(s.stats.payrollTimer) ? s.stats.payrollTimer : base.stats.payrollTimer;
+  s.stats.tasksCompleted = Number.isFinite(s.stats.tasksCompleted) ? Math.max(0, Math.floor(s.stats.tasksCompleted)) : 0;
+  s.stats.totalEarned = Number.isFinite(s.stats.totalEarned) ? s.stats.totalEarned : 0;
+
+  s.cash = Number.isFinite(s.cash) ? s.cash : base.cash;
+  s.seenHelp = !!raw.seenHelp;
   if (s.activeJob && !OCCUPATIONS[s.activeJob]) s.activeJob = null;
+
   // Keep employee lists and citizen employer fields consistent.
   for (const c of s.citizens) {
-    if (c.employer && !s.businesses[c.employer]) c.employer = null;
+    if (c.employer && (!s.businesses[c.employer] || typeof c.employer !== 'string')) c.employer = null;
   }
   for (const [id, b] of Object.entries(s.businesses)) {
     if (!b) continue;
-    b.employees = s.citizens.filter((c) => c.employer === id).map((c) => c.id);
+    b.employees = s.citizens.filter((c) => c && c.employer === id).map((c) => c.id);
+    // clamp storedProfit etc already done
   }
   s.version = SAVE_VERSION;
   return s;
