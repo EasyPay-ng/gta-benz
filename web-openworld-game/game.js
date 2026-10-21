@@ -3,12 +3,13 @@ import * as THREE from 'three';
 import {
   SAVE_KEY, OCCUPATIONS, BUSINESSES, STATIONS, DEALERSHIP, VEHICLE_MODELS, CAR_COLORS, MAX_BUSINESS_LEVEL,
   SKIN_TONES, SHIRT_COLORS, PANTS_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, TOTAL_CITIZENS, ROAD_LINES,
-  ROAD_HALF, WORLD_LIMIT, PAYROLL_INTERVAL, BLOCK_CENTERS, BLOCK_HALF,
+  ROAD_HALF, WORLD_LIMIT, PAYROLL_INTERVAL, BLOCK_CENTERS, BLOCK_HALF, DEFAULT_APPEARANCE,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, buildCarMesh } from './src/vehicles.js';
+import { NetClient, discoverServerUrl } from './src/net.js';
 
 const $ = (id) => document.getElementById(id);
 const money = Eco.money;
@@ -528,6 +529,12 @@ function updateHUD(force = false) {
   $('hud-vehicles').textContent = `${s.vehicles.length} vehicle${s.vehicles.length === 1 ? '' : 's'}`;
   $('hud-day').textContent = `Day ${s.stats.day}`;
   $('hud-payday').textContent = Eco.builtCount(s) ? `Payday in ${Math.ceil(s.stats.payrollTimer)}s` : 'No startups yet';
+  const netEl = $('hud-net');
+  if (netEl) {
+    if (!net) netEl.textContent = 'Single-player';
+    else if (net.connected) netEl.textContent = `Online · ${net.visiblePeers().length} nearby${net.rtt != null ? ` · ${net.rtt}ms` : ''}`;
+    else netEl.textContent = net.status === 'reconnecting' ? 'Reconnecting…' : 'Connecting…';
+  }
 }
 
 const modalEl = $('modal');
@@ -820,6 +827,7 @@ function closeCreator() {
   game.player.char.setCarrying(!!(game.task && game.task.carrying));
   document.activeElement?.blur?.();
   saveGame(true);
+  if (net) net.setAppearance(game.state.appearance);
 }
 $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
 
@@ -1327,6 +1335,149 @@ function updateCamera(dt) {
 }
 
 // ===========================================================================
+// Multiplayer (optional — only active when a server URL is configured)
+//
+//   ?server=wss://metroventure-city.you.workers.dev/ws?room=metro-1
+//
+// Remote players are a render-only projection of what the server tells us. We do
+// not simulate them, own their state, or resolve collisions against them.
+// ===========================================================================
+const remotes = new Map();
+let net = null;
+
+function remoteLabel(title, sub) {
+  const tex = makeTextTexture([title, sub], { width: 320, height: 96, bg: 'rgba(15,23,42,0.82)', fg: '#38bdf8', font: 'bold 38px system-ui, sans-serif' });
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(2.4, 0.72, 1);
+  sprite.position.y = 2.45;
+  sprite.renderOrder = 10;
+  return { sprite, mat, tex };
+}
+
+function ensureRemote(peer) {
+  let r = remotes.get(peer.id);
+  if (r) {
+    if (peer.app) r.char.setAppearance({ ...DEFAULT_APPEARANCE, ...peer.app });
+    return r;
+  }
+  const app = { ...DEFAULT_APPEARANCE, ...(peer.app || {}) };
+  const char = new Character(app);
+  const label = remoteLabel(peer.name || 'Citizen', 'Online');
+  char.group.add(label.sprite);
+  char.group.position.set(peer.x ?? 0, city.groundY(peer.x ?? 0, peer.z ?? 0), peer.z ?? 0);
+  scene.add(char.group);
+  r = {
+    id: peer.id,
+    name: peer.name || 'Citizen',
+    char,
+    label,
+    x: peer.x ?? 0,
+    z: peer.z ?? 0,
+    yaw: peer.yaw ?? 0,
+    car: null,
+    carModel: null,
+    carColor: null,
+  };
+  remotes.set(peer.id, r);
+  return r;
+}
+
+function removeRemote(id) {
+  const r = remotes.get(id);
+  if (!r) return;
+  scene.remove(r.char.group);
+  r.char.dispose();
+  r.label.mat.dispose();
+  r.label.tex.dispose?.();
+  if (r.car) {
+    scene.remove(r.car);
+    r.car.traverse((o) => {
+      if (o.geometry) o.geometry.dispose?.();
+      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose?.());
+    });
+  }
+  remotes.delete(id);
+}
+
+function updateRemotes(dt) {
+  for (const r of remotes.values()) {
+    const peer = net?.peers.get(r.id);
+    const visible = !!(peer && peer.visible);
+    if (!visible) {
+      r.char.group.visible = false;
+      if (r.car) r.car.visible = false;
+      continue;
+    }
+    // Dumb interpolation: enough to hide a 5 Hz snapshot rate, no prediction.
+    const k = Math.min(1, dt * 9);
+    r.x += (peer.tx - r.x) * k;
+    r.z += (peer.tz - r.z) * k;
+    r.yaw = lerpAngle(r.yaw, peer.tyaw, Math.min(1, dt * 10));
+
+    const inCar = peer.veh && VEHICLE_MODELS[peer.veh] ? peer.veh : null;
+    if (inCar) {
+      const color = peer.app?.shirt || '#38bdf8';
+      if (!r.car || r.carModel !== inCar || r.carColor !== color) {
+        if (r.car) { scene.remove(r.car); r.car.traverse((o) => { o.geometry?.dispose?.(); }); }
+        r.car = buildCarMesh(inCar, color).group;
+        r.carModel = inCar;
+        r.carColor = color;
+        scene.add(r.car);
+      }
+      r.car.visible = true;
+      r.car.position.set(r.x, city.groundY(r.x, r.z), r.z);
+      r.car.rotation.y = r.yaw;
+      r.char.group.visible = false;
+    } else {
+      if (r.car) r.car.visible = false;
+      r.char.group.visible = true;
+      r.char.group.position.set(r.x, city.groundY(r.x, r.z), r.z);
+      r.char.group.rotation.y = r.yaw;
+      r.char.animate(dt, peer.mv ? 4.2 : 0);
+    }
+  }
+}
+
+function startNet(serverUrl) {
+  net = new NetClient({
+    url: serverUrl,
+    name: game.state.appearance.name,
+    appearance: game.state.appearance,
+    handlers: {
+      onStatus(status) {
+        if (status === 'online') toast('🌐 Joined the city server', 'good');
+        else if (status === 'reconnecting') toast('🌐 Connection lost — retrying…', 'bad');
+        updateHUD(true);
+      },
+      onWelcome(msg) {
+        for (const p of msg.peers) ensureRemote(p);
+        toast(`🌐 City server: ${msg.room}`, 'good');
+      },
+      onJoin(peer) { ensureRemote(peer); },
+      onLeave(id) { removeRemote(id); },
+      onChat(msg) { toast(`${msg.name}: ${msg.m}`, ''); },
+      onError(err) { if (err.code !== 'rate_limited') console.warn('[net]', err); },
+    },
+  });
+  net.connect();
+  window.__mv.net = net;
+  window.__mv.remotes = remotes;
+}
+
+function netLocalState() {
+  const p = game.player;
+  const v = p.vehicle;
+  return {
+    x: p.x,
+    z: p.z,
+    yaw: p.yaw,
+    moving: v ? Math.abs(v.speed) > 0.4 : Math.hypot(p.vx, p.vz) > 0.3,
+    vehicle: v ? v.data.model : null,
+  };
+}
+
+// ===========================================================================
 // Minimap
 // ===========================================================================
 const mm = $('minimap');
@@ -1379,6 +1530,7 @@ function drawMinimap() {
     g.beginPath(); g.arc(toMM(st.x), toMM(st.z), pulse + 2, 0, Math.PI * 2); g.stroke();
     dot(st.x, st.z, 2.5, '#f43f5e');
   }
+  if (net) for (const r of remotes.values()) if (net.peers.get(r.id)?.visible) dot(r.x, r.z, 2.4, '#38bdf8');
   // player arrow
   const p = game.player;
   g.save();
@@ -1403,6 +1555,7 @@ function frame() {
   const s = game.state;
 
   updatePlayer(dt);
+  if (net) { net.update(dt, netLocalState()); updateRemotes(dt); }
 
   // owned parked vehicles coast to a stop & stay out of walls
   for (const v of game.vehicles) {
@@ -1479,6 +1632,7 @@ function boot() {
   if (!loaded) applyState();
   if (!game.state.seenHelp) showHelp();
   else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
+  discoverServerUrl().then((serverUrl) => { if (serverUrl) startNet(serverUrl); });
   camera.position.set(game.player.x - 6, 5, game.player.z - 6);
   frame();
 }

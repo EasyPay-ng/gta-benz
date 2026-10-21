@@ -6,6 +6,9 @@
   "type": "module",
   "scripts": {
     "start": "python3 -m http.server 8080 --bind 0.0.0.0 --directory web-openworld-game",
+    "dev": "node tools/dev.mjs",
+    "dev:offline": "node tools/dev.mjs --offline",
+    "dev:server": "npm --prefix server run dev",
     "test": "node --test web-openworld-game/tests/*.test.mjs"
   }
 }

@@ -13,6 +13,27 @@ npm start            # = python3 -m http.server 8080 --directory web-openworld-g
 
 Any static file server works. ES modules don't load from `file://`, so you can't just double-click `index.html`.
 
+## Multiplayer (optional, free)
+
+The game is single-player by default and stays that way unless it finds a server.
+
+```bash
+npm run dev          # game + city server on http://localhost:8080
+npm run dev:offline  # game only
+```
+
+Open two tabs on the same machine and you will see each other walking, driving and on
+the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
+Workers free plan (no card, no bill); `npm run deploy`-style instructions, the protocol,
+the cost maths and the honest list of what is *not* synced yet are in
+[`MULTIPLAYER.md`](MULTIPLAYER.md).
+
+Point a deployed game at a deployed server once:
+
+```
+https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.workers.dev%2Fws%3Froom%3Dmetro-1
+```
+
 ## Controls
 
 | On foot | Driving |
@@ -55,7 +76,10 @@ web-openworld-game/
   src/world.js        procedural city, lots, stations, sidewalk nav graph, collisions
   src/vehicles.js     car meshes, driving physics, AI traffic
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
+  src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback)
   tests/economy.test.mjs
+server/               free multiplayer server (Cloudflare Worker + Durable Object)
+tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
 ```
 

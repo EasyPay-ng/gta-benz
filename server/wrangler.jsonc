@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "metroventure-city",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+
+  // One Durable Object per city/room. SQLite-backed DOs are available on the
+  // Workers Free plan; every new DO class must be declared in a migration.
+  "durable_objects": {
+    "bindings": [{ "name": "CITY_ROOM", "class_name": "CityRoom" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["CityRoom"] }
+  ],
+
+  "observability": { "enabled": true },
+
+  // Uncomment after `wrangler dev` works locally:
+  //
+  // "vars": {
+  //   "ALLOWED_ORIGINS": "https://easypay-ng.github.io,http://localhost:8080"
+  // }
+}
