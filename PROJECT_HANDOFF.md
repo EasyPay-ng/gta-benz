@@ -28,6 +28,22 @@ Everything lives in `web-openworld-game/`. See `README.md` for controls and file
 ### The Unity C# reference scripts aren't in this repo
 The original summary mentioned `gta-occupations-unity/` C# scripts. They weren't in this repo when work started and haven't been recreated yet.
 
+## Multiplayer (new, optional)
+
+`server/` is a working free-tier multiplayer server (Cloudflare Worker + Durable Object,
+one room per city). `web-openworld-game/src/net.js` is the browser transport, and
+`game.js` renders other players (character or car) with name tags and minimap dots.
+Local: `npm run dev` (game + server + WS proxy on :8080). Tests: `server/test/smoke.mjs`
+(protocol) and `server/test/client.mjs` (real client module). Full guide and limits:
+`MULTIPLAYER.md`.
+
+Identity: display name + PIN accounts (`server/src/accounts.js`), session tokens in
+`localStorage` under `metroventure_identity`, guests allowed, lockout after 5 wrong PINs.
+Sign-in card is `#login` in `index.html`.
+
+Still per-client (not synced): traffic, citizens, economy, vehicle ownership. Positions
+are client-authoritative.
+
 ## Ideas for next steps
 - Bigger city with districts, plus day/night cycle with street lights and car headlights
 - Custom startup builder (choose type, name and colours on any lot)

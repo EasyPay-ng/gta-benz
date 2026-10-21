@@ -1,0 +1,19 @@
+{
+  "name": "metroventure-city-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Free-tier multiplayer city server for MetroVenture 3D (Cloudflare Worker + Durable Object).",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "test": "node test/smoke.mjs",
+    "test:auth": "node test/accounts.mjs",
+    "test:client": "SERVER_URL=ws://127.0.0.1:8080/ws?room=client-test node test/client.mjs",
+    "test:all": "npm test && npm run test:auth && npm run test:client"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
