@@ -5,11 +5,12 @@ import {
   SAVE_VERSION, STARTING_CASH, OCCUPATIONS, RANKS, RANK_PAY_BONUS, BUSINESSES,
   BASE_JOB_SLOTS, SLOTS_PER_LEVEL, MAX_BUSINESS_LEVEL, LEVEL_REVENUE_BONUS,
   VEHICLE_MODELS, DEFAULT_APPEARANCE, CITIZEN_NAMES, SKIN_TONES, SHIRT_COLORS,
-  PANTS_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, PAYROLL_INTERVAL, TOTAL_CITIZENS,
+  PANTS_COLORS, SHOE_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, PAYROLL_INTERVAL, TOTAL_CITIZENS,
   CLOCK_SPEED, CLOCK_START_HOUR, INGAME_HOUR_MS, INGAME_DAY_MS,
 } from './data.js';
 import { freshCond } from './vehicleCond.js';
 import { createClock, inGameNowMs, dayOf, secondsToNextShift } from './time.js';
+import { starterWardrobe, normalizeWardrobe } from './customization.js';
 
 // Small deterministic PRNG so citizens look the same for every new game.
 export function mulberry32(seed) {
@@ -25,7 +26,15 @@ export function mulberry32(seed) {
 
 const pick = (rand, arr) => arr[Math.floor(rand() * arr.length) % arr.length];
 
+const CITIZEN_TOPS = ['tee', 'tee', 'hoodie', 'bomber', 'jersey', 'senator', 'suit'];
+const CITIZEN_BOTTOMS = ['jeans', 'jeans', 'cargo', 'shorts', 'slacks'];
+const CITIZEN_SHOES = ['sneakers', 'sneakers', 'hightops', 'boots', 'loafers'];
+const CITIZEN_HATS = ['none', 'none', 'none', 'snapback', 'bucket', 'fila'];
+const CITIZEN_GLASSES = ['none', 'none', 'none', 'aviator', 'gold_shades'];
+
 export function randomAppearance(rand, name = 'Citizen') {
+  const topStyle = pick(rand, CITIZEN_TOPS);
+  const bottomStyle = topStyle === 'senator' || topStyle === 'suit' ? 'slacks' : pick(rand, CITIZEN_BOTTOMS);
   return {
     name,
     skin: pick(rand, SKIN_TONES),
@@ -34,6 +43,14 @@ export function randomAppearance(rand, name = 'Citizen') {
     hair: pick(rand, HAIR_COLORS),
     hairStyle: pick(rand, HAIR_STYLES),
     build: pick(rand, Object.keys(BUILDS)),
+    topStyle,
+    bottomStyle,
+    shoeStyle: pick(rand, CITIZEN_SHOES),
+    shoeColor: pick(rand, SHOE_COLORS),
+    hatStyle: topStyle === 'senator' && rand() < 0.65 ? 'fila' : pick(rand, CITIZEN_HATS),
+    hatColor: pick(rand, SHIRT_COLORS),
+    glasses: pick(rand, CITIZEN_GLASSES),
+    chain: rand() < 0.2 ? 'gold' : 'none',
   };
 }
 
@@ -64,6 +81,7 @@ export function createInitialState(wallNow = Date.now()) {
     version: SAVE_VERSION,
     cash: STARTING_CASH,
     appearance: { ...DEFAULT_APPEARANCE },
+    wardrobe: starterWardrobe(),
     activeJob: null,
     jobXP,
     businesses,
@@ -72,7 +90,9 @@ export function createInitialState(wallNow = Date.now()) {
     vehicles: [
       // Free starter car parked at the curb next to the spawn point.
       {
-        id: 'v1', model: 'hatch', color: '#b45309', x: -6.0, z: -24, yaw: 0,
+        id: 'v1', model: 'hatch', color: '#b45309',
+        livery: 'clean', rims: 'silver', underglow: 'none',
+        x: -6.0, z: -24, yaw: 0,
         cond: freshCond(), wrecked: false, lastServicedInGameMs: 0,
       },
     ],
@@ -95,6 +115,7 @@ export function migrateState(raw, wallNow = Date.now()) {
   if (!raw || typeof raw !== 'object') return base;
   const s = { ...base, ...raw };
   s.appearance = { ...base.appearance, ...(raw.appearance || {}) };
+  s.wardrobe = normalizeWardrobe(raw.wardrobe, s.appearance);
   s.jobXP = { ...base.jobXP, ...(raw.jobXP || {}) };
   s.businesses = { ...base.businesses, ...(raw.businesses || {}) };
   for (const id of Object.keys(s.businesses)) {
@@ -108,6 +129,9 @@ export function migrateState(raw, wallNow = Date.now()) {
   }
   s.vehicles = Array.isArray(raw.vehicles)
     ? raw.vehicles.filter((v) => VEHICLE_MODELS[v.model]).map((v) => ({
+      livery: VEHICLE_MODELS[v.model].defaultLivery || 'clean',
+      rims: 'silver',
+      underglow: 'none',
       ...v,
       // v2 saves have no condition — everything starts healthy
       cond: { ...freshCond(), ...(v.cond || {}) },
@@ -293,6 +317,9 @@ export function buyVehicle(state, modelId, color, spot) {
     id: `v${state.nextVehicleId++}`,
     model: modelId,
     color: m.fixedColor || color,
+    livery: m.defaultLivery || 'clean',
+    rims: 'silver',
+    underglow: 'none',
     x: spot?.x ?? 0, z: spot?.z ?? 0, yaw: spot?.yaw ?? 0,
     cond: freshCond(),
     wrecked: false,

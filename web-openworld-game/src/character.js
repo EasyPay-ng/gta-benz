@@ -53,6 +53,40 @@ const G = {
   beanie: new THREE.SphereGeometry(0.178, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
   beanieFold: new THREE.CylinderGeometry(0.182, 0.182, 0.058, 12),
   flatTop: new THREE.SphereGeometry(0.19, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+  // Unique Boutique 3D Fashion & Accessories
+  hoodBack: new THREE.SphereGeometry(0.165, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.62),
+  hoodPocket: new THREE.BoxGeometry(0.26, 0.13, 0.045),
+  drawstring: new THREE.CylinderGeometry(0.008, 0.008, 0.16, 6),
+  innerShirt: new THREE.BoxGeometry(0.16, 0.42, 0.03),
+  lapel: new THREE.BoxGeometry(0.068, 0.34, 0.035),
+  tieBody: new THREE.BoxGeometry(0.048, 0.28, 0.032),
+  tieKnot: new THREE.BoxGeometry(0.056, 0.052, 0.036),
+  pocketSquare: new THREE.BoxGeometry(0.055, 0.032, 0.02),
+  senatorSkirt: new THREE.CylinderGeometry(0.182, 0.215, 0.34, 14),
+  senatorPlacket: new THREE.BoxGeometry(0.075, 0.34, 0.025),
+  senatorMotif: new THREE.BoxGeometry(0.085, 0.085, 0.024),
+  jerseyBar: new THREE.BoxGeometry(0.16, 0.11, 0.025),
+  cargoPocket: new THREE.BoxGeometry(0.055, 0.14, 0.12),
+  shortsCuff: new THREE.CylinderGeometry(0.095, 0.095, 0.045, 10),
+  ankleSock: new THREE.CylinderGeometry(0.074, 0.072, 0.11, 10),
+  highTopCollar: new THREE.CylinderGeometry(0.084, 0.082, 0.095, 10),
+  bootShaft: new THREE.CylinderGeometry(0.086, 0.082, 0.15, 10),
+  bootSole: new THREE.BoxGeometry(0.175, 0.052, 0.305),
+  loaferClasp: new THREE.BoxGeometry(0.095, 0.018, 0.028),
+  chainLoop: new THREE.TorusGeometry(0.122, 0.015, 6, 16),
+  chainPendant: new THREE.CylinderGeometry(0.034, 0.034, 0.014, 10),
+  shadeLens: new THREE.BoxGeometry(0.078, 0.052, 0.022),
+  shadeRim: new THREE.BoxGeometry(0.088, 0.062, 0.018),
+  shadeBridge: new THREE.BoxGeometry(0.045, 0.012, 0.02),
+  shadeArm: new THREE.BoxGeometry(0.012, 0.014, 0.14),
+  cyberVisor: new THREE.BoxGeometry(0.235, 0.058, 0.036),
+  bucketCrown: new THREE.CylinderGeometry(0.158, 0.176, 0.11, 14),
+  bucketBrim: new THREE.CylinderGeometry(0.245, 0.215, 0.025, 16),
+  filaCrown: new THREE.CylinderGeometry(0.162, 0.174, 0.135, 14),
+  filaBand: new THREE.CylinderGeometry(0.176, 0.176, 0.028, 14),
+  crownBand: new THREE.CylinderGeometry(0.176, 0.168, 0.075, 14),
+  crownSpike: new THREE.ConeGeometry(0.036, 0.085, 5),
+  crownGem: new THREE.SphereGeometry(0.018, 6, 6),
   parcel: new THREE.BoxGeometry(0.4, 0.28, 0.3),
   parcelTape: new THREE.BoxGeometry(0.41, 0.05, 0.31),
 };
@@ -62,6 +96,11 @@ const SHARED_MAT = {
   white: new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45, metalness: 0.05 }),
   sole: new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.7 }),
   chrome: new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.22, metalness: 0.85 }),
+  gold: new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.18, metalness: 0.94 }),
+  silver: new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2, metalness: 0.92 }),
+  darkLens: new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.12, metalness: 0.55 }),
+  tieRed: new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.42, metalness: 0.08 }),
+  ruby: new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.18, metalness: 0.35 }),
   parcel: new THREE.MeshStandardMaterial({ color: 0xb7884e, roughness: 0.85 }),
   tape: new THREE.MeshStandardMaterial({ color: 0xd6b37c, roughness: 0.65 }),
   visor: new THREE.MeshPhysicalMaterial({
@@ -131,23 +170,39 @@ export class Character {
     this.shinR = new THREE.Group();
     this.legL.position.set(-0.115, 0.89, 0);
     this.legR.position.set(0.115, 0.89, 0);
+    this.calves = [];
+    this.legExtras = [];
+    this.shinExtras = [];
+    this.shoeExtras = [];
+    this.shoeSoles = [];
 
-    for (const [leg, shin] of [[this.legL, this.shinL], [this.legR, this.shinR]]) {
+    for (const [leg, shin, side] of [[this.legL, this.shinL, -1], [this.legR, this.shinR, 1]]) {
       const thigh = part(G.thigh, m.pants, 0, -0.21, 0);
       leg.add(thigh);
+      const legExtra = new THREE.Group();
+      legExtra.userData.side = side;
+      leg.add(legExtra);
+      this.legExtras.push(legExtra);
 
       shin.position.set(0, -0.42, 0);
       const calf = part(G.shin, m.pants, 0, -0.2, 0);
       shin.add(calf);
+      this.calves.push(calf);
+      const shinExtra = new THREE.Group();
+      shin.add(shinExtra);
+      this.shinExtras.push(shinExtra);
 
-      // Sculpted shoe + white rubber sole
+      // Sculpted shoe + rubber sole + dynamic footwear extras
       const shoeGroup = new THREE.Group();
       shoeGroup.position.set(0, -0.43, 0.045);
       const upper = part(G.shoeUpper, m.shoes, 0, 0.02, 0);
       upper.rotation.x = Math.PI / 2;
       upper.scale.set(1.02, 1, 0.76);
       const sole = part(G.shoeSole, SHARED_MAT.sole, 0, -0.025, 0.005);
-      shoeGroup.add(upper, sole);
+      const shoeExtra = new THREE.Group();
+      shoeGroup.add(upper, sole, shoeExtra);
+      this.shoeSoles.push(sole);
+      this.shoeExtras.push(shoeExtra);
       shin.add(shoeGroup);
 
       leg.add(shin);
@@ -166,40 +221,51 @@ export class Character {
     this.torso = chest;
     this.torsoGroup.add(lowerTorso, chest);
 
-    const collar = part(G.collar, m.shirt, 0, 0.6, 0.01);
-    collar.rotation.x = Math.PI / 2 + 0.12;
-    this.torsoGroup.add(collar);
+    this.collar = part(G.collar, m.shirt, 0, 0.6, 0.01);
+    this.collar.rotation.x = Math.PI / 2 + 0.12;
+    this.torsoGroup.add(this.collar);
 
+    this.shoulders = [];
     for (const sx of [-1, 1]) {
       const sh = part(G.shoulder, m.shirt, sx * 0.255, 0.54, 0);
       sh.scale.set(1, 0.92, 0.88);
       this.torsoGroup.add(sh);
+      this.shoulders.push(sh);
     }
 
     this.belt = part(G.belt, SHARED_MAT.dark, 0, 0.025, 0);
     this.belt.scale.set(1.06, 1, 0.74);
-    const buckle = part(G.buckle, SHARED_MAT.chrome, 0, 0.025, 0.135);
-    this.torsoGroup.add(this.belt, buckle);
+    this.buckle = part(G.buckle, SHARED_MAT.chrome, 0, 0.025, 0.135);
+    this.torsoGroup.add(this.belt, this.buckle);
 
     this.stripe = part(G.stripe, m.accent, 0, 0.42, 0);
     this.stripe.scale.set(1.09, 1, 0.74);
     this.torsoGroup.add(this.stripe);
+
+    // 3D sculpted garment details (hoodies, bomber lapels, suit & tie, senator tunic, chains)
+    this.topExtras = new THREE.Group();
+    this.neckExtras = new THREE.Group();
+    this.torsoGroup.add(this.topExtras, this.neckExtras);
 
     // Articulated 2-segment arms (shoulder -> upper arm -> elbow -> forearm -> hand)
     this.armL = new THREE.Group();
     this.armR = new THREE.Group();
     this.foreArmL = new THREE.Group();
     this.foreArmR = new THREE.Group();
+    this.upperArms = [];
+    this.foreArms = [];
     for (const [arm, fore, side] of [[this.armL, this.foreArmL, -1], [this.armR, this.foreArmR, 1]]) {
       arm.position.set(side * 0.285, 0.55, 0);
       const upper = part(G.upperArm, m.shirt, 0, -0.15, 0);
       arm.add(upper);
+      this.upperArms.push(upper);
 
       fore.position.set(0, -0.3, 0);
       const lower = part(G.foreArm, m.skin, 0, -0.14, 0);
       const hand = part(G.hand, m.skin, 0, -0.29, 0.01);
       hand.scale.set(0.88, 1.08, 0.68);
       fore.add(lower, hand);
+      this.foreArms.push(lower);
       arm.add(fore);
       this.torsoGroup.add(arm);
     }
@@ -241,6 +307,8 @@ export class Character {
 
     this.hairGroup = new THREE.Group();
     this.headGroup.add(this.hairGroup);
+    this.faceExtras = new THREE.Group();
+    this.headGroup.add(this.faceExtras);
     this.hatGroup = new THREE.Group();
     this.hatGroup.position.set(0, 0.39, 0);
     this.headGroup.add(this.hatGroup);
@@ -263,6 +331,7 @@ export class Character {
     this.mats.hair.color.set(app.hair || '#111111');
     this._applyClothes();
     this._buildHair();
+    this._buildHat();
   }
 
   setOccupation(occId) {
@@ -277,16 +346,143 @@ export class Character {
     const uni = this.occupation ? OCCUPATIONS[this.occupation].uniform : null;
     this.mats.shirt.color.set(uni ? uni.shirt : (app.shirt || '#3b82f6'));
     this.mats.pants.color.set(uni ? uni.pants : (app.pants || '#1f2937'));
+    this.mats.shoes.color.set(uni ? '#1c1917' : (app.shoeColor || '#f8fafc'));
     this.stripe.visible = !!uni;
     if (uni) {
       this.mats.accent.color.set(uni.accent);
       this.mats.hat.color.set(uni.hat);
+    } else {
+      this.mats.hat.color.set(app.hatColor || app.shirt || '#111827');
+    }
+
+    const topStyle = uni ? 'tee' : (app.topStyle || 'tee');
+    const bottomStyle = uni ? 'jeans' : (app.bottomStyle || 'jeans');
+    const shoeStyle = uni ? 'sneakers' : (app.shoeStyle || 'sneakers');
+
+    // Sleeve length & shoulder coverage
+    const sleeveless = topStyle === 'jersey';
+    const longSleeve = topStyle === 'hoodie' || topStyle === 'bomber' || topStyle === 'suit' || topStyle === 'senator';
+    for (const sh of this.shoulders) sh.material = sleeveless ? this.mats.skin : this.mats.shirt;
+    for (const ua of this.upperArms) ua.material = sleeveless ? this.mats.skin : this.mats.shirt;
+    for (const fa of this.foreArms) fa.material = longSleeve ? this.mats.shirt : this.mats.skin;
+
+    // Shorts vs full-length trousers
+    for (const calf of this.calves) calf.material = bottomStyle === 'shorts' ? this.mats.skin : this.mats.pants;
+
+    // Senator tunic drapes cleanly past the waist, hiding belt
+    const hideBelt = topStyle === 'senator' || topStyle === 'hoodie';
+    this.belt.visible = !hideBelt;
+    this.buckle.visible = !hideBelt;
+
+    // 3D Sculpted Top Garment Details
+    this.topExtras.clear();
+    if (topStyle === 'hoodie') {
+      const hood = part(G.hoodBack, this.mats.shirt, 0, 0.59, -0.11);
+      hood.rotation.x = -0.65;
+      hood.scale.set(1.08, 0.86, 0.92);
+      const pocket = part(G.hoodPocket, this.mats.shirt, 0, 0.16, 0.155);
+      const sL = part(G.drawstring, SHARED_MAT.white, -0.055, 0.49, 0.165);
+      const sR = part(G.drawstring, SHARED_MAT.white, 0.055, 0.49, 0.165);
+      this.topExtras.add(hood, pocket, sL, sR);
+    } else if (topStyle === 'bomber') {
+      const inner = part(G.innerShirt, SHARED_MAT.white, 0, 0.36, 0.145);
+      const lapL = part(G.lapel, this.mats.shirt, -0.095, 0.36, 0.158);
+      const lapR = part(G.lapel, this.mats.shirt, 0.095, 0.36, 0.158);
+      const zipL = part(G.drawstring, SHARED_MAT.chrome, -0.058, 0.36, 0.172);
+      const zipR = part(G.drawstring, SHARED_MAT.chrome, 0.058, 0.36, 0.172);
+      zipL.scale.y = 2.1;
+      zipR.scale.y = 2.1;
+      this.topExtras.add(inner, lapL, lapR, zipL, zipR);
+    } else if (topStyle === 'suit') {
+      const shirtFront = part(G.innerShirt, SHARED_MAT.white, 0, 0.38, 0.146);
+      const lapL = part(G.lapel, this.mats.shirt, -0.088, 0.4, 0.16);
+      lapL.rotation.z = -0.16;
+      const lapR = part(G.lapel, this.mats.shirt, 0.088, 0.4, 0.16);
+      lapR.rotation.z = 0.16;
+      const knot = part(G.tieKnot, SHARED_MAT.tieRed, 0, 0.54, 0.166);
+      const tie = part(G.tieBody, SHARED_MAT.tieRed, 0, 0.37, 0.165);
+      const sq = part(G.pocketSquare, SHARED_MAT.white, 0.125, 0.46, 0.158);
+      this.topExtras.add(shirtFront, lapL, lapR, knot, tie, sq);
+    } else if (topStyle === 'senator') {
+      // Knee-grazing Nigerian Senator / Agbada tunic skirt + 24k gold chest embroidery
+      const skirt = part(G.senatorSkirt, this.mats.shirt, 0, -0.12, 0);
+      skirt.scale.set(1.08, 1, 0.8);
+      const placket = part(G.senatorPlacket, SHARED_MAT.gold, -0.035, 0.41, 0.156);
+      const motif = part(G.senatorMotif, SHARED_MAT.gold, 0.105, 0.44, 0.156);
+      this.topExtras.add(skirt, placket, motif);
+    } else if (topStyle === 'jersey') {
+      const bar = part(G.jerseyBar, SHARED_MAT.white, 0, 0.41, 0.162);
+      this.topExtras.add(bar);
+    }
+
+    // 3D Bottoms & Footwear Details
+    for (const le of this.legExtras) {
+      le.clear();
+      const sx = le.userData.side || 1;
+      if (bottomStyle === 'cargo') {
+        le.add(part(G.cargoPocket, this.mats.pants, sx * 0.085, -0.22, 0.01));
+      } else if (bottomStyle === 'shorts') {
+        le.add(part(G.shortsCuff, this.mats.pants, 0, -0.35, 0));
+      }
+    }
+    for (const se of this.shinExtras) {
+      se.clear();
+      if (bottomStyle === 'shorts') {
+        se.add(part(G.ankleSock, SHARED_MAT.white, 0, -0.34, 0));
+      }
+    }
+    for (let i = 0; i < this.shoeExtras.length; i++) {
+      const shoeEx = this.shoeExtras[i];
+      const sole = this.shoeSoles[i];
+      shoeEx.clear();
+      sole.material = shoeStyle === 'boots' || shoeStyle === 'loafers' ? SHARED_MAT.dark : SHARED_MAT.sole;
+      if (shoeStyle === 'hightops') {
+        shoeEx.add(part(G.highTopCollar, this.mats.shoes, 0, 0.075, -0.025));
+      } else if (shoeStyle === 'boots') {
+        shoeEx.add(part(G.bootShaft, this.mats.shoes, 0, 0.095, -0.025));
+        shoeEx.add(part(G.bootSole, SHARED_MAT.dark, 0, -0.028, 0.005));
+      } else if (shoeStyle === 'loafers') {
+        shoeEx.add(part(G.loaferClasp, SHARED_MAT.gold, 0, 0.062, 0.04));
+      }
+    }
+
+    // 3D Neck Chains (Silver / 24k Gold Cuban Link + Medallion)
+    this.neckExtras.clear();
+    const chainStyle = uni ? 'none' : (app.chain || 'none');
+    if (chainStyle === 'gold' || chainStyle === 'silver') {
+      const cMat = chainStyle === 'gold' ? SHARED_MAT.gold : SHARED_MAT.silver;
+      const loop = part(G.chainLoop, cMat, 0, 0.555, 0.045);
+      loop.rotation.x = Math.PI / 2 + 0.38;
+      const pendant = part(G.chainPendant, cMat, 0, 0.445, 0.175);
+      pendant.rotation.x = Math.PI / 2;
+      this.neckExtras.add(loop, pendant);
+    }
+
+    // 3D Eyewear / Shades
+    this.faceExtras.clear();
+    const glasses = app.glasses || 'none';
+    if (glasses === 'aviator' || glasses === 'gold_shades') {
+      const frameMat = glasses === 'gold_shades' ? SHARED_MAT.gold : SHARED_MAT.chrome;
+      for (const sx of [-1, 1]) {
+        this.faceExtras.add(part(G.shadeLens, SHARED_MAT.darkLens, sx * 0.062, 0.266, 0.168));
+        if (glasses === 'gold_shades') {
+          this.faceExtras.add(part(G.shadeRim, SHARED_MAT.gold, sx * 0.062, 0.266, 0.164));
+        }
+        this.faceExtras.add(part(G.shadeArm, frameMat, sx * 0.132, 0.27, 0.09));
+      }
+      this.faceExtras.add(part(G.shadeBridge, frameMat, 0, 0.276, 0.17));
+    } else if (glasses === 'cyber_shades') {
+      this.faceExtras.add(part(G.cyberVisor, SHARED_MAT.visor, 0, 0.268, 0.165));
+      for (const sx of [-1, 1]) {
+        this.faceExtras.add(part(G.shadeArm, SHARED_MAT.chrome, sx * 0.135, 0.268, 0.085));
+      }
     }
   }
 
   _buildHair() {
     this.hairGroup.clear();
-    const hasHat = !!this.occupation;
+    const casualHat = !this.occupation && this.appearance.hatStyle && this.appearance.hatStyle !== 'none' && this.appearance.hatStyle !== 'crown';
+    const hasHat = !!this.occupation || casualHat;
     let style = this.appearance.hairStyle;
     if (hasHat && (style === 'afro' || style === 'long')) style = 'short';
     const h = this.mats.hair;
@@ -315,10 +511,32 @@ export class Character {
 
   _buildHat() {
     this.hatGroup.clear();
-    if (!this.occupation) return;
-    const type = OCCUPATIONS[this.occupation].uniform.headgear;
     const hat = this.mats.hat;
     const add = (m) => this.hatGroup.add(m);
+    if (!this.occupation) {
+      const casual = this.appearance.hatStyle || 'none';
+      if (casual === 'snapback') {
+        add(part(G.capTop, hat, 0, -0.08, 0));
+        add(part(G.capBrim, hat, 0, -0.02, 0.19));
+      } else if (casual === 'bucket') {
+        add(part(G.bucketCrown, hat, 0, 0.01, 0));
+        add(part(G.bucketBrim, hat, 0, -0.045, 0));
+      } else if (casual === 'fila') {
+        const fc = part(G.filaCrown, hat, 0, 0.02, 0);
+        fc.rotation.z = 0.08;
+        add(fc);
+        add(part(G.filaBand, SHARED_MAT.gold, 0, -0.032, 0));
+      } else if (casual === 'crown') {
+        add(part(G.crownBand, SHARED_MAT.gold, 0, 0.005, 0));
+        for (let k = 0; k < 6; k++) {
+          const ang = (k / 6) * Math.PI * 2;
+          add(part(G.crownSpike, SHARED_MAT.gold, Math.sin(ang) * 0.16, 0.075, Math.cos(ang) * 0.16));
+          add(part(G.crownGem, SHARED_MAT.ruby, Math.sin(ang) * 0.175, 0.005, Math.cos(ang) * 0.175));
+        }
+      }
+      return;
+    }
+    const type = OCCUPATIONS[this.occupation].uniform.headgear;
     switch (type) {
       case 'cap':
         add(part(G.capTop, hat, 0, -0.08, 0));

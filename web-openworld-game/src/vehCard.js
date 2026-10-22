@@ -3,6 +3,9 @@
 
 import {
   VEHICLE_MODELS,
+  CAR_LIVERIES,
+  RIM_FINISHES,
+  UNDERGLOW_OPTIONS,
   TOW_PRICE,
   ROADSIDE_FUEL_FEE,
   ROADSIDE_FUEL_AMOUNT,
@@ -192,6 +195,9 @@ export function renderVehicleCard(vehRecord, opts = {}) {
     if (quote.total > 0) {
       btns.push(`<button class="primary" data-action="repair" data-veh="${vehRecord.id}" ${cash < quote.total ? 'disabled' : ''}>🔧 Repair all · ${fmtMoney(quote.total)}</button>`);
     }
+    if (!wrecked) {
+      btns.push(`<button data-action="customizeCar" data-veh="${vehRecord.id}">🎨 Custom mods</button>`);
+    }
     if (btns.length) actionsHtml = `<div class="actions">${btns.join('')}</div>`;
   } else if (interactive && mode === 'roadside') {
     const rQuote = roadsideRepairQuote(cond, hasGarage);
@@ -210,8 +216,23 @@ export function renderVehicleCard(vehRecord, opts = {}) {
     if (needsTow) {
       btns.push(`<button data-action="roadsideTow" data-veh="${vehRecord.id}" ${cash < TOW_PRICE ? 'disabled' : ''}>🚛 Tow to ${shopName} · ${fmtMoney(TOW_PRICE)}</button>`);
     }
+    if (!wrecked) {
+      btns.push(`<button data-action="customizeCar" data-veh="${vehRecord.id}">🎨 Custom mods</button>`);
+    }
     if (btns.length) actionsHtml = `<div class="actions">${btns.join('')}</div>`;
   }
+
+  const modTags = [];
+  if (vehRecord.livery && vehRecord.livery !== 'clean' && CAR_LIVERIES[vehRecord.livery]) {
+    modTags.push(CAR_LIVERIES[vehRecord.livery].name);
+  }
+  if (vehRecord.rims && vehRecord.rims !== 'silver' && RIM_FINISHES[vehRecord.rims]) {
+    modTags.push(`${RIM_FINISHES[vehRecord.rims].name} Rims`);
+  }
+  if (vehRecord.underglow && vehRecord.underglow !== 'none' && UNDERGLOW_OPTIONS[vehRecord.underglow]) {
+    modTags.push(`${UNDERGLOW_OPTIONS[vehRecord.underglow].name} Glow`);
+  }
+  const modLine = modTags.length ? ` · <span class="good-text">✨ ${modTags.join(' · ')}</span>` : '';
 
   const swatch = vehRecord.color
     ? `<span class="veh-dot" style="background:${vehRecord.color}"></span>`
@@ -226,7 +247,7 @@ export function renderVehicleCard(vehRecord, opts = {}) {
       <div class="condgrid condgrid-pct">
         ${rowsHtml}
       </div>
-      <div class="vehcard-meta muted">Last serviced: <b>${servicedText}</b>${cond.engine < TELEMETRY_ENGINE_FAULT && cond.hp > 0 ? ' · <span class="bad-text">⚙ Engine fault</span>' : ''}</div>
+      <div class="vehcard-meta muted">Last serviced: <b>${servicedText}</b>${modLine}${cond.engine < TELEMETRY_ENGINE_FAULT && cond.hp > 0 ? ' · <span class="bad-text">⚙ Engine fault</span>' : ''}</div>
       ${quoteHtml}
       ${actionsHtml}
     </div>`;

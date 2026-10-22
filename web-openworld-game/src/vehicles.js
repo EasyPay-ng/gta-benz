@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import {
   VEHICLE_MODELS, ROAD_LINES, LANE_OFFSET, WORLD_LIMIT, CAR_COLORS, TELEMETRY_ENGINE_FAULT,
+  CAR_LIVERIES, RIM_FINISHES, UNDERGLOW_OPTIONS,
 } from './data.js';
 import { resolveCircle, makeTextTexture } from './world.js';
 import { applyDrive, speedFactor, gripFactor, freshCond } from './vehicleCond.js';
@@ -27,6 +28,10 @@ const MAT = {
   rim: new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.22, metalness: 0.88 }),
   rotor: new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.45, metalness: 0.7 }),
   trim: new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.52, metalness: 0.25 }),
+  carbon: new THREE.MeshStandardMaterial({ color: 0x141418, roughness: 0.34, metalness: 0.42 }),
+  leather: new THREE.MeshStandardMaterial({ color: 0x1f1a17, roughness: 0.62, metalness: 0.08 }),
+  goldMetal: new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.2, metalness: 0.92 }),
+  redIntake: new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.4, metalness: 0.3 }),
   chrome: new THREE.MeshStandardMaterial({ color: 0xe4e4e7, roughness: 0.14, metalness: 0.94 }),
   grille: new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.65, metalness: 0.35 }),
   archWell: new THREE.MeshBasicMaterial({ color: 0x070709 }),
@@ -101,25 +106,65 @@ function getSculptedGeometries(modelId) {
   const W = m.wid;
   const yBot = m.wheelR * 0.48;
   const yBelt = m.wheelR + m.bodyH - 0.03;
-  const yNose = yBelt - (m.style === 'sports' ? 0.16 : m.style === 'van' ? 0.06 : 0.11);
-  const yTail = yBelt + (m.style === 'sports' ? 0.04 : 0.01);
+  const yNose = yBelt - (
+    m.style === 'hyper' ? 0.22
+    : m.style === 'sports' || m.style === 'roadster' ? 0.16
+    : m.style === 'gwagen' || m.style === 'muscle' ? 0.04
+    : m.style === 'van' ? 0.06 : 0.11
+  );
+  const yTail = yBelt + (m.style === 'hyper' ? 0.06 : m.style === 'sports' || m.style === 'muscle' ? 0.04 : 0.01);
 
-  // 1. Sculpted lower body hull (sloped hood, chin spoiler, kicked-up rear haunch)
+  // 1. Sculpted lower body hull tailored to each vehicle archetype
   const hullShape = new THREE.Shape();
-  hullShape.moveTo(-L / 2 + 0.08, yBot + 0.06);
-  hullShape.lineTo(L / 2 - 0.12, yBot + 0.03);
-  hullShape.quadraticCurveTo(L / 2 + 0.02, yBot + 0.12, L / 2, yNose * 0.86);
-  hullShape.quadraticCurveTo(L / 2 - 0.08, yNose, L * 0.18, yBelt);
-  hullShape.lineTo(-L * 0.25, yBelt + 0.02);
-  hullShape.quadraticCurveTo(-L / 2 + 0.05, yTail, -L / 2, yTail - 0.08);
-  hullShape.lineTo(-L / 2 + 0.03, yBot + 0.1);
-  hullShape.closePath();
-  const hullGeo = extrudeCarProfile(hullShape, W, 0.055, 0.07);
+  if (m.style === 'gwagen') {
+    // Upright commanding G-Class off-road silhouette
+    hullShape.moveTo(-L / 2 + 0.04, yBot + 0.06);
+    hullShape.lineTo(L / 2 - 0.06, yBot + 0.06);
+    hullShape.lineTo(L / 2, yNose);
+    hullShape.lineTo(L * 0.26, yBelt);
+    hullShape.lineTo(-L / 2 + 0.02, yBelt);
+    hullShape.closePath();
+  } else if (m.style === 'hyper') {
+    // Razor-sharp mid-engine hypercar wedge
+    hullShape.moveTo(-L / 2 + 0.08, yBot + 0.05);
+    hullShape.lineTo(L / 2 - 0.06, yBot + 0.01);
+    hullShape.quadraticCurveTo(L / 2 + 0.04, yBot + 0.09, L / 2 - 0.05, yNose);
+    hullShape.quadraticCurveTo(L * 0.28, yBelt - 0.02, 0.05, yBelt + 0.02);
+    hullShape.lineTo(-L * 0.34, yTail);
+    hullShape.lineTo(-L / 2, yTail - 0.05);
+    hullShape.lineTo(-L / 2 + 0.04, yBot + 0.09);
+    hullShape.closePath();
+  } else if (m.style === 'muscle') {
+    // Long-hood '69 fastback muscle coupe with shark nose
+    hullShape.moveTo(-L / 2 + 0.06, yBot + 0.06);
+    hullShape.lineTo(L / 2 - 0.1, yBot + 0.04);
+    hullShape.lineTo(L / 2 + 0.02, yBelt - 0.02);
+    hullShape.lineTo(L * 0.14, yBelt + 0.01);
+    hullShape.lineTo(-L * 0.28, yBelt + 0.03);
+    hullShape.lineTo(-L / 2, yTail);
+    hullShape.lineTo(-L / 2 + 0.04, yBot + 0.09);
+    hullShape.closePath();
+  } else {
+    hullShape.moveTo(-L / 2 + 0.08, yBot + 0.06);
+    hullShape.lineTo(L / 2 - 0.12, yBot + 0.03);
+    hullShape.quadraticCurveTo(L / 2 + 0.02, yBot + 0.12, L / 2, yNose * 0.86);
+    hullShape.quadraticCurveTo(L / 2 - 0.08, yNose, L * 0.18, yBelt);
+    hullShape.lineTo(-L * 0.25, yBelt + 0.02);
+    hullShape.quadraticCurveTo(-L / 2 + 0.05, yTail, -L / 2, yTail - 0.08);
+    hullShape.lineTo(-L / 2 + 0.03, yBot + 0.1);
+    hullShape.closePath();
+  }
+  const hullBevel = m.style === 'gwagen' ? 0.03 : 0.055;
+  const hullGeo = extrudeCarProfile(hullShape, W, hullBevel, 0.065);
 
-  // 2. Sculpted upper cabin / greenhouse + slightly inset glass core
+  // 2. Sculpted upper cabin / greenhouse + inset glass core
   let roofGeo = null;
   let glassGeo = null;
-  if (m.style === 'van') {
+  if (m.style === 'roadster') {
+    // True open-top convertible: no roof shell!
+    roofGeo = null;
+    glassGeo = null;
+  } else if (m.style === 'van') {
     const cab = new THREE.Shape();
     const zRear = -L / 2 + 0.14;
     const zFront = L / 2 - 0.24;
@@ -130,14 +175,47 @@ function getSculptedGeometries(modelId) {
     cab.lineTo(zRear + 0.14, yTop);
     cab.quadraticCurveTo(zRear, yTop - 0.08, zRear, yBelt - 0.04);
     roofGeo = extrudeCarProfile(cab, W * 0.95, 0.05, 0.06);
+  } else if (m.style === 'gwagen') {
+    // Tall upright boxy G-Wagen greenhouse
+    const cabW = W * 0.9;
+    const zRear = -L / 2 + 0.14;
+    const zFrontBase = L * 0.22;
+    const zFrontTop = L * 0.09;
+    const yTop = yBelt + m.cabinH;
+
+    const roofShape = new THREE.Shape();
+    roofShape.moveTo(zRear, yBelt - 0.03);
+    roofShape.lineTo(zFrontBase, yBelt - 0.03);
+    roofShape.lineTo(zFrontTop, yTop);
+    roofShape.lineTo(zRear + 0.05, yTop);
+    roofShape.closePath();
+    roofGeo = extrudeCarProfile(roofShape, cabW * 0.95, 0.025, 0.03);
+
+    const glassShape = new THREE.Shape();
+    glassShape.moveTo(zRear + 0.05, yBelt - 0.01);
+    glassShape.lineTo(zFrontBase - 0.04, yBelt - 0.01);
+    glassShape.lineTo(zFrontTop - 0.02, yTop - 0.05);
+    glassShape.lineTo(zRear + 0.08, yTop - 0.05);
+    glassShape.closePath();
+    glassGeo = extrudeCarProfile(glassShape, cabW, 0.015, 0.02);
   } else {
-    const cabW = m.style === 'sports' ? W * 0.8 : W * 0.86;
+    const cabW = m.style === 'hyper' ? W * 0.74 : m.style === 'sports' ? W * 0.8 : W * 0.86;
     const zC = m.cabinZ;
     const cLen = m.cabinLen;
-    const zFrontBase = zC + cLen * 0.56;
-    const zRearBase = zC - cLen * (m.style === 'sports' ? 0.68 : m.style === 'pickup' ? 0.5 : 0.58);
-    const zFrontTop = zC + cLen * 0.24;
-    const zRearTop = zC - cLen * (m.style === 'sports' ? 0.28 : m.style === 'pickup' ? 0.42 : 0.34);
+    const zFrontBase = zC + cLen * (m.style === 'hyper' ? 0.64 : 0.56);
+    const zRearBase = zC - cLen * (
+      m.style === 'muscle' ? 0.78
+      : m.style === 'hyper' ? 0.72
+      : m.style === 'sports' ? 0.68
+      : m.style === 'pickup' ? 0.5 : 0.58
+    );
+    const zFrontTop = zC + cLen * (m.style === 'hyper' ? 0.18 : 0.24);
+    const zRearTop = zC - cLen * (
+      m.style === 'muscle' ? 0.22
+      : m.style === 'hyper' ? 0.2
+      : m.style === 'sports' ? 0.28
+      : m.style === 'pickup' ? 0.42 : 0.34
+    );
     const yTop = yBelt + m.cabinH;
 
     // Outer painted roof shell
@@ -164,7 +242,7 @@ function getSculptedGeometries(modelId) {
   return out;
 }
 
-function buildAlloyWheel(wheelR) {
+function buildAlloyWheel(wheelR, rimMat = MAT.rim) {
   const wheel = new THREE.Group();
   // Treaded rubber tyre
   const tyre = new THREE.Mesh(CYL, MAT.tyre);
@@ -181,20 +259,20 @@ function buildAlloyWheel(wheelR) {
 
   // Outer alloy rim lip + 5 sculpted spokes (on both outer faces so left/right wheels match)
   for (const side of [-1, 1]) {
-    const cap = new THREE.Mesh(CYL, MAT.rim);
+    const cap = new THREE.Mesh(CYL, rimMat);
     cap.scale.set(wheelR * 0.22, 0.03, wheelR * 0.22);
     cap.rotation.z = Math.PI / 2;
     cap.position.x = side * 0.125;
     wheel.add(cap);
 
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(wheelR * 0.66, wheelR * 0.075, 6, 16), MAT.rim);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(wheelR * 0.66, wheelR * 0.075, 6, 16), rimMat);
     ring.rotation.y = Math.PI / 2;
     ring.position.x = side * 0.12;
     wheel.add(ring);
 
     for (let k = 0; k < 5; k++) {
       const ang = (k / 5) * Math.PI * 2;
-      const spoke = new THREE.Mesh(BOX, MAT.rim);
+      const spoke = new THREE.Mesh(BOX, rimMat);
       spoke.scale.set(0.032, wheelR * 0.64, wheelR * 0.13);
       spoke.position.set(
         side * 0.12,
@@ -209,7 +287,7 @@ function buildAlloyWheel(wheelR) {
 }
 
 // Build a sculpted PBR car. The car faces +Z; the driver sits on the left (+X) side.
-export function buildCarMesh(modelId, color) {
+export function buildCarMesh(modelId, color, opts = {}) {
   const m = VEHICLE_MODELS[modelId] || VEHICLE_MODELS.sedan;
   const fxTex = getFXTextures();
   const group = new THREE.Group();
@@ -218,12 +296,23 @@ export function buildCarMesh(modelId, color) {
 
   // Metallic automotive clearcoat PBR paint
   const paint = new THREE.MeshPhysicalMaterial({
-    color: new THREE.Color(color),
-    metalness: m.style === 'taxi' ? 0.28 : 0.56,
-    roughness: m.style === 'pickup' ? 0.3 : 0.22,
-    clearcoat: 0.92,
-    clearcoatRoughness: 0.1,
-    envMapIntensity: 1.45,
+    color: new THREE.Color(color || m.fixedColor || '#2563eb'),
+    metalness: m.style === 'taxi' ? 0.28 : m.style === 'hyper' ? 0.66 : 0.56,
+    roughness: m.style === 'pickup' ? 0.3 : m.style === 'hyper' ? 0.16 : 0.22,
+    clearcoat: 0.94,
+    clearcoatRoughness: 0.09,
+    envMapIntensity: 1.5,
+  });
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(RIM_FINISHES[opts.rims]?.hex || RIM_FINISHES.silver.hex),
+    roughness: 0.22,
+    metalness: 0.88,
+  });
+  const stripeMat = new THREE.MeshPhysicalMaterial({
+    color: 0xf8fafc,
+    roughness: 0.22,
+    metalness: 0.45,
+    clearcoat: 0.9,
   });
   const brakeMat = new THREE.MeshBasicMaterial({ color: 0x991b1b });
 
@@ -249,6 +338,35 @@ export function buildCarMesh(modelId, color) {
       part(body, MAT.glass, sx * W * 0.48, yBelt + m.cabinH * 0.54, L * 0.18, 0.04, m.cabinH * 0.46, 1.05, false);
       part(body, MAT.checker, sx * W * 0.485, yBelt + 0.14, -0.45, 0.03, 0.12, L * 0.58, false);
     }
+  } else if (m.style === 'roadster') {
+    // Open-top convertible: raked frameless windshield, cockpit tub, bucket seats, roll-hoops & speedster humps!
+    const ws = part(body, MAT.glass, 0, yBelt + 0.24, 0.56, W * 0.82, 0.48, 0.06, false);
+    ws.rotation.x = -0.58;
+    const wsTop = part(body, MAT.chrome, 0, yBelt + 0.44, 0.43, W * 0.83, 0.035, 0.045, false);
+    wsTop.rotation.x = -0.58;
+    // Recessed open-air leather cockpit tub + dash + center console
+    part(body, MAT.leather, 0, yBelt - 0.06, -0.18, W * 0.78, 0.12, 1.48, false);
+    part(body, MAT.carbon, 0, yBelt + 0.04, 0.42, W * 0.76, 0.16, 0.28, false);
+    part(body, MAT.carbon, 0, yBelt + 0.02, -0.15, 0.22, 0.14, 1.15, false);
+    // Steering wheel on driver (+X) side
+    const sw = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.022, 6, 14), MAT.trim);
+    sw.position.set(W * 0.22, yBelt + 0.12, 0.24);
+    sw.rotation.x = -0.35;
+    body.add(sw);
+    // Twin sculpted seats + chrome roll-hoops + speedster tonneau humps
+    for (const sx of [-1, 1]) {
+      part(body, MAT.leather, sx * W * 0.22, yBelt + 0.12, -0.46, 0.44, 0.42, 0.14);
+      const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.028, 6, 12, Math.PI), MAT.chrome);
+      hoop.position.set(sx * W * 0.22, yBelt + 0.18, -0.56);
+      body.add(hoop);
+      const hump = new THREE.Mesh(CYL, paint);
+      hump.scale.set(0.24, 0.88, 0.16);
+      hump.rotation.x = Math.PI / 2 - 0.12;
+      hump.position.set(sx * W * 0.22, yBelt + 0.06, -1.04);
+      hump.castShadow = true;
+      body.add(hump);
+      part(body, paint, sx * (W * 0.44 + 0.06), yBelt + 0.06, 0.42, 0.14, 0.08, 0.12, false);
+    }
   } else {
     const roofMat = m.style === 'police' ? MAT.whiteDoor : paint;
     const roofMesh = new THREE.Mesh(roofGeo, roofMat);
@@ -260,7 +378,7 @@ export function buildCarMesh(modelId, color) {
     body.add(glassMesh);
 
     // Side mirrors + chrome door handles
-    const cabW = m.style === 'sports' ? W * 0.8 : W * 0.86;
+    const cabW = m.style === 'hyper' ? W * 0.74 : m.style === 'sports' ? W * 0.8 : W * 0.86;
     for (const sx of [-1, 1]) {
       part(body, paint, sx * (cabW * 0.5 + 0.08), yBelt + 0.08, m.cabinZ + m.cabinLen * 0.28, 0.15, 0.09, 0.12, false);
       part(body, MAT.chrome, sx * (W * 0.5 + 0.005), yBelt - 0.08, m.cabinZ - 0.08, 0.03, 0.04, 0.18, false);
@@ -305,7 +423,7 @@ export function buildCarMesh(modelId, color) {
   }
 
   if (m.style === 'sports' || m.style === 'sedan') {
-    // Sculpted hood power dome / muscle intake scoop (Payback muscle/GT aesthetic!)
+    // Sculpted hood power dome / muscle intake scoop
     part(body, paint, 0, yBelt + 0.045, L * 0.24, W * 0.42, 0.085, L * 0.28);
     if (m.style === 'sports') {
       part(body, MAT.chrome, 0, yBelt + 0.11, L * 0.25, 0.36, 0.11, 0.52);
@@ -317,6 +435,120 @@ export function buildCarMesh(modelId, color) {
       }
     }
   }
+
+  if (m.style === 'muscle') {
+    // '69 Stallion GT: towering chrome supercharger blower + red butterfly scoop + ducktail lip + louvers
+    part(body, MAT.trim, 0, yBelt + 0.03, L * 0.24, 0.58, 0.07, 0.72);
+    part(body, MAT.chrome, 0, yBelt + 0.14, L * 0.24, 0.44, 0.18, 0.54);
+    part(body, MAT.redIntake, 0, yBelt + 0.18, L * 0.515, 0.36, 0.09, 0.03, false);
+    // Deep shark-nose blackout grille + dual inner fog lamps
+    part(body, MAT.grille, 0, frontY + 0.04, L / 2 + 0.025, W * 0.74, 0.24, 0.06, false);
+    for (const sx of [-1, 1]) {
+      const fog = new THREE.Mesh(CYL, MAT.head);
+      fog.scale.set(0.08, 0.04, 0.08);
+      fog.rotation.x = Math.PI / 2;
+      fog.position.set(sx * W * 0.19, frontY + 0.04, L / 2 + 0.05);
+      body.add(fog);
+    }
+    // Kicked-up rear ducktail lip spoiler
+    const duck = part(body, MAT.carbon, 0, yBelt + 0.14, -L / 2 + 0.09, W * 0.92, 0.14, 0.16);
+    duck.rotation.x = -0.35;
+  }
+
+  if (m.style === 'gwagen') {
+    // Benz G-Wagen 4x4: chrome bullbar, raised fender indicators, side running boards & rear spare wheel!
+    part(body, MAT.chrome, 0, frontY + 0.04, L / 2 + 0.12, W * 0.62, 0.36, 0.07);
+    for (const sx of [-1, 1]) {
+      part(body, MAT.chrome, sx * W * 0.28, frontY + 0.06, L / 2 + 0.12, 0.06, 0.46, 0.09);
+      // Raised G-Class front fender turn-signal pods
+      part(body, MAT.amber, sx * W * 0.41, yBelt + 0.045, L / 2 - 0.34, 0.09, 0.06, 0.18, false);
+      // Squared off-road fender flares + side running boards + side-exit dual chrome pipes
+      part(body, MAT.trim, sx * (W * 0.5 + 0.02), yBot + 0.06, 0, 0.11, 0.07, L * 0.54);
+      for (const ez of [-0.45, -0.62]) {
+        const sp = new THREE.Mesh(CYL, MAT.chrome);
+        sp.scale.set(0.042, 0.16, 0.042);
+        sp.rotation.z = Math.PI / 2;
+        sp.position.set(sx * (W * 0.5 + 0.06), yBot + 0.02, ez);
+        body.add(sp);
+      }
+    }
+    // Expedition roof rack + 4 off-road LED light pods
+    part(body, MAT.trim, 0, cabinTop + 0.06, m.cabinZ - 0.05, W * 0.82, 0.05, m.cabinLen * 0.82);
+    for (const lx of [-0.48, -0.16, 0.16, 0.48]) {
+      part(body, MAT.head, lx, cabinTop + 0.12, m.cabinZ + m.cabinLen * 0.36, 0.16, 0.09, 0.08, false);
+    }
+    // Iconic rear tailgate 3D spare tyre cover + chrome band
+    const spareCover = new THREE.Mesh(CYL, paint);
+    spareCover.scale.set(0.42, 0.24, 0.42);
+    spareCover.rotation.x = Math.PI / 2;
+    spareCover.position.set(0.14, yBelt + 0.06, -L / 2 - 0.12);
+    spareCover.castShadow = true;
+    body.add(spareCover);
+    const spareRing = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.032, 6, 20), MAT.chrome);
+    spareRing.position.set(0.14, yBelt + 0.06, -L / 2 - 0.14);
+    body.add(spareRing);
+  }
+
+  if (m.style === 'hyper') {
+    // Valkyrie X12 Hypercar: front carbon splitter, side V12 air scoops, rear engine spine, swan-neck GT wing & quad central exhausts!
+    part(body, MAT.carbon, 0, yBot + 0.02, L / 2 + 0.08, W * 1.01, 0.05, 0.28);
+    for (const sx of [-1, 1]) {
+      // Side carbon skirts + deep mid-engine air intakes
+      part(body, MAT.carbon, sx * (W * 0.5 + 0.015), yBot + 0.03, -0.05, 0.08, 0.06, L * 0.56);
+      part(body, MAT.grille, sx * (W * 0.48), yBelt - 0.08, -0.36, 0.12, 0.24, 0.68, false);
+      // Carbon swan-neck wing pylons & endplates
+      part(body, MAT.carbon, sx * W * 0.26, yBelt + 0.22, -L / 2 + 0.28, 0.04, 0.32, 0.18);
+      part(body, MAT.carbon, sx * W * 0.49, yBelt + 0.34, -L / 2 + 0.22, 0.03, 0.22, 0.38);
+    }
+    // Wide carbon GT wing + louvered mid-engine spine
+    part(body, MAT.carbon, 0, yBelt + 0.37, -L / 2 + 0.22, W * 0.98, 0.045, 0.34);
+    part(body, MAT.carbon, 0, yBelt + 0.14, -1.05, 0.34, 0.12, 1.05);
+    // High-mounted quad central exhaust cannons
+    for (const ex of [-0.21, -0.07, 0.07, 0.21]) {
+      const cannon = new THREE.Mesh(CYL, MAT.goldMetal);
+      cannon.scale.set(0.048, 0.18, 0.048);
+      cannon.rotation.x = Math.PI / 2;
+      cannon.position.set(ex, yBelt - 0.1, -L / 2 - 0.06);
+      body.add(cannon);
+    }
+  }
+
+  // Dynamic Custom Livery Group (Twin Racing Stripes / 24k Gold Stripes / Carbon Aero Hood)
+  const liveryGroup = new THREE.Group();
+  liveryGroup.visible = false;
+  const twinStripes = new THREE.Group();
+  for (const sx of [-0.16, 0.16]) {
+    part(twinStripes, stripeMat, sx, yBelt + 0.025, L * 0.26, 0.13, 0.016, L * 0.38, false);
+    if (m.style !== 'roadster' && m.style !== 'pickup') {
+      part(twinStripes, stripeMat, sx, cabinTop + 0.012, m.cabinZ - 0.04, 0.13, 0.015, m.cabinLen * 0.56, false);
+    }
+    if (m.style !== 'gwagen' && m.style !== 'van') {
+      part(twinStripes, stripeMat, sx, yBelt + 0.03, -L * 0.34, 0.13, 0.016, L * 0.24, false);
+    }
+  }
+  const carbonHood = new THREE.Group();
+  part(carbonHood, MAT.carbon, 0, yBelt + 0.024, L * 0.25, W * 0.58, 0.018, L * 0.4, false);
+  if (m.style !== 'roadster' && m.style !== 'van' && m.style !== 'police') {
+    part(carbonHood, MAT.carbon, 0, cabinTop + 0.012, m.cabinZ - 0.04, W * 0.56, 0.016, m.cabinLen * 0.54, false);
+  }
+  liveryGroup.add(twinStripes, carbonHood);
+  body.add(liveryGroup);
+
+  // Street Neon Underglow Pad (hugs the asphalt under the car!)
+  const underglowMat = new THREE.MeshBasicMaterial({
+    map: fxTex.flareWhite,
+    color: 0x22d3ee,
+    transparent: true,
+    opacity: 0.78,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const underglowGeo = new THREE.PlaneGeometry(W * 1.65, L * 1.24);
+  underglowGeo.rotateX(-Math.PI / 2);
+  const underglowMesh = new THREE.Mesh(underglowGeo, underglowMat);
+  underglowMesh.position.set(0, 0.055, 0);
+  underglowMesh.visible = false;
+  group.add(underglowMesh);
 
   if (m.style === 'taxi') {
     if (!taxiSignTex) taxiSignTex = makeTextTexture('TAXI', { width: 128, height: 48, bg: '#fde047', fg: '#111827', font: 'bold 34px system-ui, sans-serif' });
@@ -424,7 +656,7 @@ export function buildCarMesh(modelId, color) {
   for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
     const pivot = new THREE.Group();
     pivot.position.set(sx * (W / 2 - 0.1), m.wheelR, sz * wz);
-    const wheel = buildAlloyWheel(m.wheelR);
+    const wheel = buildAlloyWheel(m.wheelR, rimMat);
     pivot.add(wheel);
     group.add(pivot);
     wheels.push(wheel);
@@ -433,8 +665,48 @@ export function buildCarMesh(modelId, color) {
 
   const roofInner = (m.style === 'van' ? yBelt + m.cabinH : cabinTop) - 0.08;
   const seatScale = 0.82;
-  const hipY = Math.min(yBelt - 0.05, roofInner - 1.02 * seatScale);
-  const seatZ = m.style === 'pickup' ? m.cabinZ - 0.1 : m.style === 'van' ? m.cabinZ + m.cabinLen / 2 - 1.2 : m.cabinZ - 0.05;
+  const hipY = m.style === 'roadster'
+    ? yBelt - 0.03
+    : Math.min(yBelt - 0.05, roofInner - 1.02 * seatScale);
+  const seatZ = m.style === 'pickup' ? m.cabinZ - 0.1
+    : m.style === 'van' ? m.cabinZ + m.cabinLen / 2 - 1.2
+    : m.style === 'roadster' ? -0.18
+    : m.cabinZ - 0.05;
+
+  function applyMods({ color: nextColor, livery, rims, underglow } = {}) {
+    if (nextColor && !m.fixedColor) paint.color.set(nextColor);
+    const rimDef = RIM_FINISHES[rims] || RIM_FINISHES.silver;
+    rimMat.color.set(rimDef.hex);
+
+    const livKey = CAR_LIVERIES[livery] ? livery : (m.defaultLivery || 'clean');
+    liveryGroup.visible = livKey !== 'clean';
+    twinStripes.visible = livKey === 'twin_stripe' || livKey === 'gold_trim';
+    carbonHood.visible = livKey === 'carbon_hood';
+    if (livKey === 'gold_trim') {
+      stripeMat.color.set('#fbbf24');
+      stripeMat.metalness = 0.88;
+    } else if (livKey === 'twin_stripe') {
+      // Auto-contrast white stripes on dark cars, obsidian stripes on white/yellow cars
+      const lum = paint.color.r * 0.299 + paint.color.g * 0.587 + paint.color.b * 0.114;
+      stripeMat.color.set(lum > 0.72 ? '#111827' : '#f8fafc');
+      stripeMat.metalness = 0.35;
+    }
+
+    const glowDef = UNDERGLOW_OPTIONS[underglow] || UNDERGLOW_OPTIONS.none;
+    if (glowDef.hex) {
+      underglowMesh.visible = true;
+      underglowMat.color.set(glowDef.hex);
+    } else {
+      underglowMesh.visible = false;
+    }
+  }
+
+  applyMods({
+    color: color || m.fixedColor,
+    livery: opts.livery || m.defaultLivery || 'clean',
+    rims: opts.rims || 'silver',
+    underglow: opts.underglow || 'none',
+  });
 
   return {
     group,
@@ -443,6 +715,9 @@ export function buildCarMesh(modelId, color) {
     frontPivots,
     brakeMat,
     paint,
+    rimMat,
+    underglowMesh,
+    applyMods,
     headBeams,
     headFlares,
     tailFlares,
@@ -477,9 +752,13 @@ function updateCarLightFlares(parts, { headOn, braking, runningRear }) {
 // ---------------------------------------------------------------------------
 export class Vehicle {
   constructor(scene, data) {
-    this.data = data; // persisted record {id, model, color, x, z, yaw, cond, wrecked}
+    this.data = data; // persisted record {id, model, color, livery, rims, underglow, x, z, yaw, cond, wrecked}
     this.model = VEHICLE_MODELS[data.model];
-    this.parts = buildCarMesh(data.model, data.color);
+    this.parts = buildCarMesh(data.model, data.color, {
+      livery: data.livery,
+      rims: data.rims,
+      underglow: data.underglow,
+    });
     this.mesh = this.parts.group;
     scene.add(this.mesh);
     this.scene = scene;
@@ -522,11 +801,21 @@ export class Vehicle {
       this.parts.paint.color.set(this.data.color).multiplyScalar(0.32);
       this.parts.paint.roughness = 0.88;
       this.parts.paint.clearcoat = 0.05;
+      this.parts.underglowMesh.visible = false;
     } else {
-      this.parts.paint.color.set(this.data.color);
-      this.parts.paint.roughness = this.model.style === 'pickup' ? 0.3 : 0.22;
-      this.parts.paint.clearcoat = 0.92;
+      this.applyCustomization();
+      this.parts.paint.roughness = this.model.style === 'pickup' ? 0.3 : this.model.style === 'hyper' ? 0.16 : 0.22;
+      this.parts.paint.clearcoat = 0.94;
     }
+  }
+
+  applyCustomization() {
+    this.parts.applyMods({
+      color: this.data.color,
+      livery: this.data.livery,
+      rims: this.data.rims,
+      underglow: this.data.underglow,
+    });
   }
 
   get forward() { return { x: Math.sin(this.yaw), z: Math.cos(this.yaw) }; }
@@ -685,6 +974,7 @@ export class Vehicle {
   dispose() {
     this.scene.remove(this.mesh);
     this.parts.paint.dispose();
+    this.parts.rimMat.dispose();
     this.parts.headFlareMat.dispose();
     this.parts.tailFlareMat.dispose();
     this.wreckFire.dispose();
@@ -707,11 +997,13 @@ function lanePoint(i, j, d, along) {
 export class TrafficCar {
   constructor(scene, rand) {
     this.rand = rand;
-    const models = ['sedan', 'sedan', 'hatch', 'taxi', 'van', 'pickup', 'sports'];
+    const models = ['sedan', 'sedan', 'hatch', 'taxi', 'van', 'pickup', 'sports', 'muscle', 'gwagen', 'roadster'];
     const modelId = models[Math.floor(rand() * models.length)];
     const color = VEHICLE_MODELS[modelId].fixedColor || CAR_COLORS[Math.floor(rand() * CAR_COLORS.length)];
     this.model = VEHICLE_MODELS[modelId];
-    this.parts = buildCarMesh(modelId, color);
+    this.parts = buildCarMesh(modelId, color, {
+      rims: rand() < 0.2 ? 'gold' : rand() < 0.4 ? 'black' : 'silver',
+    });
     this.mesh = this.parts.group;
     scene.add(this.mesh);
     // Seated driver silhouette

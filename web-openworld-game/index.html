@@ -129,17 +129,20 @@
       </div>
     </div>
 
-    <!-- ===== Character creator (side panel; camera frames the player) ===== -->
+    <!-- ===== Character creator & Personal Wardrobe (side panel; camera frames the player) ===== -->
     <div id="creator" class="glass hidden">
-      <h2>Character Creator</h2>
+      <h2>Look &amp; Wardrobe</h2>
       <label class="field">Name <input id="cc-name" maxlength="16" /></label>
       <div class="field"><span>Skin tone</span><div class="swatches" id="cc-skin"></div></div>
-      <div class="field"><span>Shirt</span><div class="swatches" id="cc-shirt"></div></div>
-      <div class="field"><span>Pants</span><div class="swatches" id="cc-pants"></div></div>
-      <div class="field"><span>Hair colour</span><div class="swatches" id="cc-hair"></div></div>
-      <div class="field"><span>Hair style</span><div class="chips" id="cc-hairstyle"></div></div>
+      <div class="field"><span>Hair style &amp; colour</span><div class="chips" id="cc-hairstyle"></div><div class="swatches" id="cc-hair" style="margin-top:5px"></div></div>
       <div class="field"><span>Body build</span><div class="chips" id="cc-build"></div></div>
-      <p class="hint">Uniforms and job headgear are applied automatically when you clock in.</p>
+      <div class="field"><span>Top / Jacket</span><div class="chips" id="cc-topstyle"></div><div class="swatches" id="cc-shirt" style="margin-top:5px"></div></div>
+      <div class="field"><span>Bottoms</span><div class="chips" id="cc-bottomstyle"></div><div class="swatches" id="cc-pants" style="margin-top:5px"></div></div>
+      <div class="field"><span>Footwear</span><div class="chips" id="cc-shoestyle"></div><div class="swatches" id="cc-shoecolor" style="margin-top:5px"></div></div>
+      <div class="field"><span>Headwear</span><div class="chips" id="cc-hatstyle"></div><div class="swatches" id="cc-hatcolor" style="margin-top:5px"></div></div>
+      <div class="field"><span>Eyewear &amp; Shades</span><div class="chips" id="cc-glasses"></div></div>
+      <div class="field"><span>Neck Chains</span><div class="chips" id="cc-chain"></div></div>
+      <p class="hint">Visit <b>Maison Verve Boutique</b> (pink <kbd>B</kbd> on minimap) to unlock luxury outfits, shades &amp; 24k gold chains!</p>
       <div class="row">
         <button id="cc-random">🎲 Randomize</button>
         <button id="cc-done" class="primary">Done</button>
@@ -182,7 +185,7 @@
           <li>Clock in at the <b>Express Courier Depot</b>, <b>City Security HQ</b> or <b>Metro Cab Co.</b> (glowing rings).</li>
           <li>Buy a <b>FOR SALE</b> lot to launch a startup. Each one unlocks a new occupation.</li>
           <li>Walk up to unemployed citizens (or use the startup menu) to <b>hire</b> them. Collect profit every payday.</li>
-          <li>Visit <b>Metro Motors</b> to buy faster cars, vans and taxis.</li>
+          <li>Visit <b>Metro Motors</b> (<kbd>M</kbd>) for G-Wagens, Hypercars, Convertibles &amp; Custom Mods, and <b>Maison Verve Boutique</b> (<kbd>B</kbd>) for Luxury Suits, Senator Tunics, Hoodies, Shades &amp; Gold Chains!</li>
         </ol>
         <button id="help-close" class="primary big">Start playing</button>
       </div>

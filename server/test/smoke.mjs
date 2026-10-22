@@ -127,12 +127,27 @@ check('snapshot includes movement flag', row[4] === 1);
 check('snapshot is rounded, not raw floats', String(row[3]).length <= 5, String(row[3]));
 check('snapshot excludes the recipient', !snap.p.some((r) => r[0] === welcomeA.id));
 
-// Emote relay: B performs 'dance_a' and A receives it in row[6]
+// Emote + Custom Vehicle + Boutique Look relay
+b.send({ t: 'look', app: { skin: '#8d5524', shirt: '#1d4ed8', topStyle: 'senator', hatStyle: 'fila', chain: 'gold', glasses: 'gold_shades' } });
+const lookRelay = await a.waitFor((m) => m.t === 'look' && m.id === welcomeB.id);
+check(
+  'look packet relays Boutique 3D fashion & accessory keys',
+  lookRelay.app?.topStyle === 'senator' && lookRelay.app?.hatStyle === 'fila' && lookRelay.app?.chain === 'gold',
+  JSON.stringify(lookRelay.app),
+);
+
 b.send({ t: 'pos', x: 12.5, z: -4.25, yaw: 1.23, mv: 0, veh: null, emote: 'dance_a' });
 const emoteSnap = await a.waitFor(
   (m) => m.t === 'snap' && m.p?.some((r) => r[0] === welcomeB.id && r[6] === 'dance_a'),
 );
 check('snapshot relays active emote in row[6]', !!emoteSnap);
+
+const customVehToken = 'gwagen|#111827|gold_trim|gold|cyan';
+b.send({ t: 'pos', x: 13.0, z: -4.0, yaw: 1.2, mv: 1, veh: customVehToken });
+const vehSnap = await a.waitFor(
+  (m) => m.t === 'snap' && m.p?.some((r) => r[0] === welcomeB.id && r[5] === customVehToken),
+);
+check('snapshot relays custom vehicle & mod token up to 56 chars', !!vehSnap);
 
 // Interest culling: move B far away and it should disappear from A's snapshot.
 const beforeCull = a.inbox.length;
