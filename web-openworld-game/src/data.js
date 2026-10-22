@@ -1,11 +1,22 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 3; // v3: vehicles gain cond {hp,fuel,tires,engine} + wrecked
+export const SAVE_VERSION = 4; // v4: 24x in-game clock, vehicle lastServicedInGameMs, telemetry & roadside assist
 
 export const STARTING_CASH = 500;
-export const PAYROLL_INTERVAL = 30; // seconds per in-game "business day"
+export const PAYROLL_INTERVAL = 30; // real seconds per 12-in-game-minute shift (30s * 24 = 720s = 12m)
 export const TOTAL_CITIZENS = 12;
+
+// ---------------------------------------------------------------------------
+// Dynamic time system (feature 11 — 1 real hour = 1 in-game day, 24× real time)
+// ---------------------------------------------------------------------------
+export const CLOCK_SPEED = 24;               // 24 in-game seconds per 1 real second
+export const INGAME_MINUTE_MS = 60_000;
+export const INGAME_HOUR_MS = 3_600_000;
+export const INGAME_DAY_MS = 86_400_000;
+export const CLOCK_START_HOUR = 8;           // new saves start at Day 1 · 08:00
+export const SHIFT_INGAME_MINUTES = 12;      // 12 in-game min = 30 real s at 24×
+export const STREET_LAMP_POOL = 8;           // max real PointLights pooled across the 25 intersections
 
 // ---------------------------------------------------------------------------
 // City grid
@@ -204,6 +215,20 @@ export const REPAIR_ENGINE_BUNDLE = 25;
 export const REPAIR_ENGINE_BUNDLE_COST = 200;
 export const MOTORS_REPAIR_MARKUP = 1.2;  // Metro Motors charges city rates (+20%)
 export const TOW_PRICE = 250;
+
+// Roadside assistance & mobile mechanic (callable from anywhere)
+export const ROADSIDE_CALLOUT_FEE = 150;       // dispatch fee for on-the-spot mobile repairs
+export const ROADSIDE_REPAIR_MARKUP = 1.4;     // mobile parts/labour rate (+40%, or +15% if you own Apex)
+export const ROADSIDE_APEX_MARKUP = 1.15;      // discounted mobile rate when Apex Auto Garage is built
+export const ROADSIDE_FUEL_FEE = 95;           // emergency jerrycan delivery fee
+export const ROADSIDE_FUEL_AMOUNT = 35;        // % of tank added by emergency jerrycan
+
+// Telemetry thresholds (feature 9 — see UPGRADE_PLAN.md §9)
+export const TELEMETRY_WARN_LEVEL = 50;        // amber bar + warning toast below 50%
+export const TELEMETRY_CRIT_LEVEL = 25;        // red pulsing bar + danger toast below 25%
+export const TELEMETRY_FUEL_BLINK = 10;        // blinking fuel icon + tick SFX below 10%
+export const TELEMETRY_ENGINE_FAULT = 20;      // "ENGINE FAULT" banner + tailpipe smoke below 20%
+export const TELEMETRY_HZ = 2;                 // HUD bar refresh rate (Hz)
 
 export const CAR_COLORS = ['#dc2626', '#2563eb', '#16a34a', '#f8fafc', '#111827', '#9333ea', '#f97316', '#64748b', '#0d9488', '#be185d'];
 

@@ -42,32 +42,32 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 |---|---|
 | `WASD` / arrows: move · `Shift`: sprint | `W`/`S`: gas, brake & reverse · `A`/`D`: steer |
 | Mouse drag, `Q`/`R`: orbit camera · wheel: zoom | `Space`: handbrake (drift) · `G`: horn |
-| `E` / `Space`: interact | `E`: complete waypoints |
-| `F`: get in/out of your car · `V`: valet (calls your last car) | `F`: exit |
-| `C`: character creator · `H`: help · `M`: mute | `F5`: save · `F9`: load (also autosaves) |
+| `E` / `Space`: interact | `E`: complete waypoints / stalled-car assist |
+| `F`: get in/out of your car · `V`: valet (calls your last car) | `F`: exit · `T`: Garage & Roadside Assist |
+| `T`: Garage & Roadside Assist · `C`: character creator · `H`: help · `M`: mute | `F5`: save · `F9`: load (also autosaves) |
 
 On touch devices you get an on-screen joystick and buttons.
 
 ## Features
 
-- **Open-world city.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap.
+- **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, dawn/dusk sky transitions, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
 - **Modular 3D humanoids.** The player and 12 citizens share one rig: skin tone, clothes, 5 hair styles and 3 body builds. Uniforms and headgear (cap, peaked cap, hard hat, chef hat, visor, beanie, flat cap) swap automatically by occupation.
 - **Occupations with ranks.** Pay rises 15% per rank, from Trainee up to Legend.
   - Starter jobs: *Express Courier* (parcel deliveries), *City Security Officer* (3-checkpoint patrols), *Metro Cab Driver* (needs a car; pick up and drop off passengers; taxis earn +30%).
   - Startup jobs: *Master Mechanic*, *Head Line Chef*, *Fleet Dispatcher* (includes cargo delivery runs), *Software Engineer*.
-- **Startups.** Four buildable lots: Apex Auto Garage, Metro Fresh Diner, SwiftCargo Logistics Hub and ByteForge Tech. Each starts with 3 job slots and gains +2 per upgrade, up to level 5. The building grows with each level. Payday comes every 30 s (revenue − wages).
+- **Startups.** Four buildable lots: Apex Auto Garage, Metro Fresh Diner, SwiftCargo Logistics Hub and ByteForge Tech. Each starts with 3 job slots and gains +2 per upgrade, up to level 5. The building grows with each level. Shift payouts run every 12 in-game minutes (30 real s: revenue − wages).
 - **Hiring.** Talk to unemployed citizens, or use "Hire nearest citizen" in the startup menu. Hired citizens put on your uniform, walk to your business along the sidewalks and work there.
 - **Vehicles.**
   - Arcade physics with handbrake drifts, collisions, steering wheels and brake lights.
   - Your character sits in the driver's seat; cab passengers ride beside you.
   - Metro Motors sells a sedan, taxi, pickup, van and the *Benz V12 Sport*, each with a colour picker.
   - The valet brings your car to the nearest curb.
-- **Cars wear out.** Every car has body HP, a fuel tank, tyre and engine condition.
+- **Live vehicle telemetry, wear & roadside assist.** Every car tracks body `HP`, `FUEL`, `TIRES` and `ENGINE` on a live 4-bar dashboard HUD (`green → amber <50% → pulsing red <25%`).
   - Impacts above 30 km/h dent the body (harder hits hurt more, up to 40 HP per crash); slow scrapes nick it.
-  - Fuel drains as you drive — top up at **Lagoon Fuels**, **Harbor Fuels** or **Metro Fuels** (marked `F` on the minimap). Run dry and the engine stalls where you are.
-  - Tyres and the engine wear with distance; worn tyres slide, a tired engine limps home at reduced top speed.
-  - At 0 HP the car is **wrecked**: it smokes until a mechanic tows it in ($250) and repairs it.
-  - Repairs: **Metro Motors' mechanic** (city rates, +20%) or your own **Apex Auto Garage** service bay (house rates) once you've built it.
+  - Fuel drains as you drive — below 10% the fuel icon blinks with a soft reserve tick; run dry and the engine stalls. Top up at **Lagoon Fuels**, **Harbor Fuels** or **Metro Fuels** (`F` on the minimap).
+  - Tyres and the engine wear with distance; worn tyres slide, and an engine below 20% triggers an `ENGINE FAULT` banner, exhaust smoke and limp-home speed.
+  - At 0 HP the car is **wrecked** and smokes until towed or repaired.
+  - **Shop & Roadside service:** visit **Metro Motors' mechanic** (+20% city rates) or your **Apex Auto Garage** (house rates), OR press **`T`** anywhere (or **`E`** beside a wrecked/stalled car) to open **Garage & Roadside Assist** and call a tow ($250), dispatch a mobile mechanic ($150 call-out + parts), or buy an emergency +35% fuel can ($95).
 - **AI traffic.** 12 cars drive right-hand lanes across the grid and brake for pedestrians, cars and you. They honk if you block them.
 - **Save system.** `localStorage` key `metroventure_openworld_save_v1`. Stores cash, look, job XP, startups, employees, vehicles and positions.
 
@@ -78,14 +78,17 @@ web-openworld-game/
   index.html          HUD, modals, character creator, help, touch controls
   style.css           glassmorphism UI
   game.js             entry: renderer, loop, player, citizens, tasks, UI, save/load
-  src/data.js         all tunable data (jobs, startups, vehicles, map constants)
-  src/economy.js      pure game-state logic (unit-tested, no DOM)
+  src/data.js         all tunable data (jobs, startups, vehicles, clock, telemetry)
+  src/time.js         pure 24× city clock, day/night lighting & shift boundaries
+  src/economy.js      pure game-state logic & save migrations (unit-tested, no DOM)
+  src/vehicleCond.js  pure vehicle wear, damage, shop & roadside repair quotes
+  src/vehCard.js      telemetry tiering, warning ladder & shared vehicle card renderer
   src/character.js    modular humanoid rig + outfits + animation
-  src/world.js        procedural city, lots, stations, sidewalk nav graph, collisions
-  src/vehicles.js     car meshes, driving physics, AI traffic
+  src/world.js        procedural city, street lamps, night glow, nav graph, collisions
+  src/vehicles.js     car meshes, headlights/taillights, driving physics, AI traffic
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
-  src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback)
-  tests/economy.test.mjs
+  src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock sync)
+  tests/              Node unit tests (economy, time, vehicleCond, vehCard)
 server/               free multiplayer server (Cloudflare Worker + Durable Object)
 tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main

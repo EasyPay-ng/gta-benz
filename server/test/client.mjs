@@ -59,6 +59,14 @@ a.connect();
 check('guest reaches online', await until(() => a.connected));
 check('guest is marked as a guest', a.account === false && a.name === 'Amara');
 check('guest gets no saved position', a.restore === null);
+check(
+  'NetClient captures server clock on welcome and extrapolates locally',
+  a.serverClock && typeof a.clockNow() === 'number' && /^\d{2}:\d{2}$/.test(a.serverClock.hhmm),
+  JSON.stringify(a.serverClock),
+);
+const clockT0 = a.clockNow();
+await sleep(80);
+check('NetClient.clockNow() advances monotonically at 24x', a.clockNow() > clockT0 + 1000, `${clockT0} -> ${a.clockNow()}`);
 
 // ---------------------------------------------------------------------------
 // Accounts: register (via sign-in auto-create), token reuse, resume position

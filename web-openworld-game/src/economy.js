@@ -6,8 +6,10 @@ import {
   BASE_JOB_SLOTS, SLOTS_PER_LEVEL, MAX_BUSINESS_LEVEL, LEVEL_REVENUE_BONUS,
   VEHICLE_MODELS, DEFAULT_APPEARANCE, CITIZEN_NAMES, SKIN_TONES, SHIRT_COLORS,
   PANTS_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, PAYROLL_INTERVAL, TOTAL_CITIZENS,
+  CLOCK_SPEED, CLOCK_START_HOUR, INGAME_HOUR_MS, INGAME_DAY_MS,
 } from './data.js';
 import { freshCond } from './vehicleCond.js';
+import { createClock, inGameNowMs, dayOf, secondsToNextShift } from './time.js';
 
 // Small deterministic PRNG so citizens look the same for every new game.
 export function mulberry32(seed) {
@@ -51,11 +53,13 @@ export function createCitizens(seed = 1337) {
   return citizens;
 }
 
-export function createInitialState() {
+export function createInitialState(wallNow = Date.now()) {
   const jobXP = {};
   for (const id of Object.keys(OCCUPATIONS)) jobXP[id] = 0;
   const businesses = {};
   for (const id of Object.keys(BUSINESSES)) businesses[id] = null;
+  const clock = createClock(wallNow);
+  const nowInGame = inGameNowMs(clock, wallNow);
   return {
     version: SAVE_VERSION,
     cash: STARTING_CASH,
@@ -64,21 +68,30 @@ export function createInitialState() {
     jobXP,
     businesses,
     citizens: createCitizens(),
+    clock,
     vehicles: [
       // Free starter car parked at the curb next to the spawn point.
-      { id: 'v1', model: 'hatch', color: '#b45309', x: -6.0, z: -24, yaw: 0, cond: freshCond(), wrecked: false },
+      {
+        id: 'v1', model: 'hatch', color: '#b45309', x: -6.0, z: -24, yaw: 0,
+        cond: freshCond(), wrecked: false, lastServicedInGameMs: 0,
+      },
     ],
     nextVehicleId: 2,
     lastVehicleId: 'v1',
     player: { x: -12.5, z: -15, yaw: Math.PI * 0.8, inVehicle: null },
-    stats: { tasksCompleted: 0, totalEarned: 0, day: 1, payrollTimer: PAYROLL_INTERVAL },
+    stats: {
+      tasksCompleted: 0,
+      totalEarned: 0,
+      day: dayOf(nowInGame),
+      payrollTimer: secondsToNextShift(nowInGame, clock.speed),
+    },
     seenHelp: false,
   };
 }
 
 // Merge a loaded save onto a fresh state so missing fields (older saves) get defaults.
-export function migrateState(raw) {
-  const base = createInitialState();
+export function migrateState(raw, wallNow = Date.now()) {
+  const base = createInitialState(wallNow);
   if (!raw || typeof raw !== 'object') return base;
   const s = { ...base, ...raw };
   s.appearance = { ...base.appearance, ...(raw.appearance || {}) };
@@ -99,10 +112,29 @@ export function migrateState(raw) {
       // v2 saves have no condition — everything starts healthy
       cond: { ...freshCond(), ...(v.cond || {}) },
       wrecked: !!v.wrecked,
+      lastServicedInGameMs: Number.isFinite(v.lastServicedInGameMs) ? v.lastServicedInGameMs : 0,
     }))
     : base.vehicles;
   s.player = { ...base.player, ...(raw.player || {}) };
   s.stats = { ...base.stats, ...(raw.stats || {}) };
+  if (raw.clock && typeof raw.clock === 'object' && Number.isFinite(raw.clock.realBase) && Number.isFinite(raw.clock.inGameBase)) {
+    s.clock = {
+      realBase: raw.clock.realBase,
+      inGameBase: raw.clock.inGameBase,
+      speed: Number.isFinite(raw.clock.speed) ? raw.clock.speed : CLOCK_SPEED,
+    };
+  } else {
+    // v2/v3 saves have no clock: resume on their current stats.day at 08:00 without a jump.
+    const savedDay = Math.max(1, Math.floor(raw.stats?.day || 1));
+    s.clock = createClock(
+      wallNow,
+      (savedDay - 1) * INGAME_DAY_MS + CLOCK_START_HOUR * INGAME_HOUR_MS,
+      CLOCK_SPEED,
+    );
+  }
+  const nowInGame = inGameNowMs(s.clock, wallNow);
+  s.stats.day = dayOf(nowInGame);
+  s.stats.payrollTimer = secondsToNextShift(nowInGame, s.clock.speed);
   if (s.activeJob && !OCCUPATIONS[s.activeJob]) s.activeJob = null;
   // Keep employee lists and citizen employer fields consistent.
   for (const c of s.citizens) {
@@ -264,6 +296,7 @@ export function buyVehicle(state, modelId, color, spot) {
     x: spot?.x ?? 0, z: spot?.z ?? 0, yaw: spot?.yaw ?? 0,
     cond: freshCond(),
     wrecked: false,
+    lastServicedInGameMs: 0,
   };
   state.vehicles.push(v);
   state.lastVehicleId = v.id;

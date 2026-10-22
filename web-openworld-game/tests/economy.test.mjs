@@ -109,14 +109,29 @@ test('every business unlocks an occupation that points back to it', () => {
     assert.equal(OCCUPATIONS[b.occupation].business, b.id);
   }
 });
-test('v2 saves migrate with a fresh vehicle condition (save v3)', () => {
+test('v2 saves migrate with a fresh vehicle condition and anchored clock (save v4)', () => {
+  const now = 1_700_000_000_000;
   const s = Eco.migrateState({
     version: 2,
+    stats: { day: 3, tasksCompleted: 2, totalEarned: 440, payrollTimer: 12 },
     vehicles: [{ id: 'v1', model: 'hatch', color: '#b45309', x: 0, z: 0, yaw: 0 }],
-  });
-  assert.equal(s.version, 3);
+  }, now);
+  assert.equal(s.version, 4);
   assert.deepEqual(s.vehicles[0].cond, { hp: 100, fuel: 100, tires: 100, engine: 100 });
   assert.equal(s.vehicles[0].wrecked, false);
+  assert.equal(s.vehicles[0].lastServicedInGameMs, 0);
+  // Resumes at Day 3 · 08:00 without a surprise jump
+  assert.equal(s.stats.day, 3);
+  assert.equal(s.clock.realBase, now);
+});
+
+test('v4 saves fast-forward the clock by elapsed offline time on reload', () => {
+  const t0 = 1_700_000_000_000;
+  const s0 = Eco.createInitialState(t0);
+  assert.equal(s0.stats.day, 1);
+  // Reload 2 real hours later -> +2 in-game days (Day 3)
+  const reloaded = Eco.migrateState(JSON.parse(JSON.stringify(s0)), t0 + 2 * 3_600_000);
+  assert.equal(reloaded.stats.day, 3);
 });
 
 test('partially damaged v3 saves keep their condition through migration', () => {

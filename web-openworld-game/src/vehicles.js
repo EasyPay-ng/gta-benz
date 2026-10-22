@@ -1,22 +1,40 @@
 // MetroVenture 3D — drivable vehicles + AI street traffic.
 import * as THREE from 'three';
-import { VEHICLE_MODELS, ROAD_LINES, LANE_OFFSET, WORLD_LIMIT, CAR_COLORS } from './data.js';
+import {
+  VEHICLE_MODELS, ROAD_LINES, LANE_OFFSET, WORLD_LIMIT, CAR_COLORS, TELEMETRY_ENGINE_FAULT,
+} from './data.js';
 import { resolveCircle, makeTextTexture } from './world.js';
 import { applyDrive, speedFactor, gripFactor, freshCond } from './vehicleCond.js';
 
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const WHEEL_GEO = new THREE.CylinderGeometry(1, 1, 1, 14);
 const HUB_GEO = new THREE.CylinderGeometry(0.55, 0.55, 1.02, 8);
+const HEAD_BEAM_GEO = new THREE.ConeGeometry(0.95, 4.4, 10, 1, true);
 const MAT = {
   glass: new THREE.MeshPhongMaterial({ color: 0x1e293b, transparent: true, opacity: 0.55, shininess: 120, specular: 0x8899aa }),
   tyre: new THREE.MeshLambertMaterial({ color: 0x18181b }),
   hub: new THREE.MeshLambertMaterial({ color: 0xa1a1aa }),
   trim: new THREE.MeshLambertMaterial({ color: 0x27272a }),
-  head: new THREE.MeshBasicMaterial({ color: 0xfffbeb }),
+  head: new THREE.MeshBasicMaterial({ color: 0xe2e8f0 }),
+  headBeam: new THREE.MeshBasicMaterial({
+    color: 0xfef9c3,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  }),
   plate: new THREE.MeshLambertMaterial({ color: 0xf8fafc }),
   checker: new THREE.MeshLambertMaterial({ color: 0x111827 }),
 };
 let taxiSignTex = null;
+let vehicleNight = 0;
+
+/** Update shared night-time headlight material state across all cars (O(1)). */
+export function setVehicleNightFactor(nightFactor) {
+  vehicleNight = Math.max(0, Math.min(1, nightFactor));
+  MAT.head.color.setHex(vehicleNight > 0.12 ? 0xfffbeb : 0xe2e8f0);
+  MAT.headBeam.opacity = vehicleNight * 0.16;
+}
 
 function part(parent, mat, x, y, z, w, h, d) {
   const m = new THREE.Mesh(BOX, mat);
@@ -87,11 +105,19 @@ export function buildCarMesh(modelId, color) {
     part(body, MAT.checker, -W / 2 - 0.005, bodyY + 0.05, 0, 0.02, 0.12, L * 0.8);
   }
 
-  // lights
+  // lights + night headlight cones (emissive cones; real light only on active player car)
+  const headBeams = new THREE.Group();
+  headBeams.visible = false;
   for (const sx of [-1, 1]) {
     part(body, MAT.head, sx * W * 0.34, bodyY + 0.08, L / 2 + 0.005, W * 0.2, 0.13, 0.04);
     part(body, brakeMat, sx * W * 0.36, bodyY + 0.1, -L / 2 - 0.005, W * 0.18, 0.13, 0.04);
+    const cone = new THREE.Mesh(HEAD_BEAM_GEO, MAT.headBeam);
+    // Cone tip at headlight (y +height/2 along local axis -> rotate -PI/2 around X so tip points -Z, base opens +Z forward)
+    cone.rotation.x = -Math.PI / 2 - 0.09;
+    cone.position.set(sx * W * 0.34, Math.max(0.24, bodyY - 0.12), L / 2 + 2.2);
+    headBeams.add(cone);
   }
+  body.add(headBeams);
 
   // wheels
   const wheels = [];
@@ -119,7 +145,7 @@ export function buildCarMesh(modelId, color) {
   const hipY = Math.min(bodyTop - 0.05, roofInner - 1.02 * seatScale);
   const seatZ = m.style === 'pickup' ? m.cabinZ - 0.1 : m.style === 'van' ? m.cabinZ + m.cabinLen / 2 - 1.2 : m.cabinZ - 0.05;
   return {
-    group, body, wheels, frontPivots, brakeMat, paint,
+    group, body, wheels, frontPivots, brakeMat, paint, headBeams,
     seat: new THREE.Vector3(W * 0.22, hipY - 0.9 * seatScale, seatZ),
     passengerSeat: new THREE.Vector3(-W * 0.22, hipY - 0.9 * seatScale, seatZ),
     seatScale,
@@ -141,6 +167,7 @@ export class Vehicle {
     this.speed = 0; this.vx = 0; this.vz = 0;
     this.steer = 0; this.spin = 0;
     this.braking = false;
+    this.occupied = false;
     this.radius = this.model.wid / 2 + 0.05;
     this.halfSpan = Math.max(0, this.model.len / 2 - this.radius);
     this.y = 0;
@@ -166,6 +193,20 @@ export class Vehicle {
     this.smoke.visible = data.wrecked === true;
     if (data.wrecked === true) this.parts.paint.color.multiplyScalar(0.55); // re-scorch on load
     this.mesh.add(this.smoke);
+    // Engine-fault tailpipe smoke (feature 9 — visible when engine < 20% and running)
+    this.exhaustT = 0;
+    this.exhaustSmoke = new THREE.Group();
+    for (let i = 0; i < 4; i++) {
+      const puff = new THREE.Mesh(BOX, this.smokeMat);
+      puff.scale.set(0.16, 0.16, 0.16);
+      puff.userData = {
+        phase: (i / 4) * 1.1,
+        ox: -this.model.wid * 0.28 + (i % 2 ? 0.04 : -0.04),
+      };
+      this.exhaustSmoke.add(puff);
+    }
+    this.exhaustSmoke.visible = false;
+    this.mesh.add(this.exhaustSmoke);
     this.syncMesh(0);
   }
 
@@ -291,7 +332,12 @@ export class Vehicle {
     for (const p of this.parts.frontPivots) p.rotation.y = -this.steer;
     // body roll when cornering
     this.parts.body.rotation.z = THREE.MathUtils.clamp(this.steer * this.speed * 0.006, -0.06, 0.06);
-    this.parts.brakeMat.color.setHex(this.braking ? 0xff2222 : 0x7f1d1d);
+    const powered = this.cond.hp > 0 && this.cond.fuel > 0;
+    const nightLights = this.occupied && powered && vehicleNight > 0.08;
+    this.parts.headBeams.visible = nightLights;
+    this.parts.brakeMat.color.setHex(
+      this.braking ? 0xff2222 : nightLights ? 0xdc2626 : 0x7f1d1d,
+    );
     // wreck smoke
     if (this.smoke.visible) {
       this.smokeT += dt;
@@ -299,6 +345,19 @@ export class Vehicle {
         const t = ((this.smokeT + puff.userData.phase) % 1.4) / 1.4;
         puff.position.set(puff.userData.ox, this.hoodY + 0.2 + t * 1.7, puff.userData.oz);
         const s = 0.22 + t * 0.55;
+        puff.scale.set(s, s, s);
+      }
+    }
+    // engine-fault exhaust smoke (engine < 20% while powered)
+    const faultSmoke = powered && this.cond.engine < TELEMETRY_ENGINE_FAULT;
+    this.exhaustSmoke.visible = faultSmoke;
+    if (faultSmoke) {
+      this.exhaustT += dt;
+      const tailZ = -this.model.len / 2 - 0.1;
+      for (const puff of this.exhaustSmoke.children) {
+        const t = ((this.exhaustT + puff.userData.phase) % 1.1) / 1.1;
+        puff.position.set(puff.userData.ox, this.model.wheelR * 0.75 + t * 0.85, tailZ - t * 1.25);
+        const s = 0.15 + t * 0.36;
         puff.scale.set(s, s, s);
       }
     }
@@ -464,6 +523,8 @@ export class TrafficCar {
     for (const w of this.parts.wheels) w.rotation.x = this.spin;
     const steerVis = THREE.MathUtils.clamp(diff, -0.5, 0.5);
     for (const p of this.parts.frontPivots) p.rotation.y = steerVis;
-    this.parts.brakeMat.color.setHex(this.braking ? 0xff2222 : 0x7f1d1d);
+    const nightOn = vehicleNight > 0.08;
+    this.parts.headBeams.visible = nightOn;
+    this.parts.brakeMat.color.setHex(this.braking ? 0xff2222 : nightOn ? 0xdc2626 : 0x7f1d1d);
   }
 }

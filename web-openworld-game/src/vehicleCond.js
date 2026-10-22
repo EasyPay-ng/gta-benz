@@ -7,6 +7,8 @@ import {
   ENGINE_HIGH_SPEED_EXTRA, ENGINE_HIGH_SPEED_THRESHOLD,
   REPAIR_COST_PER_HP, REPAIR_TIRE_BUNDLE, REPAIR_TIRE_BUNDLE_COST,
   REPAIR_ENGINE_BUNDLE, REPAIR_ENGINE_BUNDLE_COST,
+  ROADSIDE_CALLOUT_FEE, ROADSIDE_REPAIR_MARKUP, ROADSIDE_APEX_MARKUP,
+  ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT,
 } from './data.js';
 
 const clamp100 = (v) => Math.min(100, Math.max(0, v));
@@ -105,4 +107,47 @@ export function applyRepairs(cond, markup = 1) {
   cond.tires = 100;
   cond.engine = 100;
   return total;
+}
+
+/** Mobile mechanic markup (discounted when the player owns Apex Auto Garage). */
+export function roadsideMarkup(hasGarage = false) {
+  return hasGarage ? ROADSIDE_APEX_MARKUP : ROADSIDE_REPAIR_MARKUP;
+}
+
+/**
+ * Quote for on-the-spot roadside mechanic dispatch from anywhere in the city.
+ * Includes a flat call-out fee plus marked-up parts/labour; 0 when already healthy.
+ */
+export function roadsideRepairQuote(cond, hasGarage = false) {
+  const markup = roadsideMarkup(hasGarage);
+  const { items, total: partsTotal } = repairOptions(cond, markup);
+  if (partsTotal <= 0) return { items: [], callout: 0, partsTotal: 0, total: 0, markup };
+  return {
+    items,
+    callout: ROADSIDE_CALLOUT_FEE,
+    partsTotal,
+    total: ROADSIDE_CALLOUT_FEE + partsTotal,
+    markup,
+  };
+}
+
+/** Apply mobile roadside repairs (hp/tires/engine → 100) and return total cost. */
+export function applyRoadsideRepairs(cond, hasGarage = false) {
+  const { total } = roadsideRepairQuote(cond, hasGarage);
+  cond.hp = 100;
+  cond.tires = 100;
+  cond.engine = 100;
+  return total;
+}
+
+/** Whether a car can receive an emergency roadside jerrycan top-up. */
+export function canEmergencyRefuel(cond) {
+  return cond.hp > 0 && cond.fuel < 99.5;
+}
+
+/** Add an emergency jerrycan of fuel (+ROADSIDE_FUEL_AMOUNT%, clamped to 100). */
+export function applyEmergencyRefuel(cond) {
+  const before = cond.fuel;
+  cond.fuel = clamp100(cond.fuel + ROADSIDE_FUEL_AMOUNT);
+  return { cost: ROADSIDE_FUEL_FEE, added: cond.fuel - before, fuel: cond.fuel };
 }

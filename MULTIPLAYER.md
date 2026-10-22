@@ -65,10 +65,12 @@ Cloudflare account — which is what this code implements directly, without the 
 server/
   wrangler.jsonc          Worker config: one Durable Object class, SQLite backend
   src/index.js            Routes: /health, /ws?room=<name>
-  src/city-room.js        One CityRoom per city: join/leave, 5 Hz snapshots, rate limits
-  test/smoke.mjs          16 protocol tests (raw WebSockets, no deps)
-  test/client.mjs         17 NetClient tests (the real browser module, in Node)
-web-openworld-game/src/net.js   Browser transport: reconnect, ping, throttled sends
+  src/city-room.js        One CityRoom per city: join/leave, 5 Hz snapshots, rate limits, room clock
+  src/city-clock.js       Authoritative 24× city clock persisted in DO storage (hibernates when empty)
+  test/smoke.mjs          24 protocol + room-clock tests (raw WebSockets, no deps)
+  test/accounts.mjs       34 account/PIN/token tests
+  test/client.mjs         28 NetClient tests (the real browser module, in Node)
+web-openworld-game/src/net.js   Browser transport: reconnect, ping, throttled sends, clock interpolation
 tools/dev-server.mjs      Static server + /ws proxy + /net.json discovery
 tools/dev.mjs             `npm run dev`: game and city server together
 ```
@@ -93,7 +95,8 @@ Server → client:
 | Message | Payload | Notes |
 |---|---|---|
 | `auth` | `{ok, name, playerId, token}` / `{ok:false, code}` | identity result |
-| `welcome` | `{id, room, tick, peers[], you, restore}` | full peer list, who you are, saved position |
+| `welcome` | `{id, room, tick, peers[], you, restore, clock}` | full peer list, who you are, saved position, authoritative room clock |
+| `clock` | `{inGameMs, day, hhmm, speed, now}` | broadcast every 30 real s (+12 in-game min) while ≥1 player is online |
 | `join` / `leave` | `{id, name, app, x, z, yaw}` | presence events |
 | `snap` | `{now, p: [[id,x,z,yaw,mv,veh], …]}` | full replacement, 5 Hz, distance-culled |
 | `chat` | `{id, name, m}` | |
@@ -105,6 +108,12 @@ Design choices that keep it free and simple:
   what is on screen, not with city population.
 - **Per-socket coalescing** — a client sending at 10 Hz is answered at 5 Hz. A one-shot
   alarm flushes the trailing update so the last few metres are never lost.
+- **Hibernating 24× city clock** — `RoomClock` stores `{ inGameMs, updatedAt, speed: 24 }`
+  in Durable Object storage and shares `CityRoom`'s single DO `alarm()` slot to broadcast
+  `clock` every 30 real seconds (+12 in-game minutes) while players are connected. When
+  the last WebSocket disconnects, `deleteAlarm()` cancels all wakeups so empty rooms
+  hibernate for $0; when the next player joins later, elapsed wall time (`× 24`) is rolled
+  forward seamlessly so city time never resets.
 - **Hibernation** — `state.acceptWebSocket()`, no `setInterval`. An empty city costs
   nothing; sockets survive the object being evicted from memory.
 - **Server-side clamps** — coordinates are clamped to ±400 m, yaw to ±10, messages to
@@ -262,10 +271,10 @@ Being explicit, because the upgrade plan mixes them together:
   arrives with the timing/economy work.
 - **Positions are client-authoritative.** Fine for friends; exploitable the moment money
   is involved. Server-side movement validation is a phase-7 job.
-- **The economy is local.** Cash, startups, vehicles and employees still live in
-  `localStorage`. Two players cannot transfer keys or hire each other yet.
-- **Nothing persists while nobody is connected** except the last seen position. Offline
-  wage accrual needs a clock object plus a real account model.
+- **Economy is not tied to the account yet.** Names, tokens, last position and the shared
+  24× city clock (`Day N · HH:MM`) live on the server; cash, startups, vehicles and
+  employees still live in `localStorage`. Two players cannot transfer keys or hire each
+  other yet, and server-side offline wage accrual waits for server-owned accounts.
 
 ---
 
@@ -285,11 +294,11 @@ Nothing in this code needs to change — it is the same Worker, just not throttl
 
 ## 8. Where this fits the bigger plan
 
-| Upgrade-plan item | What the server unlocks | Order |
+| Upgrade-plan item | What the server unlocks | Status / Order |
 |---|---|---|
-| 11 — real-time clock (1 h = 24 h) | One clock Durable Object with an alarm; every client reads it, so day/night, needs and wages agree for everyone | **next** |
+| 11 — real-time clock (1 h = 24 h) | Authoritative `RoomClock` on `CityRoom`; every client sees the same `Day N · HH:MM` and day/night lighting | **done (M1)** |
 | 1 — security operatives (AI) | AI guards work single-player now; player-employers need the economy moved server-side | next |
-| 5 & 6 — vehicle access + key transfer | Needs `ownerId` on vehicles and an authoritative inventory (accounts exist, inventories don't) | after the clock |
+| 5 & 6 — vehicle access + key transfer | Needs `ownerId` on vehicles and an authoritative inventory (accounts exist, inventories don't) | next |
 | 10 — real estate | Needs interior property records + ownership | after interiors |
 | 2 — emotes visible to nearby players | Trivial: add `emote` to the `pos`/`look` payload | anytime |
 
