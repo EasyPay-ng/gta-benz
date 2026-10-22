@@ -109,3 +109,29 @@ test('every business unlocks an occupation that points back to it', () => {
     assert.equal(OCCUPATIONS[b.occupation].business, b.id);
   }
 });
+test('v2 saves migrate with a fresh vehicle condition (save v3)', () => {
+  const s = Eco.migrateState({
+    version: 2,
+    vehicles: [{ id: 'v1', model: 'hatch', color: '#b45309', x: 0, z: 0, yaw: 0 }],
+  });
+  assert.equal(s.version, 3);
+  assert.deepEqual(s.vehicles[0].cond, { hp: 100, fuel: 100, tires: 100, engine: 100 });
+  assert.equal(s.vehicles[0].wrecked, false);
+});
+
+test('partially damaged v3 saves keep their condition through migration', () => {
+  const s = Eco.migrateState({
+    version: 3,
+    vehicles: [{ id: 'v1', model: 'sedan', color: '#dc2626', x: 0, z: 0, yaw: 0, cond: { hp: 42, fuel: 7, tires: 61, engine: 88 }, wrecked: false }],
+  });
+  assert.deepEqual(s.vehicles[0].cond, { hp: 42, fuel: 7, tires: 61, engine: 88 });
+});
+
+test('new cars start healthy', () => {
+  const s = Eco.createInitialState();
+  s.cash = 100000;
+  const r = Eco.buyVehicle(s, 'sedan', '#dc2626', { x: 0, z: 0, yaw: 0 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.vehicle.cond, { hp: 100, fuel: 100, tires: 100, engine: 100 });
+  assert.equal(r.vehicle.wrecked, false);
+});

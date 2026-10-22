@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   ROAD_LINES, ROAD_HALF, SIDEWALK_W, BLOCK_HALF, SIDEWALK_RING, BLOCK_CENTERS, BUSINESSES,
-  STATIONS, DEALERSHIP, STREET_NAMES_X, STREET_NAMES_Z, MAX_BUSINESS_LEVEL,
+  STATIONS, DEALERSHIP, FUEL_STATIONS, STREET_NAMES_X, STREET_NAMES_Z, MAX_BUSINESS_LEVEL,
 } from './data.js';
 import { mulberry32 } from './economy.js';
 
@@ -286,8 +286,45 @@ export class City {
   _featureAt(bx, bz) {
     for (const s of Object.values(STATIONS)) if (s.x === bx && s.z === bz) return (f) => this._buildStation(f, s);
     for (const b of Object.values(BUSINESSES)) if (b.x === bx && b.z === bz) return (f) => this._buildLotBase(f, b);
+    for (const s of Object.values(FUEL_STATIONS)) if (s.x === bx && s.z === bz) return (f) => this._buildFuelStation(f, s);
     if (DEALERSHIP.x === bx && DEALERSHIP.z === bz) return (f) => this._buildDealership(f);
     return null;
+  }
+
+  // ----- fuel station (feature 4) --------------------------------------------
+  _buildFuelStation(frame, st) {
+    const g = this.frameGroup(frame);
+    const color = new THREE.Color(st.color);
+    const canopy = new THREE.MeshLambertMaterial({ color });
+    const dark = this.mats.darkMetal;
+    // asphalt pad
+    this.box(g, 0, 0.02, 0, 28, 0.04, 16, this.mats.road, { cast: false });
+    // canopy: four posts + roof (drive under it; only the pump islands block)
+    for (const [px, pz] of [[-9, 5], [9, 5], [-9, -5], [9, -5]]) this.box(g, px, 2.6, pz, 0.5, 5.2, 0.5, dark);
+    this.box(g, 0, 5.35, 0, 23, 0.5, 12.5, canopy);
+    this.box(g, 0, 5.65, -6.1, 23, 0.3, 0.3, dark);
+    this.sign(g, [st.name.toUpperCase(), 'FUELS 24/7'], 0, 4.6, -6.3, 12, 2.4, { bg: st.color, fg: '#ffffff' });
+    // two pump islands × two pumps
+    const screenMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+    for (const ix of [-5.5, 5.5]) {
+      this.box(g, ix, 0.15, 0, 4.2, 0.3, 4.2, dark);
+      this.frameCollider(frame, ix, 0, 4.4, 4.4);
+      for (const dx of [-1.2, 1.2]) {
+        this.box(g, ix + dx, 1.05, 0, 0.95, 1.7, 0.8, canopy);
+        this.box(g, ix + dx, 1.35, -0.42, 0.6, 0.5, 0.05, screenMat, { cast: false });
+        this.box(g, ix + dx + 0.55, 1.0, 0, 0.08, 0.8, 0.15, dark);
+      }
+    }
+    // price totem
+    this.box(g, -11.5, 1.1, 2, 0.3, 2.2, 0.3, dark);
+    this.sign(g, ['$1.05 / L', 'DIESEL + $0.20'], -11.5, 3.2, 2, 4.6, 1.6, { bg: '#111827', fg: '#4ade80' });
+    // glowing interaction pad
+    const pad = this._marker(color);
+    const p = this.toWorld(frame, 0, 9);
+    pad.position.set(p.x, CURB_Y + 0.03, p.z);
+    this.root.add(pad);
+    this.stationMarkers.push(pad);
+    st.interact = { x: p.x, z: p.z };
   }
 
   // ----- skyline -------------------------------------------------------------

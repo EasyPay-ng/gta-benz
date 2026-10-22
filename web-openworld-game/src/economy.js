@@ -7,6 +7,7 @@ import {
   VEHICLE_MODELS, DEFAULT_APPEARANCE, CITIZEN_NAMES, SKIN_TONES, SHIRT_COLORS,
   PANTS_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, PAYROLL_INTERVAL, TOTAL_CITIZENS,
 } from './data.js';
+import { freshCond } from './vehicleCond.js';
 
 // Small deterministic PRNG so citizens look the same for every new game.
 export function mulberry32(seed) {
@@ -65,7 +66,7 @@ export function createInitialState() {
     citizens: createCitizens(),
     vehicles: [
       // Free starter car parked at the curb next to the spawn point.
-      { id: 'v1', model: 'hatch', color: '#b45309', x: -6.0, z: -24, yaw: 0 },
+      { id: 'v1', model: 'hatch', color: '#b45309', x: -6.0, z: -24, yaw: 0, cond: freshCond(), wrecked: false },
     ],
     nextVehicleId: 2,
     lastVehicleId: 'v1',
@@ -92,7 +93,14 @@ export function migrateState(raw) {
   } else {
     s.citizens = raw.citizens.map((c, i) => ({ ...base.citizens[i], ...c, appearance: { ...base.citizens[i].appearance, ...(c.appearance || {}) } }));
   }
-  s.vehicles = Array.isArray(raw.vehicles) ? raw.vehicles.filter((v) => VEHICLE_MODELS[v.model]) : base.vehicles;
+  s.vehicles = Array.isArray(raw.vehicles)
+    ? raw.vehicles.filter((v) => VEHICLE_MODELS[v.model]).map((v) => ({
+      ...v,
+      // v2 saves have no condition — everything starts healthy
+      cond: { ...freshCond(), ...(v.cond || {}) },
+      wrecked: !!v.wrecked,
+    }))
+    : base.vehicles;
   s.player = { ...base.player, ...(raw.player || {}) };
   s.stats = { ...base.stats, ...(raw.stats || {}) };
   if (s.activeJob && !OCCUPATIONS[s.activeJob]) s.activeJob = null;
@@ -254,6 +262,8 @@ export function buyVehicle(state, modelId, color, spot) {
     model: modelId,
     color: m.fixedColor || color,
     x: spot?.x ?? 0, z: spot?.z ?? 0, yaw: spot?.yaw ?? 0,
+    cond: freshCond(),
+    wrecked: false,
   };
   state.vehicles.push(v);
   state.lastVehicleId = v.id;

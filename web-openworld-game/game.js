@@ -4,8 +4,10 @@ import {
   SAVE_KEY, OCCUPATIONS, BUSINESSES, STATIONS, DEALERSHIP, VEHICLE_MODELS, CAR_COLORS, MAX_BUSINESS_LEVEL,
   SKIN_TONES, SHIRT_COLORS, PANTS_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, TOTAL_CITIZENS, ROAD_LINES,
   ROAD_HALF, WORLD_LIMIT, PAYROLL_INTERVAL, BLOCK_CENTERS, BLOCK_HALF, DEFAULT_APPEARANCE,
+  FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
+import * as VCond from './src/vehicleCond.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, buildCarMesh } from './src/vehicles.js';
@@ -90,6 +92,9 @@ const sfx = {
   click() { this.tone(660, 0.05, 'square', 0.04); },
   error() { this.tone(180, 0.18, 'square', 0.06); },
   rankUp() { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.1, i * 0.09)); },
+  stall() { this.tone(150, 0.25, 'sawtooth', 0.09); this.tone(85, 0.45, 'sawtooth', 0.09, 0.18); },
+  pump() { for (let i = 0; i < 6; i++) this.tone(280 + i * 45, 0.09, 'square', 0.05, i * 0.28); },
+  wrench() { [0, 0.22, 0.44, 0.66].forEach((w, i) => this.tone(210 + (i % 2) * 70, 0.09, 'square', 0.05, w)); },
   setEngine(on, speed) {
     if (!this.engine) return;
     const t = this.ctx.currentTime;
@@ -143,6 +148,7 @@ const game = {
   task: null,
   passenger: null,
   modal: null,
+  modalShop: null, // { name, markup, x, z } — set while the mechanic modal is open
   creatorOpen: false,
   helpOpen: false,
   loginOpen: false,
@@ -343,7 +349,7 @@ function applyState() {
   game.citizens = s.citizens.map((d) => new CitizenAgent(d));
   if (s.player.inVehicle) {
     const v = game.vehicles.find((x) => x.data.id === s.player.inVehicle);
-    if (v) enterVehicle(v, true);
+    if (v && v.cond.hp > 0) enterVehicle(v, true);
   }
   if (s.activeJob) newTask();
   updateHUD(true);
@@ -552,7 +558,7 @@ function openModal(render) {
   sfx.click();
 }
 function renderModal() { if (game.modal) $('modal-body').innerHTML = game.modal(); }
-function closeModal() { game.modal = null; modalEl.classList.add('hidden'); }
+function closeModal() { game.modal = null; game.modalShop = null; modalEl.classList.add('hidden'); }
 $('modal-close').addEventListener('click', closeModal);
 modalEl.addEventListener('pointerdown', (e) => { if (e.target === modalEl) closeModal(); });
 $('modal-body').addEventListener('click', (e) => {
@@ -647,6 +653,7 @@ function lotModal(bizId) {
         ${working
           ? '<button data-action="clockout">⏹ End shift</button>'
           : `<button class="primary" data-action="clockin" data-occ="${def.occupation}">🛠 Work a shift as ${occ.title}</button>`}
+        ${bizId === 'garage' ? '<button class="primary" data-action="serviceBay">🔧 Service bay (house rates)</button>' : ''}
       </div>`;
   };
 }
@@ -675,6 +682,93 @@ function hireModal(citizenId) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Refuelling & mechanic (feature 4 — UPGRADE_PLAN.md §4)
+// ---------------------------------------------------------------------------
+function startRefuel(st) {
+  const p = game.player;
+  let best = null; let bd = 9 * 9;
+  for (const x of game.vehicles) {
+    const d = dist2(x, p);
+    if (d < bd) { bd = d; best = x; }
+  }
+  if (!best) { toast('Bring a car within 9 m of the pumps to refuel it.', ''); return; }
+  if (best.cond.hp <= 0) { toast(`Your ${best.model.name} is wrecked — it needs the mechanic before a top-up.`, 'bad'); return; }
+  if (best.cond.fuel >= 99.5) { toast('Tank is already full.', ''); return; }
+  openModal(refuelModal(best, st));
+}
+
+function refuelModal(v, st) {
+  return () => {
+    const s = game.state;
+    const cost = VCond.refuelCost(v.cond, v.data.model);
+    return `
+      <h2>⛽ ${st.name}</h2>
+      <p class="sub">${v.model.name} · parked at the pumps</p>
+      <div class="kv">
+        <div><b>${Math.ceil(v.cond.fuel)}%</b><span>Fuel in the tank</span></div>
+        <div><b>${money(cost)}</b><span>Cost to fill</span></div>
+      </div>
+      ${cost <= 0 ? '<p class="good-text">Full tank.</p>' : ''}
+      <div class="actions">
+        ${cost > 0 ? `<button class="primary" data-action="refuel" data-veh="${v.data.id}" ${s.cash < cost ? 'disabled' : ''}>Fill up · ${money(cost)}</button>` : ''}
+        <button data-action="close">Later</button>
+      </div>
+      ${cost > 0 && s.cash < cost ? `<p class="bad-text">You need ${money(cost - s.cash)} more. A quick shift fixes that.</p>` : ''}`;
+  };
+}
+
+function towSpotNear(x, z) {
+  const cands = [[0, 8], [7, 10], [-7, 10], [0, 14], [7, 14], [-7, 14]];
+  for (const [dx, dz] of cands) {
+    const c = { x: x + dx, z: z + dz, yaw: Math.PI / 2 };
+    const clear = !game.vehicles.some((v) => dist2(v, c) < 4.5 * 4.5);
+    const r = resolveCircle(c.x, c.z, 1.2, city.colliderCache);
+    if (clear && !r.hit) return c;
+  }
+  return { x: x + 0, z: z + 8, yaw: Math.PI / 2 };
+}
+
+function openMechanicAt(shop) {
+  game.modalShop = shop;
+  openModal(mechanicModal(shop));
+}
+
+function mechanicModal(shop) {
+  return () => {
+    const s = game.state;
+    const rows = s.vehicles.map((d) => {
+      const v = game.vehicles.find((x) => x.data.id === d.id);
+      const cond = v ? v.cond : d.cond;
+      const m = VEHICLE_MODELS[d.model];
+      const wrecked = d.wrecked || cond.hp <= 0;
+      const needs = !wrecked && (cond.hp < 100 || cond.tires < 100 || cond.engine < 100);
+      const opts = VCond.repairOptions(cond, shop.markup);
+      const bar = (val) => `<div class="condbar"><i class="${val < 25 ? 'c-bad' : val < 50 ? 'c-warn' : 'c-ok'}" style="width:${Math.max(0, Math.min(100, val))}%"></i></div>`;
+      const status = wrecked ? '<span class="pill bad">WRECKED</span>' : needs ? '<span class="pill warn">Needs service</span>' : '<span class="pill good">Healthy</span>';
+      return `
+        <div class="vehcard">
+          <div class="vehcard-head"><b>🚗 ${m.name}</b>${status}</div>
+          <div class="condgrid">
+            <span>Body</span>${bar(cond.hp)}
+            <span>⛽ Fuel</span><span class="muted">${Math.ceil(cond.fuel)}% — top up at a station</span>
+            <span>Tyres</span>${bar(cond.tires)}
+            <span>Engine</span>${bar(cond.engine)}
+          </div>
+          <div class="actions">
+            ${wrecked ? `<button class="primary" data-action="tow" data-veh="${d.id}" ${s.cash < TOW_PRICE ? 'disabled' : ''}>Tow here · ${money(TOW_PRICE)}</button>` : ''}
+            ${opts.total > 0 ? `<button class="primary" data-action="repair" data-veh="${d.id}" ${s.cash < opts.total ? 'disabled' : ''}>Repair all · ${money(opts.total)}</button>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+    return `
+      <h2>🔧 ${shop.name} — Mechanic</h2>
+      <p class="sub">${shop.markup > 1 ? 'City rates — 20% markup.' : 'House rates — no markup.'}</p>
+      ${rows || '<p class="muted">You don\'t own any vehicles yet.</p>'}
+      <div class="actions"><button data-action="close">Close</button></div>`;
+  };
+}
+
 const dealerUI = { colors: {} };
 function dealerModal() {
   return () => {
@@ -700,8 +794,11 @@ function dealerModal() {
     return `
       <h2>Metro Motors</h2>
       <p class="sub">Your garage: ${owned || 'empty'}</p>
+      <div class="actions">
+        <button class="primary" data-action="mechDealer">🔧 Mechanic (city rates)</button>
+      </div>
       ${cards}
-      <p class="muted">Tip: taxis earn +30% fares as a Metro Cab Driver. Press <kbd>V</kbd> anywhere to have the valet bring your last-driven car.</p>`;
+      <p class="muted">Tip: taxis earn +30% fares as a Metro Cab Driver. Press <kbd>V</kbd> anywhere to have the valet bring your last-driven car. Fuel: Lagoon / Harbor / Metro Fuels, marked F on the minimap.</p>`;
   };
 }
 
@@ -756,6 +853,56 @@ const modalActions = {
     const v = new Vehicle(scene, res.vehicle);
     v.syncMesh(city.groundY(v.x, v.z));
     game.vehicles.push(v);
+    saveGame(true);
+  },
+  refuel: ({ veh }) => {
+    const s = game.state;
+    const v = game.vehicles.find((x) => x.data.id === veh);
+    if (!v) return;
+    const cost = VCond.refuelCost(v.cond, v.data.model);
+    if (cost <= 0) { result({ ok: false, msg: 'Tank is already full.' }); return; }
+    if (s.cash < cost) { result({ ok: false, msg: `You need ${money(cost - s.cash)} more.` }); return; }
+    s.cash -= cost;
+    v.cond.fuel = 100;
+    v.stallNotified = false;
+    sfx.pump();
+    result({ ok: true, msg: `⛽ ${v.model.name} refuelled (${money(cost)})` });
+    saveGame(true);
+  },
+  mechDealer: () => {
+    openMechanicAt({ name: 'Metro Motors', markup: MOTORS_REPAIR_MARKUP, ...DEALERSHIP.interact });
+  },
+  serviceBay: () => {
+    openMechanicAt({ name: 'Apex Auto Garage', markup: 1, ...city.lots.garage.interact });
+  },
+  repair: ({ veh }) => {
+    const s = game.state;
+    const shop = game.modalShop;
+    const v = game.vehicles.find((x) => x.data.id === veh);
+    if (!shop || !v) return;
+    const opts = VCond.repairOptions(v.cond, shop.markup);
+    if (opts.total <= 0) { result({ ok: false, msg: 'Nothing to repair.' }); return; }
+    if (s.cash < opts.total) { result({ ok: false, msg: `You need ${money(opts.total - s.cash)} more.` }); return; }
+    s.cash -= opts.total;
+    VCond.applyRepairs(v.cond, shop.markup);
+    v.data.wrecked = false;
+    v.smoke.visible = false;
+    v.parts.paint.color.set(v.data.color);
+    sfx.wrench();
+    result({ ok: true, msg: `🔧 ${v.model.name} repaired (${money(opts.total)})` });
+    saveGame(true);
+  },
+  tow: ({ veh }) => {
+    const s = game.state;
+    const shop = game.modalShop;
+    const v = game.vehicles.find((x) => x.data.id === veh);
+    if (!shop || !v) return;
+    if (s.cash < TOW_PRICE) { result({ ok: false, msg: `You need ${money(TOW_PRICE - s.cash)} more.` }); return; }
+    s.cash -= TOW_PRICE;
+    const spot = towSpotNear(shop.x, shop.z);
+    v.teleport(spot.x, spot.z, spot.yaw);
+    sfx.tone(110, 0.5, 'sawtooth', 0.06);
+    result({ ok: true, msg: `🚛 ${v.model.name} towed to ${shop.name}.` });
     saveGame(true);
   },
 };
@@ -867,6 +1014,7 @@ for (const b of document.querySelectorAll('.side-buttons button')) b.addEventLis
 function nearestOwnedVehicle(maxDist) {
   let best = null; let bd = maxDist * maxDist;
   for (const v of game.vehicles) {
+    if (v.cond.hp <= 0) continue; // wrecks wait for the mechanic, not the driver
     const d = dist2(v, game.player);
     const reach = (maxDist + v.model.len * 0.35) ** 2;
     if (d < reach && d < bd + v.model.len) { bd = d; best = v; }
@@ -925,11 +1073,24 @@ function exitVehicle() {
   cam.yaw = v.yaw;
 }
 
+function wreckVehicle(v) {
+  v.data.wrecked = true;
+  v.speed = 0; v.vx = 0; v.vz = 0;
+  v.smoke.visible = true;
+  v.parts.paint.color.multiplyScalar(0.55);
+  sfx.setEngine(false, 0);
+  sfx.crash(14);
+  if (game.player.vehicle === v) exitVehicle();
+  toast(`💥 Your ${v.model.name} is wrecked! Metro Motors${game.state.businesses.garage ? ' or your Apex Auto Garage' : ''} can tow it in (${money(TOW_PRICE)}) and repair it.`, 'bad');
+  saveGame(true);
+}
+
 function toggleVehicle() {
   if (game.creatorOpen) return;
   if (game.player.vehicle) { exitVehicle(); return; }
   const v = nearestOwnedVehicle(3.2);
   if (v) enterVehicle(v);
+  else if (game.vehicles.some((x) => x.cond.hp <= 0 && dist2(x, game.player) < 4.2 * 4.2)) toast('That car is wrecked — a mechanic needs to tow and repair it first.', 'bad');
   else if (game.state.vehicles.length) toast('No car nearby. Press V to call the valet.', '');
   else toast('You don\'t own a car. Visit Metro Motors!', 'bad');
 }
@@ -960,7 +1121,9 @@ function curbSpotNear(x, z) {
 function valet() {
   if (game.player.vehicle) { toast('You are already driving.', ''); return; }
   const s = game.state;
-  const v = game.vehicles.find((x) => x.data.id === s.lastVehicleId) || game.vehicles[0];
+  const v = game.vehicles.find((x) => x.data.id === s.lastVehicleId && x.cond.hp > 0)
+    || game.vehicles.find((x) => x.cond.hp > 0)
+    || game.vehicles[0];
   if (!v) { toast('You don\'t own a car yet. Visit Metro Motors!', 'bad'); return; }
   if (game.valetCooldown > 0) { toast(`Valet is on the way back… ${Math.ceil(game.valetCooldown)}s`, ''); return; }
   const spot = curbSpotNear(game.player.x, game.player.z);
@@ -1191,7 +1354,10 @@ function findInteraction() {
       const active = game.state.activeJob === st.occupation;
       consider(st.interact.x, st.interact.z, 2.6, `${st.name}: ${active ? 'on shift' : 'clock in'}`, () => openModal(stationModal(st.id)));
     }
-    consider(DEALERSHIP.interact.x, DEALERSHIP.interact.z, 2.6, 'Metro Motors: browse cars', () => openModal(dealerModal()));
+    consider(DEALERSHIP.interact.x, DEALERSHIP.interact.z, 2.6, 'Metro Motors: browse cars & mechanic', () => openModal(dealerModal()));
+    for (const st of Object.values(FUEL_STATIONS)) {
+      consider(st.interact.x, st.interact.z, 3.4, `⛽ Refuel at ${st.name}`, () => startRefuel(st));
+    }
     for (const [id, lot] of Object.entries(city.lots)) {
       const def = BUSINESSES[id]; const biz = game.state.businesses[id];
       consider(lot.interact.x, lot.interact.z, 2.8, biz ? `Manage ${def.name}` : `Vacant lot: ${def.name} (${money(def.cost)})`, () => openModal(lotModal(id)));
@@ -1252,12 +1418,28 @@ function updatePlayer(dt) {
     const others = carCirclesAll(v);
     const impact = v.update(dt, input, city.colliderCache, others);
     if (impact > 4) { sfx.crash(impact); cam.shake = Math.min(0.6, impact * 0.04); }
+    // collision damage (≥30 km/h threshold — src/vehicleCond.js, UPGRADE_PLAN.md §4)
+    const dmg = VCond.applyImpact(v.cond, impact);
+    if (dmg > 0 && v.cond.hp <= 0) { wreckVehicle(v); return; }
+    else if (dmg >= 12) cam.shake = Math.min(0.8, cam.shake + 0.15);
+    // fuel warnings
+    if (v.cond.fuel <= 0 && !v.stallNotified) {
+      v.stallNotified = true;
+      sfx.setEngine(false, 0); sfx.stall(); sfx.horn();
+      toast('⛽ Out of fuel — the engine stalls. Find a fuel station (F on the minimap)!', 'bad');
+    } else if (v.cond.fuel > 40) v.stallNotified = false;
+    if (v.cond.fuel > 0 && v.cond.fuel < 25 && !v.lowFuelNotified) {
+      v.lowFuelNotified = true;
+      toast('⛽ Low fuel — Lagoon / Harbor / Metro Fuels (F on the minimap)', '');
+    } else if (v.cond.fuel > 40) v.lowFuelNotified = false;
     v.syncMesh(city.groundY(v.x, v.z), dt);
     p.x = v.x; p.z = v.z; p.yaw = v.yaw;
     p.char.animate(dt, 0);
     p.char.armL.rotation.z = p.char.armR.rotation.z = -v.steer * 0.4;
-    sfx.setEngine(true, v.speed);
+    sfx.setEngine(v.cond.fuel > 0 && v.cond.hp > 0, v.speed);
     $('veh-speed').textContent = Math.round(Math.abs(v.speed) * 3.6);
+    $('veh-fuel').textContent = `⛽ ${Math.ceil(v.cond.fuel)}%`;
+    $('veh-fuel').classList.toggle('low', v.cond.fuel < 25);
     return;
   }
   // on foot
@@ -1648,6 +1830,7 @@ function drawMinimap() {
   }
   for (const st of Object.values(STATIONS)) square(st.x, st.z, 13, st.color, st.id[0].toUpperCase());
   square(DEALERSHIP.x, DEALERSHIP.z, 13, DEALERSHIP.color, 'M');
+  for (const st of Object.values(FUEL_STATIONS)) square(st.x, st.z, 11, st.color, 'F');
   for (const t of game.traffic) dot(t.x, t.z, 1.6, '#e5e7eb');
   for (const c of game.citizens) dot(c.x, c.z, 1.6, c.data.employer ? '#4ade80' : '#fde047');
   for (const v of game.vehicles) if (v !== game.player.vehicle) dot(v.x, v.z, 2.6, '#38bdf8');
@@ -1685,10 +1868,10 @@ function frame() {
   updatePlayer(dt);
   if (net) { net.update(dt, netLocalState()); updateRemotes(dt); }
 
-  // owned parked vehicles coast to a stop & stay out of walls
+  // owned parked vehicles coast to a stop & stay out of walls (wrecks animate smoke)
   for (const v of game.vehicles) {
     if (v === game.player.vehicle) continue;
-    if (Math.abs(v.speed) > 0.05 || Math.hypot(v.vx, v.vz) > 0.05) {
+    if (v.cond.hp <= 0 || Math.abs(v.speed) > 0.05 || Math.hypot(v.vx, v.vz) > 0.05) {
       v.update(dt, { throttle: 0, steer: 0, handbrake: true }, city.colliderCache, []);
       v.syncMesh(city.groundY(v.x, v.z), dt);
     }
