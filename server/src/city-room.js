@@ -45,6 +45,7 @@ const blankSession = () => ({
   yaw: 0,
   mv: 0,
   veh: null,
+  emote: null,
   joinedAt: 0,
   lastSeen: 0,
   lastSave: 0,
@@ -146,6 +147,7 @@ export class CityRoom {
         s.yaw = clampNum(msg.yaw, -10, 10, s.yaw);
         s.mv = msg.mv ? 1 : 0;
         s.veh = typeof msg.veh === 'string' ? msg.veh.slice(0, 16) : null;
+        s.emote = typeof msg.emote === 'string' ? msg.emote.slice(0, 16) : null;
         ws.serializeAttachment(s);
         this._maybeBroadcast(now);
         if (now - s.lastSave > STATE_SAVE_MS) {
@@ -425,7 +427,9 @@ export class CityRoom {
       if (!s.id || s.id === me.id) continue;
       if (now - s.lastSeen > ABSENT_AFTER_MS) continue;          // ghost: gone quiet
       if (Math.hypot(s.x - me.x, s.z - me.z) > INTEREST_RADIUS) continue; // culled
-      p.push([s.id, round(s.x), round(s.z), round(s.yaw, 2), s.mv, s.veh]);
+      const row = [s.id, round(s.x), round(s.z), round(s.yaw, 2), s.mv, s.veh];
+      if (s.emote) row.push(s.emote);
+      p.push(row);
     }
     this._send(ws, { t: 'snap', now, p });
   }

@@ -6,14 +6,18 @@ import {
   ROAD_HALF, WORLD_LIMIT, BLOCK_CENTERS, BLOCK_HALF, DEFAULT_APPEARANCE,
   FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
   ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
+  EMOTES,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
 import * as Time from './src/time.js';
 import * as VCard from './src/vehCard.js';
+import * as Heat from './src/heat.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
-import { Vehicle, TrafficCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
+import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
+import { setupRealisticAtmosphere } from './src/textures.js';
+import { StreetFX } from './src/fx.js';
 import { NetClient, discoverServerUrl } from './src/net.js';
 
 const $ = (id) => document.getElementById(id);
@@ -39,7 +43,9 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 const SKY = new THREE.Color(0x9fd3f5);
 scene.background = SKY;
-scene.fog = new THREE.Fog(SKY, 150, 430);
+scene.fog = new THREE.Fog(SKY, 130, 380);
+const atmosphere = setupRealisticAtmosphere(renderer, scene);
+const streetFX = new StreetFX(scene);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
 const hemi = new THREE.HemisphereLight(0xe0f2fe, 0x4d6b35, 1.9);
@@ -69,7 +75,7 @@ window.addEventListener('resize', () => {
 // Audio (tiny WebAudio synth, no assets)
 // ===========================================================================
 const sfx = {
-  ctx: null, muted: false, engine: null,
+  ctx: null, muted: false, engine: null, skid: null, siren: null,
   ensure() {
     if (this.ctx) return;
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -85,6 +91,30 @@ const sfx = {
     osc.connect(filter).connect(gain).connect(this.ctx.destination);
     osc.start();
     this.engine = { osc, gain };
+
+    // Tyre screech continuous synth
+    const sOsc = this.ctx.createOscillator();
+    const sFilt = this.ctx.createBiquadFilter();
+    const sGain = this.ctx.createGain();
+    sOsc.type = 'sawtooth';
+    sOsc.frequency.value = 780;
+    sFilt.type = 'bandpass';
+    sFilt.frequency.value = 1150;
+    sFilt.Q.value = 4.5;
+    sGain.gain.value = 0;
+    sOsc.connect(sFilt).connect(sGain).connect(this.ctx.destination);
+    sOsc.start();
+    this.skid = { osc: sOsc, gain: sGain };
+
+    // Police wail siren continuous synth
+    const pOsc = this.ctx.createOscillator();
+    const pGain = this.ctx.createGain();
+    pOsc.type = 'triangle';
+    pOsc.frequency.value = 680;
+    pGain.gain.value = 0;
+    pOsc.connect(pGain).connect(this.ctx.destination);
+    pOsc.start();
+    this.siren = { osc: pOsc, gain: pGain };
   },
   tone(freq, dur = 0.15, type = 'sine', vol = 0.12, when = 0) {
     if (!this.ctx || this.muted) return;
@@ -99,7 +129,28 @@ const sfx = {
   },
   cash() { this.tone(880, 0.12, 'triangle', 0.12); this.tone(1320, 0.2, 'triangle', 0.1, 0.09); },
   horn() { this.tone(392, 0.35, 'square', 0.06); this.tone(494, 0.35, 'square', 0.05); },
-  crash(v) { this.tone(70 + Math.random() * 40, 0.25, 'sawtooth', Math.min(0.25, v * 0.02)); },
+  crash(v) {
+    this.tone(70 + Math.random() * 40, 0.25, 'sawtooth', Math.min(0.25, v * 0.02));
+    if (v > 7) this.tone(180 + Math.random() * 90, 0.14, 'square', Math.min(0.12, v * 0.01));
+  },
+  explosion() {
+    this.tone(48, 0.85, 'sawtooth', 0.28);
+    this.tone(82, 0.55, 'triangle', 0.22, 0.04);
+    this.tone(145, 0.32, 'square', 0.14, 0.08);
+  },
+  jump() {
+    if (!this.ctx || this.muted) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(210, t);
+    o.frequency.exponentialRampToValueAtTime(380, t + 0.12);
+    g.gain.setValueAtTime(0.06, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+    o.connect(g).connect(this.ctx.destination);
+    o.start(t); o.stop(t + 0.15);
+  },
   click() { this.tone(660, 0.05, 'square', 0.04); },
   error() { this.tone(180, 0.18, 'square', 0.06); },
   rankUp() { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.1, i * 0.09)); },
@@ -112,6 +163,22 @@ const sfx = {
     const t = this.ctx.currentTime;
     this.engine.gain.gain.setTargetAtTime(on && !this.muted ? 0.035 : 0, t, 0.1);
     this.engine.osc.frequency.setTargetAtTime(45 + Math.abs(speed) * 5.5, t, 0.08);
+  },
+  setSkid(on, factor = 0.5) {
+    if (!this.skid) return;
+    const t = this.ctx.currentTime;
+    this.skid.gain.gain.setTargetAtTime(on && !this.muted ? 0.024 * factor : 0, t, 0.06);
+    this.skid.osc.frequency.setTargetAtTime(690 + factor * 260 + Math.sin(t * 28) * 35, t, 0.05);
+  },
+  setSiren(on, elapsed = 0, proximity = 1) {
+    if (!this.siren) return;
+    const t = this.ctx.currentTime;
+    const vol = on && !this.muted ? 0.042 * Math.max(0.2, Math.min(1, proximity)) : 0;
+    this.siren.gain.gain.setTargetAtTime(vol, t, 0.08);
+    if (on) {
+      const wail = 640 + (Math.sin(elapsed * 4.6) * 0.5 + 0.5) * 360;
+      this.siren.osc.frequency.setTargetAtTime(wail, t, 0.05);
+    }
   },
 };
 
@@ -158,6 +225,10 @@ const game = {
   vehicles: [],
   citizens: [],
   traffic: [],
+  police: [],
+  heat: Heat.createHeatState(),
+  fx: streetFX,
+  atmosphere,
   task: null,
   passenger: null,
   modal: null,
@@ -168,6 +239,7 @@ const game = {
   elapsed: 0,
   time: null,      // window.__mv.time = { now(), set(inGameMs), fastForwardTo(inGameMs), phase(), label() }
   telemetry: null, // window.__mv.telemetry = () => snapshot of all owned vehicles' cond
+  emotes: EMOTES,
   valetCooldown: 0,
   autosaveTimer: 60,
   prompt: null,
@@ -206,12 +278,13 @@ function updateDayNight(inGameMs, force = false) {
   sun.castShadow = L.shadows;
   city.setDayNight(L.night, L.lampFactor, game.player.x, game.player.z);
   setVehicleNightFactor(L.night);
+  atmosphere.update(L, game.elapsed, game.player.x, game.player.z);
   const nightBeams = L.night > 0.08;
   for (const p of displayCarParts) p.headBeams.visible = nightBeams;
   const pv = game.player.vehicle;
   const headOn = !!(pv && pv.cond.hp > 0 && pv.cond.fuel > 0 && nightBeams);
   playerHeadlight.visible = headOn;
-  playerHeadlight.intensity = headOn ? 4.2 * L.night : 0;
+  playerHeadlight.intensity = headOn ? 4.8 * L.night : 0;
 }
 
 function ensureWarnState(v) {
@@ -383,6 +456,7 @@ class CitizenAgent {
           this.char.setPose('dive', 1.1);
           this.diveX = (dx / (d || 1)) * 5; this.diveZ = (dz / (d || 1)) * 5;
           this.idle = 1.2;
+          if (c.isPlayer && c.speed > 7) triggerOffense('pedScare');
           break;
         }
       }
@@ -473,6 +547,9 @@ function applyState() {
     return veh;
   });
   for (const v of game.vehicles) v.syncMesh(city.groundY(v.x, v.z));
+  // police & street heat reset on load/new game
+  clearPolice();
+  game.heat = Heat.createHeatState();
   // citizens
   for (const c of game.citizens) c.dispose();
   game.citizens = s.citizens.map((d) => new CitizenAgent(d));
@@ -540,8 +617,32 @@ function resetGame() {
 // ===========================================================================
 // Input
 // ===========================================================================
+const EMOTE_BY_ID = Object.fromEntries(EMOTES.map((e) => [e.id, e]));
+
+function triggerJump() {
+  if (game.player.vehicle || game.creatorOpen || anyOverlay()) return;
+  if (game.player.char.triggerJump()) sfx.jump();
+}
+
+function triggerEmote(id) {
+  if (game.player.vehicle) { toast('Step out of the car to perform emotes.', 'bad'); return false; }
+  if (game.creatorOpen) return false;
+  const def = EMOTE_BY_ID[id];
+  if (!def) return false;
+  const active = game.player.char.emote === id && def.loop;
+  if (active) {
+    game.player.char.clearEmote();
+    sfx.click();
+    return true;
+  }
+  game.player.char.setEmote(id);
+  sfx.click();
+  toast(`${def.icon} ${def.name}`, '');
+  return true;
+}
+
 const keys = new Set();
-const touchInput = { x: 0, y: 0, sprint: false };
+const touchInput = { x: 0, y: 0, sprint: false, handbrake: false };
 const isTyping = () => document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
 const anyOverlay = () => !!game.modal || game.helpOpen || game.loginOpen;
 
@@ -555,10 +656,26 @@ window.addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.repeat) return;
   if (game.helpOpen) { if (e.code === 'Enter' || e.code === 'Space') hideHelp(); return; }
-  if (game.modal) return;
+  if (game.modal) {
+    if (e.code === 'KeyB') closeModal();
+    return;
+  }
+  if (e.code.startsWith('Digit')) {
+    const idx = Number(e.code.slice(5)) - 1;
+    if (idx >= 0 && idx < EMOTES.length && !game.player.vehicle) {
+      triggerEmote(EMOTES[idx].id);
+      return;
+    }
+  }
   switch (e.code) {
     case 'KeyE': interact(); break;
-    case 'Space': if (!game.player.vehicle) interact(); break;
+    case 'Space':
+      if (!game.player.vehicle) {
+        if (game.prompt?.e?.action) interact();
+        else triggerJump();
+      }
+      break;
+    case 'KeyB': openEmotesModal(); break;
     case 'KeyF': toggleVehicle(); break;
     case 'KeyV': valet(); break;
     case 'KeyT': openGarageModal(); break;
@@ -624,13 +741,21 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
     const key = b.dataset.key;
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault(); sfx.ensure();
+      if (b.id === 't-emote') { openEmotesModal(); return; }
       if (anyOverlay()) return;
       if (key === 'interact') interact();
       if (key === 'vehicle') toggleVehicle();
       if (key === 'horn') honk();
       if (key === 'sprint') touchInput.sprint = true;
+      if (key === 'jump') {
+        if (game.player.vehicle) touchInput.handbrake = true;
+        else triggerJump();
+      }
     });
-    const up = () => { if (key === 'sprint') touchInput.sprint = false; };
+    const up = () => {
+      if (key === 'sprint') touchInput.sprint = false;
+      if (key === 'jump') touchInput.handbrake = false;
+    };
     b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
   }
 }
@@ -670,6 +795,12 @@ function updateHUD(force = false) {
   $('hud-startups').textContent = `${Eco.builtCount(s)} / ${Object.keys(BUSINESSES).length}`;
   $('hud-employment').textContent = `${Eco.employedCount(s)} / ${TOTAL_CITIZENS} citizens hired`;
   $('hud-vehicles').textContent = `${s.vehicles.length} vehicle${s.vehicles.length === 1 ? '' : 's'}`;
+  const heatRow = $('hud-heat-row');
+  if (heatRow) {
+    const stars = game.heat?.stars || 0;
+    heatRow.classList.toggle('hidden', stars <= 0);
+    if (stars > 0) $('hud-heat').textContent = `🚨 ${Heat.starLabel(stars)}`;
+  }
   if (force || clockHudTimer <= 0) {
     clockHudTimer = 1.0; // tick #hud-day at 1 Hz (UPGRADE_PLAN.md §11A B)
     $('hud-day').textContent = Time.clockLabel(getClock());
@@ -933,6 +1064,32 @@ function garageModal(focusVehId = null) {
   };
 }
 
+function openEmotesModal() {
+  if (game.creatorOpen) closeCreator();
+  openModal(emotesModal);
+}
+
+function emotesModal() {
+  const inCar = !!game.player.vehicle;
+  const active = game.player.char?.emote;
+  const buttons = EMOTES.map((def) => {
+    const isAct = active === def.id;
+    return `<button class="emote-btn ${isAct ? 'active' : ''}" data-action="emote" data-emote="${def.id}" ${inCar ? 'disabled' : ''}>
+      <span>${def.icon} ${def.name}</span>
+      <kbd>${def.key}</kbd>
+    </button>`;
+  }).join('');
+  return `
+    <h2>✋ Character Actions &amp; Emotes</h2>
+    <p class="sub">${inCar ? 'Step out of your car (<kbd>F</kbd>) to jump, wave, or dance.' : 'Press <kbd>1</kbd>–<kbd>8</kbd> anytime on foot, or <kbd>Space</kbd> to jump. Moving cancels looping poses.'}</p>
+    <div class="emote-grid">${buttons}</div>
+    <div class="actions">
+      <button class="primary" data-action="jumpNow" ${inCar ? 'disabled' : ''}>⤒ Jump (<kbd>Space</kbd>)</button>
+      ${active ? '<button data-action="stopEmote">⏹ Stop emote</button>' : ''}
+      <button data-action="close">Close</button>
+    </div>`;
+}
+
 const dealerUI = { colors: {} };
 function dealerModal() {
   return () => {
@@ -968,6 +1125,17 @@ function dealerModal() {
 
 const modalActions = {
   close: () => closeModal(),
+  emote: ({ emote }) => {
+    if (triggerEmote(emote)) closeModal();
+  },
+  stopEmote: () => {
+    game.player.char?.clearEmote();
+    closeModal();
+  },
+  jumpNow: () => {
+    closeModal();
+    triggerJump();
+  },
   clockin: ({ occ }) => {
     const res = Eco.clockIn(game.state, occ);
     if (!result(res)) return;
@@ -1054,9 +1222,8 @@ const modalActions = {
     VCond.applyRepairs(v.cond, shop.markup);
     v.data.wrecked = false;
     v.data.lastServicedInGameMs = Math.round(getClock());
-    v.smoke.visible = false;
+    v.setScorched(false);
     v.exhaustSmoke.visible = false;
-    v.parts.paint.color.set(v.data.color);
     VCard.rearmWarnings(ensureWarnState(v), v.cond);
     updateVehicleTelemetry(0, true);
     sfx.wrench();
@@ -1089,9 +1256,8 @@ const modalActions = {
     VCond.applyRoadsideRepairs(v.cond, hasGarage);
     v.data.wrecked = false;
     v.data.lastServicedInGameMs = Math.round(getClock());
-    v.smoke.visible = false;
+    v.setScorched(false);
     v.exhaustSmoke.visible = false;
-    v.parts.paint.color.set(v.data.color);
     VCard.rearmWarnings(ensureWarnState(v), v.cond);
     updateVehicleTelemetry(0, true);
     sfx.wrench();
@@ -1213,6 +1379,7 @@ function closeCreator() {
 }
 $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
 $('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
+$('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : openEmotesModal()));
 
 // Help
 function showHelp() { game.helpOpen = true; $('help').classList.remove('hidden'); }
@@ -1297,6 +1464,7 @@ function detachFromVehicle() {
   $('vicon-fuel')?.classList.remove('blink');
   fuelTickTimer = 0;
   sfx.setEngine(false, 0);
+  sfx.setSkid(false, 0);
 }
 
 function exitVehicle() {
@@ -1324,12 +1492,15 @@ function exitVehicle() {
 function wreckVehicle(v) {
   v.data.wrecked = true;
   v.speed = 0; v.vx = 0; v.vz = 0;
-  v.smoke.visible = true;
-  v.parts.paint.color.multiplyScalar(0.55);
+  v.setScorched(true);
+  streetFX.spawnExplosion(v.x, v.y, v.z);
   sfx.setEngine(false, 0);
-  sfx.crash(14);
+  sfx.setSkid(false, 0);
+  sfx.explosion();
+  cam.shake = Math.max(cam.shake, 0.92);
   if (game.player.vehicle === v) exitVehicle();
-  toast(`💥 Your ${v.model.name} is wrecked! Press T (or E nearby) to call a tow (${money(TOW_PRICE)}) or mobile mechanic.`, 'danger');
+  triggerOffense('explosion');
+  toast(`💥 Your ${v.model.name} exploded! Press T (or E nearby) to call a tow (${money(TOW_PRICE)}) or mobile mechanic.`, 'danger');
   saveGame(true);
 }
 
@@ -1659,10 +1830,91 @@ function updatePrompt() {
 // ===========================================================================
 // Player update (on foot / driving)
 // ===========================================================================
+let hitHeatCooldown = 0;
+
+function clearPolice() {
+  for (const cop of game.police) cop.dispose();
+  game.police = [];
+  sfx.setSiren(false);
+}
+
+function triggerOffense(kind) {
+  if (kind !== 'explosion' && hitHeatCooldown > 0) return;
+  if (kind !== 'explosion') hitHeatCooldown = 1.6;
+  const res = Heat.addHeatOffense(game.heat, kind);
+  if (res.escalated) {
+    toast(`🚨 Wanted ${Heat.starLabel(res.stars)} — Metro Police dispatched! Outrun cruisers to clear heat.`, 'danger');
+    updateHUD(true);
+  }
+}
+
+function updatePolice(dt) {
+  hitHeatCooldown = Math.max(0, hitHeatCooldown - dt);
+  const desired = Heat.desiredCruisers(game.heat.stars);
+  const target = game.player.vehicle || game.player;
+
+  while (game.police.length < desired) {
+    const cop = new PoliceCar(scene, game.police.length === 0);
+    cop.spawnNear(target.x, target.z);
+    game.police.push(cop);
+  }
+  while (game.police.length > desired) {
+    const cop = game.police.pop();
+    cop.dispose();
+  }
+
+  let closestDist = Infinity;
+  for (const cop of game.police) {
+    const gy = city.groundY(cop.x, cop.z);
+    cop.update(dt, target, game.heat.stars, city.colliderCache, gy);
+    const d = Math.hypot(cop.x - target.x, cop.z - target.z);
+    if (d < closestDist) closestDist = d;
+  }
+
+  if (game.heat.score > 0 || game.heat.stars > 0) {
+    const prevStars = game.heat.stars;
+    const playerSpeed = game.player.vehicle
+      ? Math.abs(game.player.vehicle.speed)
+      : Math.hypot(game.player.vx, game.player.vz);
+    const step = Heat.stepHeat(game.heat, dt, {
+      policeInSight: closestDist < 54,
+      closestPoliceDist: closestDist,
+      playerSpeed,
+    });
+    if (step.busted) {
+      const fine = Heat.applyBustFine(game.state, step.bustedStars);
+      if (game.player.vehicle) {
+        game.player.vehicle.speed = 0;
+        game.player.vehicle.vx = 0;
+        game.player.vehicle.vz = 0;
+      }
+      clearPolice();
+      sfx.error();
+      toast(`🚓 Busted by Metro Police! Ticketed ${money(fine)} — street heat cleared.`, 'danger');
+      updateHUD(true);
+    } else if (step.evaded) {
+      clearPolice();
+      sfx.cash();
+      toast('🕵️ Outran Metro Police — street heat cleared!', 'good');
+      updateHUD(true);
+    } else if (game.heat.stars !== prevStars) {
+      updateHUD(true);
+    }
+  }
+
+  const sirenOn = game.police.length > 0 && closestDist < 95;
+  sfx.setSiren(sirenOn, game.elapsed, 1 - Math.min(0.85, closestDist / 95));
+}
+
 function carCirclesAll(excludeVehicle) {
   const out = [];
-  for (const v of game.vehicles) if (v !== excludeVehicle) for (const c of v.circles()) out.push({ ...c, speed: Math.abs(v.speed) });
-  for (const t of game.traffic) for (const c of t.circles()) out.push({ ...c, speed: t.speed });
+  for (const v of game.vehicles) {
+    if (v === excludeVehicle) continue;
+    const isPlayer = v === game.player.vehicle;
+    for (const c of v.circles()) out.push({ ...c, speed: Math.abs(v.speed), isPlayer, tag: 'car' });
+  }
+  for (const t of game.traffic) for (const c of t.circles()) out.push({ ...c, speed: t.speed, tag: 'car' });
+  for (const cop of game.police) for (const c of cop.circles()) out.push({ ...c, speed: cop.speed, tag: 'police' });
   return out;
 }
 
@@ -1678,10 +1930,26 @@ function updatePlayer(dt) {
   const { f, r } = axes();
   if (p.vehicle) {
     const v = p.vehicle;
-    const input = { throttle: f, steer: r, handbrake: k('Space') && !anyOverlay() };
+    const hb = (k('Space') || touchInput.handbrake) && !anyOverlay();
+    const input = { throttle: f, steer: r, handbrake: hb };
     const others = carCirclesAll(v);
     const impact = v.update(dt, input, city.colliderCache, others);
-    if (impact > 4) { sfx.crash(impact); cam.shake = Math.min(0.6, impact * 0.04); }
+    const gy = city.groundY(v.x, v.z);
+    streetFX.trackVehicleSkids(v, dt, gy);
+    sfx.setSkid(v.drifting && Math.abs(v.speed) > 4.5, Math.min(1, Math.abs(v.speed) / 22));
+    if (impact > 3.5) {
+      sfx.crash(impact);
+      cam.shake = Math.min(0.65, impact * 0.042);
+      streetFX.spawnSparks(
+        v.lastHitPoint.x,
+        gy + 0.55,
+        v.lastHitPoint.z,
+        Math.min(28, Math.round(impact * 1.9)),
+        Math.min(2.2, impact / 11),
+      );
+      if (v.lastHitKind === 'police' && impact > 5) triggerOffense('policeHit');
+      else if (v.lastHitKind === 'car' && impact > 10.5) triggerOffense('trafficHit');
+    }
     // collision damage (≥30 km/h threshold — src/vehicleCond.js, UPGRADE_PLAN.md §4)
     const dmg = VCond.applyImpact(v.cond, impact);
     if (dmg > 0 && v.cond.hp <= 0) { wreckVehicle(v); return; }
@@ -1692,7 +1960,7 @@ function updatePlayer(dt) {
       sfx.setEngine(false, 0); sfx.stall(); sfx.horn();
       toast('⛽ Out of fuel — engine stalled. Press E or T for Roadside Assist, or visit a fuel station!', 'danger');
     } else if (v.cond.fuel > 40) v.stallNotified = false;
-    v.syncMesh(city.groundY(v.x, v.z), dt);
+    v.syncMesh(gy, dt);
     p.x = v.x; p.z = v.z; p.yaw = v.yaw;
     p.char.animate(dt, 0);
     p.char.armL.rotation.z = p.char.armR.rotation.z = -v.steer * 0.4;
@@ -1701,6 +1969,7 @@ function updatePlayer(dt) {
     updateVehicleTelemetry(dt);
     return;
   }
+  sfx.setSkid(false, 0);
   // on foot
   const sprint = k('ShiftLeft', 'ShiftRight') || touchInput.sprint;
   const speed = sprint ? 7.2 : 3.8;
@@ -1711,6 +1980,7 @@ function updatePlayer(dt) {
   const len = Math.hypot(mx, mz);
   if (len > 1) { mx /= len; mz /= len; }
   if (game.creatorOpen) { mx = 0; mz = 0; }
+  if (len > 0.12 && p.char.emote) p.char.clearEmote();
   const k2 = Math.min(1, dt * 12);
   p.vx += (mx * speed - p.vx) * k2;
   p.vz += (mz * speed - p.vz) * k2;
@@ -1761,7 +2031,7 @@ function updateCamera(dt) {
     pitch = cam.pitch;
     camera.fov += ((62 + Math.abs(v.speed) * 0.35) - camera.fov) * Math.min(1, dt * 3);
   } else {
-    target.set(p.x, city.groundY(p.x, p.z) + 1.55, p.z);
+    target.set(p.x, city.groundY(p.x, p.z) + 1.55 + (p.char.jumpY || 0) * 0.4, p.z);
     camera.fov += (62 - camera.fov) * Math.min(1, dt * 3);
   }
   camera.updateProjectionMatrix();
@@ -1890,6 +2160,11 @@ function updateRemotes(dt) {
       r.char.group.visible = true;
       r.char.group.position.set(r.x, city.groundY(r.x, r.z), r.z);
       r.char.group.rotation.y = r.yaw;
+      if (peer.emote && EMOTE_BY_ID[peer.emote]) {
+        if (r.char.emote !== peer.emote) r.char.setEmote(peer.emote);
+      } else if (r.char.emote) {
+        r.char.clearEmote();
+      }
       r.char.animate(dt, peer.mv ? 4.2 : 0);
     }
   }
@@ -2066,6 +2341,7 @@ function netLocalState() {
     yaw: p.yaw,
     moving: v ? Math.abs(v.speed) > 0.4 : Math.hypot(p.vx, p.vz) > 0.3,
     vehicle: v ? v.data.model : null,
+    emote: !v && p.char?.emote ? p.char.emote : null,
   };
 }
 
@@ -2114,6 +2390,10 @@ function drawMinimap() {
   square(DEALERSHIP.x, DEALERSHIP.z, 13, DEALERSHIP.color, 'M');
   for (const st of Object.values(FUEL_STATIONS)) square(st.x, st.z, 11, st.color, 'F');
   for (const t of game.traffic) dot(t.x, t.z, 1.6, '#e5e7eb');
+  for (const cop of game.police) {
+    const copColor = Math.floor(game.elapsed * 7) % 2 === 0 ? '#ef4444' : '#3b82f6';
+    dot(cop.x, cop.z, 3.0, copColor);
+  }
   for (const c of game.citizens) dot(c.x, c.z, 1.6, c.data.employer ? '#4ade80' : '#fde047');
   for (const v of game.vehicles) if (v !== game.player.vehicle) dot(v.x, v.z, 2.6, '#38bdf8');
   if (game.task) {
@@ -2168,11 +2448,18 @@ function frame() {
   for (const c of game.citizens) obstacles.push({ x: c.x, z: c.z, kind: 'ped', r: 0.4 });
   if (game.passenger && game.passenger.state !== 'riding') obstacles.push({ x: game.passenger.x, z: game.passenger.z, kind: 'ped', r: 0.4 });
   for (const v of game.vehicles) if (v !== game.player.vehicle) for (const c of v.circles()) obstacles.push({ x: c.x, z: c.z, kind: 'car', r: c.r });
+  for (const cop of game.police) for (const c of cop.circles()) obstacles.push({ x: c.x, z: c.z, kind: 'car', r: c.r });
   for (const t of game.traffic) for (const c of t.circles()) obstacles.push({ x: c.x, z: c.z, kind: 'car', r: c.r, self: t });
   for (const t of game.traffic) {
     t.update(dt, obstacles);
     if (t.wantsHonk && dist2(t, game.player) < 900) sfx.horn();
   }
+
+  // police pursuit cruisers + wanted street heat
+  updatePolice(dt);
+
+  // street FX (skid marks, crash sparks, explosions, smoke)
+  streetFX.update(dt);
 
   // citizens
   const circles = carCirclesAll(null);

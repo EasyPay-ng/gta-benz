@@ -56,6 +56,20 @@ button.big { padding: 12px 22px; font-size: 1.05rem; }
 .xpbar { height: 5px; background: #1e293b; border-radius: 4px; overflow: hidden; margin: 2px 0 6px; }
 #hud-xp { height: 100%; width: 0; background: linear-gradient(90deg, #f59e0b, #fde047); transition: width .3s; }
 #hud-job { text-align: right; font-weight: 600; }
+.heat-stat {
+  margin-top: 4px; padding: 4px 8px; border-radius: 8px;
+  background: rgba(127, 29, 29, 0.35); border: 1px solid rgba(248, 113, 113, 0.55);
+  animation: sirenflash 0.9s ease-in-out infinite;
+}
+.heat-stat .label { color: #fecaca; font-weight: 700; }
+#hud-heat { color: #fde047; font-weight: 900; letter-spacing: 2px; font-size: 14px; }
+@keyframes sirenflash {
+  0%, 100% { border-color: rgba(239, 68, 68, 0.85); box-shadow: 0 0 10px rgba(239, 68, 68, 0.35); }
+  50% { border-color: rgba(59, 130, 246, 0.85); box-shadow: 0 0 10px rgba(59, 130, 246, 0.35); }
+}
+.emote-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
+.emote-btn { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; font-weight: 600; }
+.emote-btn.active { border-color: var(--accent); background: rgba(245, 158, 11, 0.2); }
 
 #task-banner {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%);

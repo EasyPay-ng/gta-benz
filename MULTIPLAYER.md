@@ -85,7 +85,7 @@ Client → server:
 | `login` | `{name, pin}` | `no_account` / `bad_pin` / `locked`; issues a session token |
 | `join` | `{token}` or `{guest:true, name}`, plus `app` | must be first; guests skip accounts entirely |
 | `logout` | `{}` | revokes the current token |
-| `pos` | `{x, z, yaw, mv, veh}` | ≤10/s, validated and clamped server-side |
+| `pos` | `{x, z, yaw, mv, veh, emote?}` | ≤10/s, validated and clamped server-side; optional `emote` id when on foot |
 | `look` | `{app}` | appearance change without reconnecting |
 | `chat` | `{m}` | ≤120 chars, broadcast to the room |
 | `ping` | `{ts}` | answered with `pong`, drives the RTT readout |
@@ -98,7 +98,7 @@ Server → client:
 | `welcome` | `{id, room, tick, peers[], you, restore, clock}` | full peer list, who you are, saved position, authoritative room clock |
 | `clock` | `{inGameMs, day, hhmm, speed, now}` | broadcast every 30 real s (+12 in-game min) while ≥1 player is online |
 | `join` / `leave` | `{id, name, app, x, z, yaw}` | presence events |
-| `snap` | `{now, p: [[id,x,z,yaw,mv,veh], …]}` | full replacement, 5 Hz, distance-culled |
+| `snap` | `{now, p: [[id,x,z,yaw,mv,veh,emote?], …]}` | full replacement, 5 Hz, distance-culled; optional 7th item relays active emote |
 | `chat` | `{id, name, m}` | |
 | `pong`, `error` | `{ts}` / `{code}` | `bad_json`, `rate_limited`, `join_first` |
 

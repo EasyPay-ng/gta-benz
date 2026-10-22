@@ -195,6 +195,12 @@ export const VEHICLE_MODELS = {
     maxSpeed: 46, accel: 17, brake: 32, steer: 0.55, grip: 9.5, style: 'sports',
     fuelPerKm: 3.6, fillPrice: 140,
   },
+  police: {
+    id: 'police', name: 'Metro Police Interceptor', price: 0, forSale: false, fixedColor: '#0f172a',
+    len: 4.45, wid: 1.9, bodyH: 0.56, cabinH: 0.55, cabinLen: 2.05, cabinZ: -0.2, wheelR: 0.36,
+    maxSpeed: 41, accel: 15, brake: 28, steer: 0.54, grip: 9.0, style: 'police',
+    fuelPerKm: 2.8, fillPrice: 110,
+  },
 };
 
 // Fuel, damage & wear (feature 4 — see UPGRADE_PLAN.md §4)
@@ -267,3 +273,41 @@ export const CITIZEN_NAMES = [
   'Tunde', 'Amara', 'Chidi', 'Zainab', 'Femi', 'Ngozi',
   'Kemi', 'Emeka', 'Aisha', 'Bayo', 'Funke', 'Ike',
 ];
+
+// ---------------------------------------------------------------------------
+// Character Jump & Expressive Emotes (feature 2 — see UPGRADE_PLAN.md §2)
+// ---------------------------------------------------------------------------
+export const JUMP_VELOCITY = 4.35;   // m/s upward impulse (~0.95 m apex)
+export const JUMP_GRAVITY = 10.2;    // m/s² downward acceleration
+
+export const EMOTES = [
+  { id: 'wave',      key: '1', icon: '👋', name: 'Wave',           duration: 1.9, loop: false },
+  { id: 'greet',     key: '2', icon: '🤝', name: 'Respect Greet',  duration: 1.7, loop: false },
+  { id: 'clap',      key: '3', icon: '👏', name: 'Applause',       duration: 1.8, loop: false },
+  { id: 'celebrate', key: '4', icon: '🙌', name: 'Celebrate',      duration: 2.1, loop: false },
+  { id: 'flex',      key: '5', icon: '💪', name: 'Flex',           duration: 2.0, loop: false },
+  { id: 'dance1',    key: '6', icon: '🕺', name: 'Afro-Groove',    duration: 2.4, loop: true },
+  { id: 'dance2',    key: '7', icon: '🤖', name: 'Robot',          duration: 2.4, loop: true },
+  { id: 'dance3',    key: '8', icon: '🔥', name: 'Street Shuffle', duration: 2.2, loop: true },
+];
+
+// ---------------------------------------------------------------------------
+// Street Chaos, Police Pursuit Heat & FX pools
+// ---------------------------------------------------------------------------
+export const HEAT_MAX_STARS = 3;
+export const HEAT_STAR_THRESHOLDS = [22, 55, 92]; // points for ★☆☆, ★★☆, ★★★
+export const HEAT_MAX_SCORE = 120;
+export const HEAT_CRASH_SPEED_MPS = 10.5;         // ramming traffic faster than ~38 km/h adds heat
+export const HEAT_COOLDOWN_DELAY = 6.5;           // seconds out of cruiser sight before heat decays
+export const HEAT_DECAY_PER_SEC = 4.5;            // score drained per second while evading
+export const HEAT_BUST_DIST = 6.2;                // cruiser proximity (m) to start bust timer
+export const HEAT_BUST_MAX_SPEED = 2.2;           // player must be nearly stopped (m/s)
+export const HEAT_BUST_SECONDS = 2.4;             // continuous pinned time before fine
+export const HEAT_FINE_PER_STAR = 140;            // $ fine per star when busted
+export const HEAT_SIGHT_DIST = 62;                // cruiser line-of-sight distance (m)
+export const HEAT_MAX_CRUISERS = 2;               // active police interceptors at 2–3 stars
+
+export const SKID_POOL_SIZE = 560;
+export const SPARK_POOL_SIZE = 72;
+export const SCORCH_POOL_SIZE = 28;
+

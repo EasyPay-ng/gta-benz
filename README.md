@@ -38,30 +38,32 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 
 ## Controls
 
-| On foot | Driving |
+| On foot | Driving & Street Heat |
 |---|---|
 | `WASD` / arrows: move · `Shift`: sprint | `W`/`S`: gas, brake & reverse · `A`/`D`: steer |
-| Mouse drag, `Q`/`R`: orbit camera · wheel: zoom | `Space`: handbrake (drift) · `G`: horn |
-| `E` / `Space`: interact | `E`: complete waypoints / stalled-car assist |
-| `F`: get in/out of your car · `V`: valet (calls your last car) | `F`: exit · `T`: Garage & Roadside Assist |
+| Mouse drag, `Q`/`R`: orbit camera · wheel: zoom | `Space`: handbrake (drift & twin tyre skids!) · `G`: horn |
+| `E`: interact · `Space`: jump | `E`: complete waypoints / stalled-car assist |
+| `B` or `1`–`8`: character actions, greetings & dances | `F`: exit · `T`: Garage & Roadside Assist |
+| `F`: get in/out of your car · `V`: valet (calls your last car) | High-speed hits & explosions raise **Police Heat (`★`–`★★★`)** — outrun cruisers to cool down |
 | `T`: Garage & Roadside Assist · `C`: character creator · `H`: help · `M`: mute | `F5`: save · `F9`: load (also autosaves) |
 
 On touch devices you get an on-screen joystick and buttons.
 
 ## Features
 
-- **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, dawn/dusk sky transitions, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
-- **Modular 3D humanoids.** The player and 12 citizens share one rig: skin tone, clothes, 5 hair styles and 3 body builds. Uniforms and headgear (cap, peaked cap, hard hat, chef hat, visor, beanie, flat cap) swap automatically by occupation.
+- **Realistic PBR visuals & atmospheric city.** Procedural diffuse, normal, roughness and emissive PBR maps (`src/textures.js`) with ACES Filmic tone mapping, PMREM environment reflections and a custom atmospheric `SkyDome` shader (dawn/sunset horizon scatter, drifting clouds and twinkling night stars). Features tyre-polished weathered asphalt, irregular flagstone sidewalks, curb storm drains, 6 brick/limestone/glass-curtain architectural facades, multi-cluster avenue trees and soft additive streetlamp & vehicle lens flares.
+- **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
+- **Sculpted 3D humanoids, jumping & expressive emotes.** Anatomically proportioned characters with 2-segment articulated arms and legs (elbows & knees), sculpted sneakers, facial features, 5 hair styles, 3 body builds and automatic job uniforms/headgear. Supports biomechanical walk/sprint cycles, **vertical jump physics (`Space`)**, and **8 expressive emotes & dances (`B` / `1`–`8`)** — Wave, Respect Greet, Applause, Celebrate, Flex, Afro-Groove, Robot and Street Shuffle — synced live to nearby multiplayer peers.
 - **Occupations with ranks.** Pay rises 15% per rank, from Trainee up to Legend.
   - Starter jobs: *Express Courier* (parcel deliveries), *City Security Officer* (3-checkpoint patrols), *Metro Cab Driver* (needs a car; pick up and drop off passengers; taxis earn +30%).
   - Startup jobs: *Master Mechanic*, *Head Line Chef*, *Fleet Dispatcher* (includes cargo delivery runs), *Software Engineer*.
 - **Startups.** Four buildable lots: Apex Auto Garage, Metro Fresh Diner, SwiftCargo Logistics Hub and ByteForge Tech. Each starts with 3 job slots and gains +2 per upgrade, up to level 5. The building grows with each level. Shift payouts run every 12 in-game minutes (30 real s: revenue − wages).
 - **Hiring.** Talk to unemployed citizens, or use "Hire nearest citizen" in the startup menu. Hired citizens put on your uniform, walk to your business along the sidewalks and work there.
-- **Vehicles.**
-  - Arcade physics with handbrake drifts, collisions, steering wheels and brake lights.
-  - Your character sits in the driver's seat; cab passengers ride beside you.
-  - Metro Motors sells a sedan, taxi, pickup, van and the *Benz V12 Sport*, each with a colour picker.
-  - The valet brings your car to the nearest curb.
+- **Sculpted clearcoat vehicles, Street FX & Police Heat.**
+  - Bevelled `ExtrudeGeometry` car hulls & greenhouses with metallic clearcoat PBR paint, 5-spoke alloy rims, brake rotors, spoilers/hood scoops, xenon headlights and crimson tail-lamp bars.
+  - **Street FX (`src/fx.js`):** persistent twin black rubber tyre skid marks & drift smoke, velocity-streaked orange collision sparks, and dramatic wreck explosions with expanding fireballs, ground scorch decals, flickering flames and towering dark smoke plumes.
+  - **Wanted Street Heat & Police Interceptors (`src/heat.js`):** reckless high-speed traffic crashes, pedestrian scares or car explosions raise **Police Heat (`★☆☆`–`★★★`)** and dispatch pursuing **Metro Police Interceptors** with flashing red/blue LED lightbars and wail sirens. Break line-of-sight to cool down and evade, or pay a ticket fine if boxed in and busted.
+  - Metro Motors sells a sedan, taxi, pickup, van and the *Benz V12 Sport*, each with a colour picker; the valet (`V`) brings your car to the nearest curb.
 - **Live vehicle telemetry, wear & roadside assist.** Every car tracks body `HP`, `FUEL`, `TIRES` and `ENGINE` on a live 4-bar dashboard HUD (`green → amber <50% → pulsing red <25%`).
   - Impacts above 30 km/h dent the body (harder hits hurt more, up to 40 HP per crash); slow scrapes nick it.
   - Fuel drains as you drive — below 10% the fuel icon blinks with a soft reserve tick; run dry and the engine stalls. Top up at **Lagoon Fuels**, **Harbor Fuels** or **Metro Fuels** (`F` on the minimap).
@@ -78,17 +80,20 @@ web-openworld-game/
   index.html          HUD, modals, character creator, help, touch controls
   style.css           glassmorphism UI
   game.js             entry: renderer, loop, player, citizens, tasks, UI, save/load
-  src/data.js         all tunable data (jobs, startups, vehicles, clock, telemetry)
+  src/data.js         all tunable data (jobs, startups, vehicles, clock, telemetry, emotes, heat)
   src/time.js         pure 24× city clock, day/night lighting & shift boundaries
   src/economy.js      pure game-state logic & save migrations (unit-tested, no DOM)
   src/vehicleCond.js  pure vehicle wear, damage, shop & roadside repair quotes
   src/vehCard.js      telemetry tiering, warning ladder & shared vehicle card renderer
-  src/character.js    modular humanoid rig + outfits + animation
-  src/world.js        procedural city, street lamps, night glow, nav graph, collisions
-  src/vehicles.js     car meshes, headlights/taillights, driving physics, AI traffic
+  src/heat.js         pure wanted street-heat stars, pursuit escalation, evasion & bust logic
+  src/textures.js     procedural PBR diffuse/normal/roughness/emissive maps, PMREM & SkyDome
+  src/fx.js           pooled twin tyre skid marks, crash sparks, scorch decals & wreck fire/smoke
+  src/character.js    sculpted 2-joint humanoid rig, outfits, jump physics & 8 procedural emotes
+  src/world.js        PBR procedural city, street lamps, night glow, nav graph, collisions
+  src/vehicles.js     sculpted clearcoat cars, 5-spoke rims, light flares, AI traffic & PoliceCar
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
-  src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock sync)
-  tests/              Node unit tests (economy, time, vehicleCond, vehCard)
+  src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock & emote sync)
+  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism)
 server/               free multiplayer server (Cloudflare Worker + Durable Object)
 tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
