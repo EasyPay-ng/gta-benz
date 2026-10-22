@@ -84,7 +84,21 @@ button.big { padding: 12px 22px; font-size: 1.05rem; }
 #vehicle-hud .speed { font-size: 40px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
 #vehicle-hud .speed small { font-size: 13px; color: var(--muted); margin-left: 4px; }
 .veh-name { font-weight: 600; color: var(--accent); margin-top: 2px; }
+.veh-fuel { font-size: 12px; font-weight: 600; color: var(--muted); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.veh-fuel.low { color: #f87171; }
 .veh-keys { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* mechanic modal (feature 4) */
+.vehcard { border: 1px solid var(--line, rgba(148, 163, 184, 0.25)); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.vehcard-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.condgrid { display: grid; grid-template-columns: 64px 1fr; gap: 4px 10px; align-items: center; margin: 8px 0; font-size: 12px; }
+.condbar { height: 8px; border-radius: 4px; background: rgba(15, 23, 42, 0.4); overflow: hidden; }
+.condbar i { display: block; height: 100%; border-radius: 4px; transition: width 0.2s; }
+.condbar i.c-ok { background: #22c55e; }
+.condbar i.c-warn { background: #eab308; }
+.condbar i.c-bad { background: #ef4444; }
+.pill.warn { background: rgba(234, 179, 8, 0.2); color: #fde047; }
+.pill.bad { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
 
 #toasts { position: absolute; top: 360px; right: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; pointer-events: none; }
 .toast {

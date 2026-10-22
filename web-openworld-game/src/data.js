@@ -1,7 +1,7 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3; // v3: vehicles gain cond {hp,fuel,tires,engine} + wrecked
 
 export const STARTING_CASH = 500;
 export const PAYROLL_INTERVAL = 30; // seconds per in-game "business day"
@@ -152,35 +152,67 @@ export const VEHICLE_MODELS = {
     id: 'hatch', name: 'Rusty Hatchback', price: 0, forSale: false,
     len: 3.9, wid: 1.75, bodyH: 0.62, cabinH: 0.62, cabinLen: 2.1, cabinZ: -0.2, wheelR: 0.33,
     maxSpeed: 24, accel: 9, brake: 22, steer: 0.62, grip: 7, style: 'hatch',
+    fuelPerKm: 3.0, fillPrice: 60,
   },
   sedan: {
     id: 'sedan', name: 'Lagos Cruiser Sedan', price: 1800, forSale: true,
     len: 4.6, wid: 1.85, bodyH: 0.6, cabinH: 0.6, cabinLen: 2.3, cabinZ: -0.15, wheelR: 0.35,
     maxSpeed: 31, accel: 11, brake: 26, steer: 0.58, grip: 8, style: 'sedan',
+    fuelPerKm: 2.6, fillPrice: 120,
   },
   taxi: {
     id: 'taxi', name: 'Metro Cab Taxi', price: 2200, forSale: true, fixedColor: '#facc15',
     len: 4.6, wid: 1.85, bodyH: 0.6, cabinH: 0.6, cabinLen: 2.3, cabinZ: -0.15, wheelR: 0.35,
     maxSpeed: 29, accel: 10.5, brake: 26, steer: 0.6, grip: 8, style: 'taxi',
+    fuelPerKm: 2.7, fillPrice: 120,
   },
   pickup: {
     id: 'pickup', name: 'Okada Ridge Pickup', price: 2600, forSale: true,
     len: 5.1, wid: 2.0, bodyH: 0.8, cabinH: 0.7, cabinLen: 1.9, cabinZ: 0.55, wheelR: 0.44,
     maxSpeed: 28, accel: 10, brake: 24, steer: 0.55, grip: 7.5, style: 'pickup',
+    fuelPerKm: 3.2, fillPrice: 130,
   },
   van: {
     id: 'van', name: 'SwiftCargo Van', price: 3200, forSale: true,
     len: 5.2, wid: 2.05, bodyH: 0.9, cabinH: 1.15, cabinLen: 4.1, cabinZ: -0.35, wheelR: 0.4,
     maxSpeed: 25, accel: 8.5, brake: 22, steer: 0.5, grip: 7, style: 'van',
+    fuelPerKm: 3.4, fillPrice: 130,
   },
   sports: {
     id: 'sports', name: 'Benz V12 Sport', price: 6500, forSale: true,
     len: 4.5, wid: 1.95, bodyH: 0.5, cabinH: 0.48, cabinLen: 1.8, cabinZ: -0.35, wheelR: 0.36,
     maxSpeed: 46, accel: 17, brake: 32, steer: 0.55, grip: 9.5, style: 'sports',
+    fuelPerKm: 3.6, fillPrice: 140,
   },
 };
 
+// Fuel, damage & wear (feature 4 — see UPGRADE_PLAN.md §4)
+// Speeds are m/s everywhere (1 m/s = 3.6 km/h).
+export const DAMAGE_SPEED_KMH = 30;      // impacts above this closing speed damage the body
+export const IMPACT_DMG_FACTOR = 4;      // hp lost = (relSpeedMps − threshold) × 4
+export const IMPACT_DMG_CAP = 40;        // …max hp lost per impact
+export const SCRAPE_SPEED_MPS = 5;       // 5..8.33 m/s: minor scrape damage
+export const SCRAPE_DMG = 1;
+export const TIRE_WEAR_PER_KM = 0.05;
+export const ENGINE_WEAR_PER_KM = 0.03;
+export const ENGINE_HIGH_SPEED_THRESHOLD = 25; // m/s — above this, extra engine wear
+export const ENGINE_HIGH_SPEED_EXTRA = 0.02;   // per km
+export const REPAIR_COST_PER_HP = 3;
+export const REPAIR_TIRE_BUNDLE = 25;         // tyre sets restore this much condition
+export const REPAIR_TIRE_BUNDLE_COST = 150;
+export const REPAIR_ENGINE_BUNDLE = 25;
+export const REPAIR_ENGINE_BUNDLE_COST = 200;
+export const MOTORS_REPAIR_MARKUP = 1.2;  // Metro Motors charges city rates (+20%)
+export const TOW_PRICE = 250;
+
 export const CAR_COLORS = ['#dc2626', '#2563eb', '#16a34a', '#f8fafc', '#111827', '#9333ea', '#f97316', '#64748b', '#0d9488', '#be185d'];
+
+// Fuel stations — one on each of three outer blocks (marked F on the minimap)
+export const FUEL_STATIONS = {
+  lagoon: { id: 'lagoon', name: 'Lagoon Fuels', x: 112.5, z: 112.5, face: -1, color: '#ea580c' },
+  harbor: { id: 'harbor', name: 'Harbor Fuels', x: -112.5, z: -112.5, face: 1, color: '#0284c7' },
+  metro: { id: 'metro', name: 'Metro Fuels', x: 37.5, z: 112.5, face: -1, color: '#16a34a' },
+};
 
 // ---------------------------------------------------------------------------
 // Character appearance options

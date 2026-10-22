@@ -62,6 +62,12 @@ On touch devices you get an on-screen joystick and buttons.
   - Your character sits in the driver's seat; cab passengers ride beside you.
   - Metro Motors sells a sedan, taxi, pickup, van and the *Benz V12 Sport*, each with a colour picker.
   - The valet brings your car to the nearest curb.
+- **Cars wear out.** Every car has body HP, a fuel tank, tyre and engine condition.
+  - Impacts above 30 km/h dent the body (harder hits hurt more, up to 40 HP per crash); slow scrapes nick it.
+  - Fuel drains as you drive — top up at **Lagoon Fuels**, **Harbor Fuels** or **Metro Fuels** (marked `F` on the minimap). Run dry and the engine stalls where you are.
+  - Tyres and the engine wear with distance; worn tyres slide, a tired engine limps home at reduced top speed.
+  - At 0 HP the car is **wrecked**: it smokes until a mechanic tows it in ($250) and repairs it.
+  - Repairs: **Metro Motors' mechanic** (city rates, +20%) or your own **Apex Auto Garage** service bay (house rates) once you've built it.
 - **AI traffic.** 12 cars drive right-hand lanes across the grid and brake for pedestrians, cars and you. They honk if you block them.
 - **Save system.** `localStorage` key `metroventure_openworld_save_v1`. Stores cash, look, job XP, startups, employees, vehicles and positions.
 
@@ -84,6 +90,13 @@ server/               free multiplayer server (Cloudflare Worker + Durable Objec
 tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
 ```
+
+## Roadmap
+
+The 11-point upgrade plan (security operatives, emotes, needs, vehicle damage & fuel,
+vehicle keys, enterable buildings, telemetry, real estate, day/night clock) is
+formatted into detailed development prompts in [`UPGRADE_PLAN.md`](UPGRADE_PLAN.md) —
+including build order (milestones M1–M7) and a decision log.
 
 ## Tests
 

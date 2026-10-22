@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { VEHICLE_MODELS, ROAD_LINES, LANE_OFFSET, WORLD_LIMIT, CAR_COLORS } from './data.js';
 import { resolveCircle, makeTextTexture } from './world.js';
+import { applyDrive, speedFactor, gripFactor, freshCond } from './vehicleCond.js';
 
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const WHEEL_GEO = new THREE.CylinderGeometry(1, 1, 1, 14);
@@ -130,7 +131,7 @@ export function buildCarMesh(modelId, color) {
 // ---------------------------------------------------------------------------
 export class Vehicle {
   constructor(scene, data) {
-    this.data = data;              // persisted record {id, model, color, x, z, yaw}
+    this.data = data;              // persisted record {id, model, color, x, z, yaw, cond, wrecked}
     this.model = VEHICLE_MODELS[data.model];
     this.parts = buildCarMesh(data.model, data.color);
     this.mesh = this.parts.group;
@@ -143,6 +144,28 @@ export class Vehicle {
     this.radius = this.model.wid / 2 + 0.05;
     this.halfSpan = Math.max(0, this.model.len / 2 - this.radius);
     this.y = 0;
+    // condition (feature 4) — same object as data.cond so repairs/repairs persist
+    if (!data.cond) data.cond = freshCond();
+    this.cond = data.cond;
+    this.stallNotified = false;
+    this.lowFuelNotified = false;
+    this.hoodY = this.model.wheelR + this.model.bodyH + 0.15;
+    this.smokeT = 0;
+    this.smokeMat = new THREE.MeshBasicMaterial({ color: 0x6b7280, transparent: true, opacity: 0.35, depthWrite: false });
+    this.smoke = new THREE.Group();
+    for (let i = 0; i < 6; i++) {
+      const puff = new THREE.Mesh(BOX, this.smokeMat);
+      puff.scale.set(0.22, 0.22, 0.22);
+      puff.userData = {
+        phase: (i / 6) * 1.4,
+        ox: (i % 2 ? 1 : -1) * this.model.wid * 0.25,
+        oz: this.model.len * 0.28 + (i / 5 - 0.5) * 0.9,
+      };
+      this.smoke.add(puff);
+    }
+    this.smoke.visible = data.wrecked === true;
+    if (data.wrecked === true) this.parts.paint.color.multiplyScalar(0.55); // re-scorch on load
+    this.mesh.add(this.smoke);
     this.syncMesh(0);
   }
 
@@ -161,17 +184,27 @@ export class Vehicle {
   // returns impact speed (m/s) of any collision this frame
   update(dt, input, colliders, otherCircles) {
     const m = this.model;
+    // Wrecked cars are static props: no power, no response to input.
+    if (this.cond.hp <= 0) {
+      this.speed = 0; this.vx = 0; this.vz = 0; this.braking = false;
+      return 0;
+    }
+    const stalled = this.cond.fuel <= 0; // no fuel: can only coast and brake
+    const maxSpeed = m.maxSpeed * speedFactor(this.cond.engine); // worn engine = limp home
     const f = this.forward;
     let { speed } = this;
     this.braking = false;
-    if (input.throttle > 0.05) {
+    if (stalled) {
+      const drag = (1.6 + 0.012 * speed * speed) * dt;
+      speed -= Math.sign(speed) * Math.min(Math.abs(speed), drag);
+    } else if (input.throttle > 0.05) {
       if (speed < -0.3) { speed = Math.min(0, speed + m.brake * dt); this.braking = true; } else {
-        const k = 1 - Math.min(1, (speed / m.maxSpeed) ** 2);
+        const k = 1 - Math.min(1, (speed / maxSpeed) ** 2);
         speed += m.accel * input.throttle * k * dt;
       }
     } else if (input.throttle < -0.05) {
       if (speed > 0.3) { speed = Math.max(0, speed - m.brake * dt); this.braking = true; } else {
-        speed = Math.max(-m.maxSpeed * 0.3, speed - m.accel * 0.6 * dt);
+        speed = Math.max(-maxSpeed * 0.3, speed - m.accel * 0.6 * dt);
       }
     } else {
       const drag = (1.6 + 0.012 * speed * speed) * dt;
@@ -181,7 +214,7 @@ export class Vehicle {
       speed -= Math.sign(speed) * Math.min(Math.abs(speed), 9 * dt);
       this.braking = true;
     }
-    speed = Math.min(speed, m.maxSpeed);
+    speed = Math.min(speed, maxSpeed);
 
     const steerTarget = input.steer * m.steer / (1 + Math.abs(speed) * 0.045);
     this.steer += (steerTarget - this.steer) * Math.min(1, dt * 7);
@@ -191,7 +224,7 @@ export class Vehicle {
     this.yaw += yawRate * dt;
 
     const nf = this.forward;
-    const grip = input.handbrake ? 1.4 : m.grip;
+    const grip = input.handbrake ? 1.4 : m.grip * gripFactor(this.cond.tires); // worn tyres = slidey
     const k = Math.min(1, grip * dt);
     this.vx += (nf.x * speed - this.vx) * k;
     this.vz += (nf.z * speed - this.vz) * k;
@@ -199,6 +232,12 @@ export class Vehicle {
     this.z += this.vz * dt;
     this.speed = speed;
     this.drifting = input.handbrake && Math.abs(speed) > 6;
+    // fuel + wear, distance-based (no idle consumption)
+    const dist = Math.abs(this.speed) * dt;
+    if (dist > 1e-4) {
+      const speedFrac = Math.min(1, Math.abs(this.speed) / Math.max(1, m.maxSpeed));
+      applyDrive(this.cond, this.data.model, dist / 1000, Math.abs(this.speed), speedFrac);
+    }
     void f;
     return this.collide(colliders, otherCircles);
   }
@@ -253,6 +292,16 @@ export class Vehicle {
     // body roll when cornering
     this.parts.body.rotation.z = THREE.MathUtils.clamp(this.steer * this.speed * 0.006, -0.06, 0.06);
     this.parts.brakeMat.color.setHex(this.braking ? 0xff2222 : 0x7f1d1d);
+    // wreck smoke
+    if (this.smoke.visible) {
+      this.smokeT += dt;
+      for (const puff of this.smoke.children) {
+        const t = ((this.smokeT + puff.userData.phase) % 1.4) / 1.4;
+        puff.position.set(puff.userData.ox, this.hoodY + 0.2 + t * 1.7, puff.userData.oz);
+        const s = 0.22 + t * 0.55;
+        puff.scale.set(s, s, s);
+      }
+    }
     this.data.x = this.x; this.data.z = this.z; this.data.yaw = this.yaw;
   }
 
@@ -265,6 +314,7 @@ export class Vehicle {
   dispose() {
     this.scene.remove(this.mesh);
     this.parts.paint.dispose();
+    this.smokeMat.dispose();
   }
 }
 
