@@ -6,6 +6,16 @@ import {
   STREET_LAMP_POOL,
 } from './data.js';
 import { mulberry32 } from './economy.js';
+import {
+  makeAsphaltPBR,
+  makeFlagstonePBR,
+  makeGrassPBR,
+  makeStormDrainTexture,
+  makeFacadePBR,
+  makeBarkPBR,
+  makeFoliagePBR,
+  getFXTextures,
+} from './textures.js';
 
 const MAP_EDGE = ROAD_LINES[ROAD_LINES.length - 1] + ROAD_HALF; // 157
 export const CURB_Y = 0.1;
@@ -77,14 +87,25 @@ function makeWindowPair(seed, base, lit) {
 
 function makeZebraTexture() {
   const c = document.createElement('canvas');
-  c.width = 64; c.height = 64;
+  c.width = 128; c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#3a3d42'; g.fillRect(0, 0, 64, 64);
-  g.fillStyle = '#e5e7eb';
-  for (let i = 0; i < 4; i++) g.fillRect(i * 16 + 3, 0, 10, 64);
+  g.clearRect(0, 0, 128, 128);
+  g.fillStyle = 'rgba(229, 231, 235, 0.84)';
+  for (let i = 0; i < 4; i++) {
+    g.fillRect(i * 32 + 6, 4, 18, 120);
+  }
   const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
+}
+
+function cloneRepeat(tex, rx, ry) {
+  const c = tex.clone();
+  c.needsUpdate = true;
+  c.wrapS = c.wrapT = THREE.RepeatWrapping;
+  c.repeat.set(rx, ry);
+  return c;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,31 +120,92 @@ export class City {
     this.dynamicColliders = {};    // keyed (lots) -> array of AABBs
     this.lots = {};                // bizId -> { group, interact }
     this.stationMarkers = [];
+
+    const asphalt = makeAsphaltPBR(101);
+    const cobble = makeFlagstonePBR(202);
+    const grass = makeGrassPBR(303);
+    const bark = makeBarkPBR(404);
+    const leafDark = makeFoliagePBR(505, '#254d1f');
+    const leafMid = makeFoliagePBR(606, '#336528');
+
+    const roadZMap = cloneRepeat(asphalt.map, 2, 46);
+    const roadZNorm = cloneRepeat(asphalt.normalMap, 2, 46);
+    const roadZRough = cloneRepeat(asphalt.roughnessMap, 2, 46);
+
+    const roadXMap = cloneRepeat(asphalt.map, 46, 2);
+    const roadXNorm = cloneRepeat(asphalt.normalMap, 46, 2);
+    const roadXRough = cloneRepeat(asphalt.roughnessMap, 46, 2);
+
+    const padMap = cloneRepeat(asphalt.map, 4, 3);
+    const padNorm = cloneRepeat(asphalt.normalMap, 4, 3);
+
+    const swMap = cloneRepeat(cobble.map, 11, 11);
+    const swNorm = cloneRepeat(cobble.normalMap, 11, 11);
+    const swRough = cloneRepeat(cobble.roughnessMap, 11, 11);
+
+    const plazaMap = cloneRepeat(cobble.map, 6, 6);
+    const plazaNorm = cloneRepeat(cobble.normalMap, 6, 6);
+
+    const grassWorldMap = cloneRepeat(grass.map, 95, 95);
+    const grassWorldNorm = cloneRepeat(grass.normalMap, 95, 95);
+    const grassBlockMap = cloneRepeat(grass.map, 8, 8);
+    const grassBlockNorm = cloneRepeat(grass.normalMap, 8, 8);
+
     this.mats = {
-      road: new THREE.MeshLambertMaterial({ color: 0x3a3d42 }),
-      line: new THREE.MeshBasicMaterial({ color: 0xfacc15 }),
+      road: new THREE.MeshStandardMaterial({
+        map: padMap, normalMap: padNorm, roughness: 0.84, metalness: 0.08,
+      }),
+      roadZ: new THREE.MeshStandardMaterial({
+        map: roadZMap, normalMap: roadZNorm, roughnessMap: roadZRough,
+        normalScale: new THREE.Vector2(0.85, 0.85), roughness: 0.92, metalness: 0.08,
+      }),
+      roadX: new THREE.MeshStandardMaterial({
+        map: roadXMap, normalMap: roadXNorm, roughnessMap: roadXRough,
+        normalScale: new THREE.Vector2(0.85, 0.85), roughness: 0.92, metalness: 0.08,
+      }),
+      line: new THREE.MeshBasicMaterial({ color: 0xeab308 }),
       white: new THREE.MeshBasicMaterial({ color: 0xe5e7eb }),
-      sidewalk: new THREE.MeshLambertMaterial({ color: 0xb8b5ad }),
-      grass: new THREE.MeshLambertMaterial({ color: 0x5f9e45 }),
-      plaza: new THREE.MeshLambertMaterial({ color: 0x9ca3af }),
-      dirt: new THREE.MeshLambertMaterial({ color: 0x8b6b43 }),
-      trunk: new THREE.MeshLambertMaterial({ color: 0x6b4423 }),
-      leaf: new THREE.MeshLambertMaterial({ color: 0x2f7d32 }),
-      leaf2: new THREE.MeshLambertMaterial({ color: 0x3f8f3a }),
-      glass: new THREE.MeshPhongMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.55, shininess: 90 }),
-      metal: new THREE.MeshLambertMaterial({ color: 0x9ca3af }),
-      darkMetal: new THREE.MeshLambertMaterial({ color: 0x374151 }),
-      roofDark: new THREE.MeshLambertMaterial({ color: 0x334155 }),
-      water: new THREE.MeshPhongMaterial({ color: 0x38bdf8, shininess: 100, transparent: true, opacity: 0.85 }),
-      fence: new THREE.MeshLambertMaterial({ color: 0xd6d3d1 }),
-      hill: new THREE.MeshLambertMaterial({ color: 0x4d7c3a, flatShading: true }),
+      sidewalk: new THREE.MeshStandardMaterial({
+        map: swMap, normalMap: swNorm, roughnessMap: swRough,
+        normalScale: new THREE.Vector2(1.3, 1.3), roughness: 0.82, metalness: 0.06,
+      }),
+      grass: new THREE.MeshStandardMaterial({
+        map: grassWorldMap, normalMap: grassWorldNorm,
+        normalScale: new THREE.Vector2(0.65, 0.65), roughness: 0.94, metalness: 0.02,
+      }),
+      grassBlock: new THREE.MeshStandardMaterial({
+        map: grassBlockMap, normalMap: grassBlockNorm,
+        normalScale: new THREE.Vector2(0.7, 0.7), roughness: 0.92, metalness: 0.02,
+      }),
+      plaza: new THREE.MeshStandardMaterial({
+        map: plazaMap, normalMap: plazaNorm, color: 0xb8b2a8,
+        normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.76, metalness: 0.06,
+      }),
+      dirt: new THREE.MeshStandardMaterial({ color: 0x6b4f31, roughness: 0.95 }),
+      trunk: new THREE.MeshStandardMaterial({ map: bark.map, normalMap: bark.normalMap, roughness: 0.92 }),
+      leaf: new THREE.MeshStandardMaterial({ map: leafDark.map, normalMap: leafDark.normalMap, roughness: 0.84 }),
+      leaf2: new THREE.MeshStandardMaterial({ map: leafMid.map, normalMap: leafMid.normalMap, roughness: 0.82 }),
+      glass: new THREE.MeshPhysicalMaterial({
+        color: 0x38bdf8, transparent: true, opacity: 0.62, roughness: 0.08, metalness: 0.15, clearcoat: 1.0, envMapIntensity: 1.6,
+      }),
+      metal: new THREE.MeshStandardMaterial({ color: 0xa1a1aa, roughness: 0.32, metalness: 0.78 }),
+      darkMetal: new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.44, metalness: 0.68 }),
+      roofDark: new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.82, metalness: 0.15 }),
+      water: new THREE.MeshPhysicalMaterial({
+        color: 0x0284c7, roughness: 0.08, metalness: 0.1, clearcoat: 1.0, transparent: true, opacity: 0.88,
+      }),
+      fence: new THREE.MeshStandardMaterial({ color: 0xd6d3d1, roughness: 0.7 }),
+      hill: new THREE.MeshStandardMaterial({ color: 0x2e4c24, roughness: 0.95, flatShading: true }),
     };
+
+    // 6 realistic architectural facade PBR sets (brick masonry, limestone, concrete, glass curtain, terracotta)
     this.windowPairs = [
-      makeWindowPair(1, '#64748b', '#fde68a'),
-      makeWindowPair(2, '#a8a29e', '#fef3c7'),
-      makeWindowPair(3, '#475569', '#bae6fd'),
-      makeWindowPair(4, '#9f7a5a', '#fde68a'),
-      makeWindowPair(5, '#1e3a5f', '#93c5fd'),
+      makeFacadePBR(11, { wallStyle: 'brick',     wallHex: '#8b4332', mortarHex: '#382a25', litHex: '#fde68a' }),
+      makeFacadePBR(22, { wallStyle: 'limestone', wallHex: '#a89f91', mortarHex: '#44403c', litHex: '#fef3c7' }),
+      makeFacadePBR(33, { wallStyle: 'curtain',   wallHex: '#1e3a5f', mortarHex: '#0f172a', litHex: '#bae6fd' }),
+      makeFacadePBR(44, { wallStyle: 'brick',     wallHex: '#6f4534', mortarHex: '#29201c', litHex: '#fed7aa' }),
+      makeFacadePBR(55, { wallStyle: 'curtain',   wallHex: '#0f172a', mortarHex: '#090d16', litHex: '#93c5fd' }),
+      makeFacadePBR(66, { wallStyle: 'concrete',  wallHex: '#64748b', mortarHex: '#334155', litHex: '#fde68a' }),
     ];
     this.windowTex = this.windowPairs.map((p) => p.map);
     this.windowMats = [];          // skyline + office window materials (emissive at night)
@@ -131,9 +213,13 @@ export class City {
     this.fuelGlowMats = [];        // fuel canopy neon strips + under-canopy glow
     this.streetLamps = [];         // 25 intersection lamps { x, y, z }
     this.lampLights = [];          // pooled <=8 real PointLights
+    this.lampFlareMat = null;      // additive warm glow flare on streetlamp bulbs
     this._lastLampFocus = { x: 1e9, z: 1e9, factor: -1 };
     this._nightFactor = 0;
     this.boxGeo = new THREE.BoxGeometry(1, 1, 1);
+    this.trunkGeo = new THREE.CylinderGeometry(0.14, 0.23, 2.5, 8);
+    this.boughGeo = new THREE.CylinderGeometry(0.06, 0.1, 1.1, 6);
+    this.foliageGeo = new THREE.DodecahedronGeometry(1.15, 1);
     this.rand = mulberry32(42);
 
     this._buildGround();
@@ -190,11 +276,37 @@ export class City {
   tree(x, z, scale = 1) {
     const g = new THREE.Group();
     g.position.set(x, CURB_Y, z);
-    this.box(g, 0, 1.1 * scale, 0, 0.35 * scale, 2.2 * scale, 0.35 * scale, this.mats.trunk);
-    const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5 * scale, 0), this.rand() < 0.5 ? this.mats.leaf : this.mats.leaf2);
-    leaf.position.y = 2.9 * scale;
-    leaf.castShadow = true;
-    g.add(leaf);
+    const trunk = new THREE.Mesh(this.trunkGeo, this.mats.trunk);
+    trunk.scale.setScalar(scale);
+    trunk.position.y = 1.25 * scale;
+    trunk.castShadow = true;
+    trunk.receiveShadow = true;
+    g.add(trunk);
+
+    for (const sx of [-1, 1]) {
+      const bough = new THREE.Mesh(this.boughGeo, this.mats.trunk);
+      bough.scale.setScalar(scale);
+      bough.position.set(sx * 0.34 * scale, 2.25 * scale, 0);
+      bough.rotation.z = -sx * 0.58;
+      g.add(bough);
+    }
+
+    const clusters = [
+      [0, 3.35, 0, 1.25],
+      [-0.78, 2.75, 0.36, 0.92],
+      [0.82, 2.82, -0.32, 0.95],
+      [0.12, 2.9, -0.72, 0.86],
+    ];
+    for (const [cx, cy, cz, cr] of clusters) {
+      const leafMat = this.rand() < 0.5 ? this.mats.leaf : this.mats.leaf2;
+      const puff = new THREE.Mesh(this.foliageGeo, leafMat);
+      puff.scale.set(cr * scale, cr * 0.84 * scale, cr * scale);
+      puff.position.set(cx * scale, cy * scale, cz * scale);
+      puff.rotation.set(this.rand() * 0.5, this.rand() * 3, 0);
+      puff.castShadow = true;
+      puff.receiveShadow = true;
+      g.add(puff);
+    }
     this.root.add(g);
     this.addCollider(x - 0.3, x + 0.3, z - 0.3, z + 0.3);
   }
@@ -210,16 +322,15 @@ export class City {
   _buildRoads() {
     const len = MAP_EDGE * 2;
     for (const r of ROAD_LINES) {
-      // road along Z at x=r, and along X at z=r
-      const a = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, len), this.mats.road);
+      const a = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, len), this.mats.roadZ);
       a.rotation.x = -Math.PI / 2; a.position.set(r, 0.02, 0); a.receiveShadow = true;
       this.root.add(a);
-      const b = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_HALF * 2), this.mats.road);
+      const b = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_HALF * 2), this.mats.roadX);
       b.rotation.x = -Math.PI / 2; b.position.set(0, 0.021, r); b.receiveShadow = true;
       this.root.add(b);
     }
     // dashed centre lines between intersections
-    const dash = new THREE.PlaneGeometry(0.25, 2.4);
+    const dash = new THREE.PlaneGeometry(0.22, 2.4);
     const dashes = [];
     for (let i = 0; i < ROAD_LINES.length - 1; i++) {
       const from = ROAD_LINES[i] + ROAD_HALF + 2;
@@ -238,25 +349,48 @@ export class City {
     dashes.forEach(([x, z, rot], idx) => {
       e.set(-Math.PI / 2, 0, rot);
       q.setFromEuler(e);
-      m4.compose(new THREE.Vector3(x, 0.035, z), q, new THREE.Vector3(1, 1, 1));
+      m4.compose(new THREE.Vector3(x, 0.032, z), q, new THREE.Vector3(1, 1, 1));
       inst.setMatrixAt(idx, m4);
     });
     this.root.add(inst);
 
-    // zebra crossings at every block corner
+    // Curb storm-drain grates along road edges (gritty street detail!)
+    const drainGeo = new THREE.PlaneGeometry(0.55, 1.15);
+    const drainMat = new THREE.MeshStandardMaterial({
+      map: makeStormDrainTexture(), roughness: 0.45, metalness: 0.72,
+    });
+    const drains = [];
+    for (const bx of BLOCK_CENTERS) {
+      for (const r of ROAD_LINES) {
+        for (const s of [-1, 1]) {
+          drains.push([r + s * (ROAD_HALF - 0.34), bx, 0]);
+          drains.push([bx, r + s * (ROAD_HALF - 0.34), Math.PI / 2]);
+        }
+      }
+    }
+    const drainInst = new THREE.InstancedMesh(drainGeo, drainMat, drains.length);
+    drains.forEach(([x, z, rot], idx) => {
+      e.set(-Math.PI / 2, 0, rot);
+      q.setFromEuler(e);
+      m4.compose(new THREE.Vector3(x, 0.029, z), q, new THREE.Vector3(1, 1, 1));
+      drainInst.setMatrixAt(idx, m4);
+    });
+    this.root.add(drainInst);
+
+    // zebra crossings at every block corner (alpha-blended over textured asphalt)
     const zebra = makeZebraTexture();
-    const zebraMat = new THREE.MeshLambertMaterial({ map: zebra });
-    const crossGeoZ = new THREE.PlaneGeometry(ROAD_HALF * 2, SIDEWALK_W); // crossing a road along Z
+    const zebraMat = new THREE.MeshStandardMaterial({
+      map: zebra, transparent: true, roughness: 0.85, depthWrite: false,
+    });
+    const crossGeoZ = new THREE.PlaneGeometry(ROAD_HALF * 2, SIDEWALK_W);
     for (const r of ROAD_LINES) {
       for (const r2 of ROAD_LINES) {
         for (const s of [-1, 1]) {
           const off = s * (ROAD_HALF + SIDEWALK_W / 2);
-          // crossing road along Z (x=r) near intersection z=r2
           const c1 = new THREE.Mesh(crossGeoZ, zebraMat);
           c1.rotation.x = -Math.PI / 2;
           c1.position.set(r, 0.03, r2 + off);
           if (Math.abs(r2 + off) < MAP_EDGE) this.root.add(c1);
-          // crossing road along X (z=r) near intersection x=r2
           const c2 = new THREE.Mesh(crossGeoZ, zebraMat);
           c2.rotation.x = -Math.PI / 2;
           c2.rotation.z = Math.PI / 2;
@@ -270,14 +404,13 @@ export class City {
   _buildBlocks() {
     for (const bx of BLOCK_CENTERS) {
       for (const bz of BLOCK_CENTERS) {
-        // sidewalk slab + inner plaza
         const outer = BLOCK_HALF + SIDEWALK_W;
         const sw = new THREE.Mesh(this.boxGeo, this.mats.sidewalk);
         sw.scale.set(outer * 2, CURB_Y, outer * 2);
         sw.position.set(bx, CURB_Y / 2, bz);
         sw.receiveShadow = true;
         this.root.add(sw);
-        const inner = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK_HALF * 2, BLOCK_HALF * 2), this.mats.grass);
+        const inner = new THREE.Mesh(new THREE.PlaneGeometry(BLOCK_HALF * 2, BLOCK_HALF * 2), this.mats.grassBlock);
         inner.rotation.x = -Math.PI / 2;
         inner.position.set(bx, CURB_Y + 0.005, bz);
         inner.receiveShadow = true;
@@ -369,14 +502,17 @@ export class City {
       const pair = this.windowPairs[Math.floor(r() * this.windowPairs.length)];
       const rx = Math.max(1, Math.round(w / 6));
       const ry = Math.max(1, Math.round(h / 6));
-      const tex = pair.map.clone();
-      tex.needsUpdate = true;
-      tex.repeat.set(rx, ry);
-      const em = pair.emissive.clone();
-      em.needsUpdate = true;
-      em.repeat.set(rx, ry);
-      const mat = new THREE.MeshLambertMaterial({
+      const tex = cloneRepeat(pair.map, rx, ry);
+      const norm = cloneRepeat(pair.normalMap, rx, ry);
+      const rough = cloneRepeat(pair.roughnessMap, rx, ry);
+      const em = cloneRepeat(pair.emissive, rx, ry);
+      const mat = new THREE.MeshStandardMaterial({
         map: tex,
+        normalMap: norm,
+        roughnessMap: rough,
+        normalScale: new THREE.Vector2(0.85, 0.85),
+        roughness: 0.9,
+        metalness: 0.14,
         emissive: 0xffffff,
         emissiveMap: em,
         emissiveIntensity: 0,
@@ -389,7 +525,9 @@ export class City {
       m.castShadow = true;
       m.receiveShadow = true;
       this.root.add(m);
-      if (r() < 0.5) this.box(this.root, p.x, CURB_Y + h + 1, p.z, w * 0.4, 2, d * 0.4, this.mats.darkMetal);
+      // Projecting rooftop cornice parapet + HVAC mechanical unit
+      this.box(this.root, p.x, CURB_Y + h + 0.22, p.z, w + 0.55, 0.44, d + 0.55, this.mats.darkMetal);
+      if (r() < 0.55) this.box(this.root, p.x, CURB_Y + h + 1.35, p.z, w * 0.38, 1.9, d * 0.38, this.mats.darkMetal);
       this.addCollider(p.x - w / 2, p.x + w / 2, p.z - d / 2, p.z + d / 2);
     }
   }
@@ -431,8 +569,19 @@ export class City {
   _buildStation(frame, st) {
     const g = this.frameGroup(frame);
     const color = new THREE.Color(st.color);
-    const wallMat = new THREE.MeshLambertMaterial({ color: 0xe7e5e4 });
-    const trimMat = new THREE.MeshLambertMaterial({ color });
+    const pair = this.windowPairs[1];
+    const wallMat = new THREE.MeshStandardMaterial({
+      map: cloneRepeat(pair.map, 3, 2),
+      normalMap: cloneRepeat(pair.normalMap, 3, 2),
+      roughnessMap: cloneRepeat(pair.roughnessMap, 3, 2),
+      roughness: 0.85,
+      metalness: 0.12,
+      emissive: 0xffffff,
+      emissiveMap: cloneRepeat(pair.emissive, 3, 2),
+      emissiveIntensity: 0,
+    });
+    this.windowMats.push(wallMat);
+    const trimMat = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.25 });
     // building footprint local x[-10,10] z[-16,-2]
     this.box(g, 0, 3.5, -9, 20, 7, 14, wallMat);
     this.box(g, 0, 7.2, -9, 20.6, 0.5, 14.6, trimMat);
@@ -444,11 +593,11 @@ export class City {
     this.frameCollider(frame, 0, -9, 20.6, 14.6);
     // station props
     if (st.id === 'courier') {
-      for (const [x, z] of [[12, -4], [13, -6], [12.4, -8]]) this.box(g, x, 0.4, z, 1, 0.8, 1, new THREE.MeshLambertMaterial({ color: 0xb7884e }));
+      for (const [x, z] of [[12, -4], [13, -6], [12.4, -8]]) this.box(g, x, 0.4, z, 1, 0.8, 1, new THREE.MeshStandardMaterial({ color: 0xb7884e, roughness: 0.85 }));
       this.frameCollider(frame, 12.5, -6, 2.5, 6);
     } else if (st.id === 'security') {
       this.box(g, 13, 4, -3, 0.2, 8, 0.2, this.mats.metal);
-      this.box(g, 13.8, 7.3, -3, 1.6, 1, 0.05, new THREE.MeshLambertMaterial({ color: 0x16a34a }));
+      this.box(g, 13.8, 7.3, -3, 1.6, 1, 0.05, new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.5 }));
       this.frameCollider(frame, 13, -3, 0.6, 0.6);
     } else if (st.id === 'cab') {
       // painted parking bays
@@ -474,10 +623,10 @@ export class City {
   // ----- dealership ----------------------------------------------------------
   _buildDealership(frame) {
     const g = this.frameGroup(frame);
-    const trim = new THREE.MeshLambertMaterial({ color: DEALERSHIP.color });
+    const trim = new THREE.MeshStandardMaterial({ color: DEALERSHIP.color, roughness: 0.35, metalness: 0.35 });
     this.box(g, 0, 0.05, -8, 30, 0.1, 18, this.mats.plaza, { cast: false });
     // glass showroom
-    this.box(g, 0, 3, -16.8, 30, 6, 0.4, new THREE.MeshLambertMaterial({ color: 0xe5e7eb })); // back wall
+    this.box(g, 0, 3, -16.8, 30, 6, 0.4, new THREE.MeshStandardMaterial({ color: 0xd6d3d1, roughness: 0.65 })); // back wall
     this.box(g, -14.8, 3, -8, 0.4, 6, 18, this.mats.glass, { cast: false });
     this.box(g, 14.8, 3, -8, 0.4, 6, 18, this.mats.glass, { cast: false });
     this.box(g, 0, 6.2, -8, 30.6, 0.4, 18.4, trim);
@@ -566,9 +715,16 @@ export class City {
 
     const level = Math.min(bizState.level, MAX_BUSINESS_LEVEL);
     const color = new THREE.Color(def.color);
-    const main = new THREE.MeshLambertMaterial({ color });
-    const accent = new THREE.MeshLambertMaterial({ color: new THREE.Color(def.accent) });
-    const wall = new THREE.MeshLambertMaterial({ color: 0xf1f5f9 });
+    const main = new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.25 });
+    const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(def.accent), roughness: 0.48, metalness: 0.2 });
+    const wallPair = this.windowPairs[bizId === 'garage' ? 0 : 1];
+    const wall = new THREE.MeshStandardMaterial({
+      map: cloneRepeat(wallPair.map, 3, Math.max(1, level)),
+      normalMap: cloneRepeat(wallPair.normalMap, 3, Math.max(1, level)),
+      roughnessMap: cloneRepeat(wallPair.roughnessMap, 3, Math.max(1, level)),
+      roughness: 0.86,
+      metalness: 0.1,
+    });
     const floors = 1 + (level - 1);
     const floorH = 3.6;
     const width = 20 + (level - 1) * 1.5;
@@ -584,15 +740,17 @@ export class City {
     }
     if (bizId === 'tech') {
       const pair = this.windowPairs[4];
-      const tex = pair.map.clone();
-      tex.needsUpdate = true;
-      tex.repeat.set(4, floors * 1.5 + 1);
-      const em = pair.emissive.clone();
-      em.needsUpdate = true;
-      em.repeat.set(4, floors * 1.5 + 1);
-      const glassMat = new THREE.MeshLambertMaterial({
+      const tex = cloneRepeat(pair.map, 4, floors * 1.5 + 1);
+      const norm = cloneRepeat(pair.normalMap, 4, floors * 1.5 + 1);
+      const rough = cloneRepeat(pair.roughnessMap, 4, floors * 1.5 + 1);
+      const em = cloneRepeat(pair.emissive, 4, floors * 1.5 + 1);
+      const glassMat = new THREE.MeshStandardMaterial({
         map: tex,
+        normalMap: norm,
+        roughnessMap: rough,
         color: 0xc4b5fd,
+        roughness: 0.35,
+        metalness: 0.45,
         emissive: 0xffffff,
         emissiveMap: em,
         emissiveIntensity: this._nightFactor * 0.95,
@@ -659,15 +817,25 @@ export class City {
 
   // ----- street lamps at the 25 intersections (feature 11) -------------------
   _buildStreetLamps() {
+    const fxTex = getFXTextures();
     this.lampBulbMat = new THREE.MeshBasicMaterial({ color: 0x64748b });
     this.lampHaloMat = new THREE.MeshBasicMaterial({
       color: 0xfef08a,
       transparent: true,
       opacity: 0,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
     });
-    const haloGeo = new THREE.ConeGeometry(2.2, 5.8, 12, 1, true);
+    this.lampFlareMat = new THREE.SpriteMaterial({
+      map: fxTex.flareWhite,
+      color: 0xfde68a,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const haloGeo = new THREE.ConeGeometry(2.4, 5.8, 12, 1, true);
     for (const rx of ROAD_LINES) {
       for (const rz of ROAD_LINES) {
         const sx = rx >= 150 ? -1 : 1;
@@ -684,7 +852,10 @@ export class City {
         this.box(g, -sx * 1.3, 5.92, -sz * 1.3, 0.34, 0.08, 0.34, this.lampBulbMat, { cast: false, receive: false });
         const halo = new THREE.Mesh(haloGeo, this.lampHaloMat);
         halo.position.set(-sx * 1.3, 3.0, -sz * 1.3);
-        g.add(halo);
+        const flare = new THREE.Sprite(this.lampFlareMat);
+        flare.position.set(-sx * 1.3, 5.82, -sz * 1.3);
+        flare.scale.set(2.3, 2.3, 1);
+        g.add(halo, flare);
         this.root.add(g);
         this.addCollider(px - 0.18, px + 0.18, pz - 0.18, pz + 0.18);
         this.streetLamps.push({
@@ -695,7 +866,7 @@ export class City {
       }
     }
     for (let i = 0; i < STREET_LAMP_POOL; i++) {
-      const light = new THREE.PointLight(0xffdca8, 0, 36, 1.6);
+      const light = new THREE.PointLight(0xffdca8, 0, 38, 1.55);
       light.castShadow = false;
       light.visible = false;
       this.root.add(light);
@@ -718,8 +889,11 @@ export class City {
     }
     if (this.lampBulbMat) {
       this.lampBulbMat.color.setHex(lampFactor > 0.15 ? 0xfef08a : 0x64748b);
-      this.lampHaloMat.opacity = lampFactor * 0.09;
+      this.lampHaloMat.opacity = lampFactor * 0.085;
       this.lampHaloMat.visible = lampFactor > 0.04;
+    }
+    if (this.lampFlareMat) {
+      this.lampFlareMat.opacity = lampFactor * 0.85;
     }
     if (!this.lampLights.length) return;
     if (lampFactor <= 0.04) {

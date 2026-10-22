@@ -23,6 +23,7 @@
       <div class="stat"><span class="label">Startups built</span><span id="hud-startups">0 / 4</span></div>
       <div class="stat"><span class="label">City employment</span><span id="hud-employment">0 / 12 citizens hired</span></div>
       <div class="stat"><span class="label">Garage</span><span id="hud-vehicles">1 vehicle</span></div>
+      <div class="stat heat-stat hidden" id="hud-heat-row"><span class="label">Police Heat</span><span id="hud-heat">★☆☆</span></div>
       <div class="stat small"><span class="label" id="hud-day">Day 1 · 08:00</span><span id="hud-payday">Shift in 30s</span></div>
       <div class="stat small"><span class="label">Network</span><span id="hud-net">Single-player</span></div>
     </div>
@@ -39,6 +40,7 @@
         <button id="btn-account" class="hidden" title="Sign in / switch player">🪪 Account</button>
         <button id="btn-garage" title="Garage, telemetry &amp; roadside assist (T)">🛠 Garage</button>
         <button id="btn-creator" title="Character creator (C)">👤 Look</button>
+        <button id="btn-emotes" title="Character actions &amp; emotes (B / 1–8)">✋ Actions</button>
         <button id="btn-clockout" class="hidden" title="Clock out of your current job">⏹ Clock out</button>
         <button id="btn-save" title="Save (F5)">💾 Save</button>
         <button id="btn-load" title="Load (F9)">📂 Load</button>
@@ -87,8 +89,10 @@
       <div id="touch-buttons">
         <button data-key="interact">E</button>
         <button data-key="vehicle">F</button>
+        <button data-key="jump">⤒</button>
         <button data-key="sprint">⇧</button>
         <button data-key="horn">📯</button>
+        <button id="t-emote" type="button">✋</button>
       </div>
     </div>
 
@@ -154,19 +158,21 @@
               <li><kbd>W A S D</kbd> / arrows: move</li>
               <li><kbd>Shift</kbd>: sprint</li>
               <li>Mouse drag / <kbd>Q</kbd> <kbd>R</kbd>: orbit camera · wheel: zoom</li>
-              <li><kbd>E</kbd> / <kbd>Space</kbd>: interact</li>
+              <li><kbd>E</kbd>: interact · <kbd>Space</kbd>: jump</li>
               <li><kbd>F</kbd>: get in/out of your car</li>
+              <li><kbd>B</kbd> / <kbd>1–8</kbd>: emotes &amp; dances</li>
               <li><kbd>V</kbd>: valet · <kbd>T</kbd>: garage &amp; roadside assist</li>
               <li><kbd>C</kbd>: character creator</li>
             </ul>
           </div>
           <div>
-            <h3>Driving</h3>
+            <h3>Driving &amp; Street Heat</h3>
             <ul>
               <li><kbd>W</kbd>/<kbd>S</kbd>: gas / brake &amp; reverse</li>
               <li><kbd>A</kbd>/<kbd>D</kbd>: steer</li>
-              <li><kbd>Space</kbd>: handbrake (drift!)</li>
+              <li><kbd>Space</kbd>: handbrake (drift &amp; tyre skids!)</li>
               <li><kbd>G</kbd>: horn · <kbd>E</kbd>: complete waypoints</li>
+              <li>Wrecking cars or reckless hits raise <b>Police Heat (★–★★★)</b> — outrun cruisers to cool down!</li>
               <li><kbd>F5</kbd> save · <kbd>F9</kbd> load · <kbd>M</kbd> mute</li>
             </ul>
           </div>

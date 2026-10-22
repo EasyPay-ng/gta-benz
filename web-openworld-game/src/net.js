@@ -242,24 +242,28 @@ export class NetClient {
 
     if (now < this.nextSend) return;
     const veh = local.vehicle || null;
+    const emote = local.emote || null;
     const moved = !this.lastSent
       || Math.abs(local.x - this.lastSent.x) > 0.05
       || Math.abs(local.z - this.lastSent.z) > 0.05
       || Math.abs(local.yaw - this.lastSent.yaw) > 0.02
-      || veh !== this.lastSent.vehicle;
+      || veh !== this.lastSent.vehicle
+      || emote !== this.lastSent.emote;
 
     if (!moved && now - this.lastSent.at < KEEPALIVE_MS) return;
 
     this.nextSend = now + 1000 / SEND_HZ;
-    this.lastSent = { x: local.x, z: local.z, yaw: local.yaw, vehicle: veh, at: now };
-    this._send({
+    this.lastSent = { x: local.x, z: local.z, yaw: local.yaw, vehicle: veh, emote, at: now };
+    const pkt = {
       t: 'pos',
       x: round(local.x, 2),
       z: round(local.z, 2),
       yaw: round(local.yaw, 3),
       mv: local.moving ? 1 : 0,
       veh,
-    });
+    };
+    if (emote) pkt.emote = emote;
+    this._send(pkt);
   }
 
   setAppearance(appearance) {
@@ -358,10 +362,10 @@ export class NetClient {
       case 'snap': {
         const seen = new Set();
         for (const row of msg.p || []) {
-          const [id, x, z, yaw, mv, veh] = row;
+          const [id, x, z, yaw, mv, veh, emote] = row;
           let p = this.peers.get(id);
           if (!p) { p = this._peer({ id }); this.peers.set(id, p); this.handlers.onJoin?.(p); }
-          p.tx = x; p.tz = z; p.tyaw = yaw; p.mv = mv; p.veh = veh;
+          p.tx = x; p.tz = z; p.tyaw = yaw; p.mv = mv; p.veh = veh; p.emote = emote || null;
           if (!p.visible) { p.x = x; p.z = z; p.yaw = yaw; p.visible = true; }
           seen.add(id);
         }
