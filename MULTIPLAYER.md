@@ -249,14 +249,6 @@ Optional hardening once you share the link: restrict browser origins in
 }
 ```
 
-### A two-minute fix you should do first
-
-The repo currently has two Pages workflows deploying to the same site:
-`.github/workflows/pages.yml` (correct: deploys `web-openworld-game/`) and
-`.github/workflows/jekyll-gh-pages.yml` (a Jekyll build of the repo root, which has no
-`index.html`). Whichever finishes last wins, so the published site can flip between the
-game and a Jekyll error page. Delete the Jekyll one before you share a link.
-
 ---
 
 ## 6. What is *not* multiplayer yet
