@@ -90,20 +90,53 @@ test('Character rig: sculpted limbs, biomechanical locomotion, jump physics & al
   }
   ch.clearEmote();
   assert.equal(ch.emote, null);
+
+  // Exercise every unique 3D Boutique garment, shoe, hat, eyewear & chain
+  const { CLOTHING_ITEMS } = await import('../src/data.js');
+  for (const [slot, items] of Object.entries(CLOTHING_ITEMS)) {
+    for (const item of Object.values(items)) {
+      ch.setAppearance({ ...DEFAULT_APPEARANCE, [item.field]: item.id });
+      ch.animate(0.05, 3.5);
+    }
+    void slot;
+  }
+  // Verify Senator tunic adds 3D tunic skirt + gold embroidery and Crown adds gold circlet + gems
+  ch.setAppearance({
+    ...DEFAULT_APPEARANCE,
+    topStyle: 'senator',
+    bottomStyle: 'shorts',
+    shoeStyle: 'loafers',
+    hatStyle: 'crown',
+    glasses: 'gold_shades',
+    chain: 'gold',
+  });
+  assert.ok(ch.topExtras.children.length >= 3, 'Senator tunic populates 3D skirt & gold embroidery');
+  assert.ok(ch.hatGroup.children.length >= 7, 'Crown populates 3D gold band, spikes & gems');
+  assert.ok(ch.faceExtras.children.length >= 5, 'Gold shades populate lenses, gold rims & bridge');
+  assert.equal(ch.neckExtras.children.length, 2, 'Gold Cuban chain + medallion populated');
   ch.dispose();
 });
 
-test('Vehicles: sculpted PBR meshes for all 7 models, scorched wreck rig & PoliceCar pursuit AI', async () => {
+test('Vehicles: sculpted PBR meshes for all 11 models, custom mods, scorched wreck rig & PoliceCar pursuit AI', async () => {
   const THREE = await import('three');
   const { VEHICLE_MODELS } = await import('../src/data.js');
   const { buildCarMesh, Vehicle, TrafficCar, PoliceCar, setVehicleNightFactor } = await import('../src/vehicles.js');
   const { mulberry32 } = await import('../src/economy.js');
 
   const scene = new THREE.Scene();
-  for (const modelId of Object.keys(VEHICLE_MODELS)) {
-    const parts = buildCarMesh(modelId, '#2563eb');
+  const modelIds = Object.keys(VEHICLE_MODELS);
+  assert.equal(modelIds.length, 11, '11 distinct vehicle models registered');
+  for (const modelId of modelIds) {
+    const parts = buildCarMesh(modelId, '#2563eb', {
+      livery: 'gold_trim',
+      rims: 'gold',
+      underglow: 'cyan',
+    });
     assert.equal(parts.wheels.length, 4, `${modelId} has 4 sculpted 5-spoke wheels`);
     assert.ok(parts.paint.isMeshPhysicalMaterial, `${modelId} uses clearcoat MeshPhysicalMaterial`);
+    assert.equal(parts.underglowMesh.visible, true, `${modelId} cyan neon underglow active`);
+    parts.applyMods({ color: '#111827', livery: 'carbon_hood', rims: 'black', underglow: 'none' });
+    assert.equal(parts.underglowMesh.visible, false, `${modelId} underglow toggles off cleanly`);
     assert.ok(parts.headBeams && parts.brakeMat);
   }
 
@@ -143,6 +176,7 @@ test('World & StreetFX: PBR City, SkyDome shader, tyre skid marks, crash sparks 
   city.update(1.5);
   assert.ok(city.colliders.length > 40, 'city static colliders populated');
   assert.equal(city.streetLamps.length, 25, '25 streetlamps built');
+  assert.equal(city.boutiqueDisplays.length, 3, 'Maison Verve Boutique has 3 display pedestals');
 
   const atmo = setupRealisticAtmosphere(null, scene);
   atmo.update(Time.lightingAt(19 * 3600_000), 2.5, 10, -10);

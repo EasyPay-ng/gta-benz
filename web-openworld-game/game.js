@@ -1,18 +1,19 @@
 // MetroVenture 3D — main entry: renderer, game loop, player, NPCs, jobs, startups, vehicles, UI.
 import * as THREE from 'three';
 import {
-  SAVE_KEY, OCCUPATIONS, BUSINESSES, STATIONS, DEALERSHIP, VEHICLE_MODELS, CAR_COLORS, MAX_BUSINESS_LEVEL,
-  SKIN_TONES, SHIRT_COLORS, PANTS_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, TOTAL_CITIZENS, ROAD_LINES,
+  SAVE_KEY, OCCUPATIONS, BUSINESSES, STATIONS, DEALERSHIP, BOUTIQUE, VEHICLE_MODELS, CAR_COLORS, MAX_BUSINESS_LEVEL,
+  SKIN_TONES, SHIRT_COLORS, PANTS_COLORS, SHOE_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, TOTAL_CITIZENS, ROAD_LINES,
   ROAD_HALF, WORLD_LIMIT, BLOCK_CENTERS, BLOCK_HALF, DEFAULT_APPEARANCE,
   FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
   ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
-  EMOTES,
+  EMOTES, CAR_LIVERIES, RIM_FINISHES, UNDERGLOW_OPTIONS, RESPRAY_COST, CLOTHING_ITEMS, OUTFIT_BUNDLES,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
 import * as Time from './src/time.js';
 import * as VCard from './src/vehCard.js';
 import * as Heat from './src/heat.js';
+import * as Cust from './src/customization.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -188,16 +189,37 @@ const sfx = {
 const city = new City(scene);
 const navNodes = city.navNodes;
 
-// Showroom display cars at Metro Motors
-const displayCarParts = ['sedan', 'sports', 'pickup'].map((model, i) => {
-  const parts = buildCarMesh(model, ['#2563eb', '#dc2626', '#0d9488'][i]);
+// Showroom display cars at Metro Motors (Valkyrie X12 Hypercar, Benz G-Wagen 4x4, Aero Spider Convertible)
+const SHOWROOM_SPECS = [
+  { model: 'hyper', color: '#dc2626', opts: { livery: 'carbon_hood', rims: 'gold', underglow: 'cyan' } },
+  { model: 'gwagen', color: '#111827', opts: { livery: 'gold_trim', rims: 'gold', underglow: 'gold' } },
+  { model: 'roadster', color: '#2563eb', opts: { livery: 'twin_stripe', rims: 'silver', underglow: 'purple' } },
+];
+const displayCarParts = SHOWROOM_SPECS.map((spec, i) => {
+  const parts = buildCarMesh(spec.model, spec.color, spec.opts);
   const spot = city.dealerDisplays[i];
-  parts.group.position.set(spot.x, CURB_Y + 0.25, spot.z);
+  parts.group.position.set(spot.x, CURB_Y + 0.26, spot.z);
   parts.group.rotation.y = spot.yaw;
   scene.add(parts.group);
   return parts;
 });
 const displayCars = displayCarParts.map((p) => p.group);
+
+// Dressed 3D fashion mannequins on Maison Verve Boutique display pedestals
+const boutiqueMannequins = (city.boutiqueDisplays || []).map((spot, i) => {
+  const bundle = OUTFIT_BUNDLES[i % OUTFIT_BUNDLES.length];
+  const app = { ...DEFAULT_APPEARANCE, skin: ['#8d5524', '#c68642', '#4a2c11'][i % 3], ...(bundle.colors || {}) };
+  for (const [slot, id] of bundle.items) {
+    const def = CLOTHING_ITEMS[slot]?.[id];
+    if (def) app[def.field] = id;
+  }
+  const ch = new Character(app);
+  ch.group.position.set(spot.x, spot.y, spot.z);
+  ch.group.rotation.y = spot.yaw;
+  ch.setEmote(['flex', 'peace', 'wave'][i % 3]);
+  scene.add(ch.group);
+  return ch;
+});
 
 // Task waypoint marker
 const marker = (() => {
@@ -828,7 +850,16 @@ function openModal(render) {
   sfx.click();
 }
 function renderModal() { if (game.modal) $('modal-body').innerHTML = game.modal(); }
-function closeModal() { game.modal = null; game.modalShop = null; modalEl.classList.add('hidden'); }
+function closeModal() {
+  game.modal = null;
+  game.modalShop = null;
+  if (game.boutiquePreview) {
+    game.boutiquePreview = false;
+    game.player.char?.setOccupation(game.state?.activeJob || null);
+    game.player.char?.setCarrying(!!(game.task && game.task.carrying));
+  }
+  modalEl.classList.add('hidden');
+}
 $('modal-close').addEventListener('click', closeModal);
 modalEl.addEventListener('pointerdown', (e) => { if (e.target === modalEl) closeModal(); });
 $('modal-body').addEventListener('click', (e) => {
@@ -923,7 +954,7 @@ function lotModal(bizId) {
         ${working
           ? '<button data-action="clockout">⏹ End shift</button>'
           : `<button class="primary" data-action="clockin" data-occ="${def.occupation}">🛠 Work a shift as ${occ.title}</button>`}
-        ${bizId === 'garage' ? '<button class="primary" data-action="serviceBay">🔧 Service bay (house rates)</button>' : ''}
+        ${bizId === 'garage' ? '<button class="primary" data-action="serviceBay">🔧 Service bay (house rates)</button><button data-action="openModShop">🎨 Custom Mod Shop (-25%)</button>' : ''}
       </div>`;
   };
 }
@@ -1090,20 +1121,194 @@ function emotesModal() {
     </div>`;
 }
 
-const dealerUI = { colors: {} };
+const dealerUI = { colors: {}, filter: 'all' };
+const customUI = { vehId: null };
+const boutiqueUI = { tab: 'bundles' };
+
+function openCustomizer(focusVehId = null) {
+  const s = game.state;
+  if (!s.vehicles.length) {
+    toast('You don\'t own a vehicle yet. Buy one at Metro Motors!', 'bad');
+    return;
+  }
+  customUI.vehId = focusVehId || game.player.vehicle?.data.id || s.lastVehicleId || s.vehicles[0].id;
+  openModal(customizerModal());
+}
+
+function customizerModal() {
+  return () => {
+    const s = game.state;
+    const hasGarage = !!s.businesses.garage;
+    if (!s.vehicles.some((x) => x.id === customUI.vehId)) customUI.vehId = s.vehicles[0]?.id || null;
+    const v = s.vehicles.find((x) => x.id === customUI.vehId);
+    if (!v) return '<h2>🎨 Custom Mod Shop</h2><p class="muted">No vehicles in your garage.</p>';
+    const m = VEHICLE_MODELS[v.model];
+    const fleetTabs = s.vehicles.map((veh) => {
+      const mod = VEHICLE_MODELS[veh.model];
+      return `<button class="shop-tab ${veh.id === v.id ? 'active' : ''}" data-action="selectModCar" data-veh="${veh.id}">
+        <span class="veh-dot" style="background:${veh.color}"></span>${mod.name}
+      </button>`;
+    }).join('');
+
+    const paintCost = Cust.modCost(RESPRAY_COST, hasGarage);
+    const paintSection = m.fixedColor
+      ? '<span class="muted">Official fleet vehicle — body paint locked</span>'
+      : CAR_COLORS.map((c) => `<button class="swatch ${c === v.color ? 'active' : ''}" style="background:${c}" data-action="applyMod" data-veh="${v.id}" data-kind="paint" data-val="${c}" title="Respray (${money(paintCost)})"></button>`).join('');
+
+    const liveryBtns = Object.values(CAR_LIVERIES).map((liv) => {
+      const active = (v.livery || 'clean') === liv.id;
+      const cost = Cust.modCost(liv.price, hasGarage);
+      const label = active ? `✓ ${liv.name}` : `${liv.name} · ${cost ? money(cost) : 'Free'}`;
+      return `<button class="mod-chip ${active ? 'active' : ''}" data-action="applyMod" data-veh="${v.id}" data-kind="livery" data-val="${liv.id}" ${!active && s.cash < cost ? 'disabled' : ''}>${label}</button>`;
+    }).join('');
+
+    const rimBtns = Object.values(RIM_FINISHES).map((rim) => {
+      const active = (v.rims || 'silver') === rim.id;
+      const cost = Cust.modCost(rim.price, hasGarage);
+      const label = active ? `✓ ${rim.name}` : `${rim.name} · ${cost ? money(cost) : 'Free'}`;
+      return `<button class="mod-chip ${active ? 'active' : ''}" data-action="applyMod" data-veh="${v.id}" data-kind="rims" data-val="${rim.id}" ${!active && s.cash < cost ? 'disabled' : ''}>
+        <span class="veh-dot" style="background:${rim.hex}"></span>${label}
+      </button>`;
+    }).join('');
+
+    const glowBtns = Object.values(UNDERGLOW_OPTIONS).map((gl) => {
+      const active = (v.underglow || 'none') === gl.id;
+      const cost = Cust.modCost(gl.price, hasGarage);
+      const dot = gl.hex ? `<span class="veh-dot" style="background:${gl.hex};box-shadow:0 0 8px ${gl.hex}"></span>` : '';
+      const label = active ? `✓ ${gl.name}` : `${gl.name} · ${cost ? money(cost) : 'Free'}`;
+      return `<button class="mod-chip ${active ? 'active' : ''}" data-action="applyMod" data-veh="${v.id}" data-kind="underglow" data-val="${gl.id}" ${!active && s.cash < cost ? 'disabled' : ''}>${dot}${label}</button>`;
+    }).join('');
+
+    return `
+      <h2>🎨 Metro Customs — Paint, Stripes, Rims &amp; Underglow</h2>
+      <p class="sub">${hasGarage ? '⭐ <b>Apex Auto Garage owner</b> — 25% discount active on all custom mods!' : 'Standard Metro Customs pricing · build <b>Apex Auto Garage</b> for 25% off all mods.'} · Cash: <b>${money(s.cash)}</b></p>
+      <div class="shop-tabs">${fleetTabs}</div>
+      <div class="mod-section">
+        <h4><span>🎨 Metallic Clearcoat Respray</span><span>${m.fixedColor ? 'Locked' : money(paintCost)}</span></h4>
+        <div class="swatches">${paintSection}</div>
+      </div>
+      <div class="mod-section">
+        <h4><span>🏁 Racing Stripes &amp; Carbon Aero</span></h4>
+        <div class="mod-chips">${liveryBtns}</div>
+      </div>
+      <div class="mod-section">
+        <h4><span>🛞 5-Spoke Alloy Rim Finish</span></h4>
+        <div class="mod-chips">${rimBtns}</div>
+      </div>
+      <div class="mod-section">
+        <h4><span>💡 Street Neon Underglow</span></h4>
+        <div class="mod-chips">${glowBtns}</div>
+      </div>
+      <div class="actions">
+        <button data-action="backToDealer">🚗 Showroom</button>
+        <button data-action="close">Done</button>
+      </div>`;
+  };
+}
+
+function openBoutique() {
+  if (game.creatorOpen) closeCreator();
+  game.boutiquePreview = true;
+  game.player.char?.setOccupation(null);
+  openModal(boutiqueModal());
+}
+
+const BOUTIQUE_TABS = [
+  { id: 'bundles', label: '✨ Signature Looks' },
+  { id: 'top', label: '🧥 Tops & Jackets' },
+  { id: 'bottom', label: '👖 Bottoms' },
+  { id: 'shoe', label: '👟 Footwear' },
+  { id: 'hat', label: '👑 Headwear' },
+  { id: 'glasses', label: '🕶 Shades' },
+  { id: 'chain', label: '⛓ Chains' },
+  { id: 'colors', label: '🎨 Colours' },
+];
+
+function boutiqueModal() {
+  return () => {
+    const s = game.state;
+    const tabs = BOUTIQUE_TABS.map((t) => `<button class="shop-tab boutique-tab ${boutiqueUI.tab === t.id ? 'active' : ''}" data-action="boutiqueTab" data-tab="${t.id}">${t.label}</button>`).join('');
+
+    let body = '';
+    if (boutiqueUI.tab === 'bundles') {
+      const cards = OUTFIT_BUNDLES.map((b) => {
+        const q = Cust.bundleQuote(s, b.id);
+        return `
+          <div class="shop-item exotic ${q.allOwned ? 'equipped' : ''}">
+            <div>
+              <h4><span>${b.name}</span><span class="exotic-badge">${q.allOwned ? 'Owned' : money(q.cost)}</span></h4>
+              <p>${b.desc}</p>
+              ${!q.allOwned && q.savings > 0 ? `<p class="good-text" style="margin-top:4px">Save ${money(q.savings)} vs individual pieces</p>` : ''}
+            </div>
+            <button class="primary" data-action="buyBundle" data-bundle="${b.id}" ${!q.allOwned && s.cash < q.cost ? 'disabled' : ''}>
+              ${q.allOwned ? '✨ Wear Signature Look' : `🛍 Unlock & Wear · ${money(q.cost)}`}
+            </button>
+          </div>`;
+      }).join('');
+      body = `<div class="shop-grid">${cards}</div>`;
+    } else if (boutiqueUI.tab === 'colors') {
+      const sw = (list, key) => list.map((c) => `<button class="swatch ${s.appearance[key] === c ? 'active' : ''}" style="background:${c}" data-action="wardrobeColor" data-key="${key}" data-val="${c}"></button>`).join('');
+      body = `
+        <div class="mod-section"><h4>Top / Jacket / Tunic Colour (Free)</h4><div class="swatches">${sw(SHIRT_COLORS, 'shirt')}</div></div>
+        <div class="mod-section"><h4>Pants / Shorts / Slacks Colour (Free)</h4><div class="swatches">${sw(PANTS_COLORS, 'pants')}</div></div>
+        <div class="mod-section"><h4>Sneaker / Boot / Loafer Colour (Free)</h4><div class="swatches">${sw(SHOE_COLORS, 'shoeColor')}</div></div>
+        <div class="mod-section"><h4>Cap / Bucket / Fila Hat Colour (Free)</h4><div class="swatches">${sw(SHIRT_COLORS, 'hatColor')}</div></div>`;
+    } else {
+      const slot = boutiqueUI.tab;
+      const items = Object.values(CLOTHING_ITEMS[slot] || {});
+      const cards = items.map((item) => {
+        const owned = Cust.ownsClothing(s, slot, item.id);
+        const equipped = (s.appearance[item.field] || '') === item.id;
+        return `
+          <div class="shop-item ${equipped ? 'equipped' : ''}">
+            <div>
+              <h4><span>${item.name}</span><span class="pill ${owned ? 'good' : ''}">${owned ? (equipped ? 'Wearing' : 'Owned') : money(item.price)}</span></h4>
+              <p>${item.desc}</p>
+            </div>
+            <button class="${equipped ? '' : 'primary'}" data-action="buyCloth" data-slot="${slot}" data-item="${item.id}" ${equipped || (!owned && s.cash < item.price) ? 'disabled' : ''}>
+              ${equipped ? '✓ Currently Wearing' : owned ? 'Equip (Free)' : `Buy & Wear · ${money(item.price)}`}
+            </button>
+          </div>`;
+      }).join('');
+      body = `<div class="shop-grid">${cards}</div>`;
+    }
+
+    return `
+      <h2>🛍 Maison Verve — Luxury Fashion &amp; Chains</h2>
+      <p class="sub">Unlock 3D Hoodies, Bombers, Suits, Royal Senator Tunics, Shades &amp; 24k Gold Chains · Cash: <b>${money(s.cash)}</b></p>
+      <div class="shop-tabs">${tabs}</div>
+      ${body}
+      <p class="muted">Unlocked pieces stay in your personal <b>Look &amp; Wardrobe (<kbd>C</kbd>)</b> forever — mix &amp; match anytime for free!</p>
+      <div class="actions">
+        <button data-action="openCreatorFromBoutique">👤 Open Full Look &amp; Colours (<kbd>C</kbd>)</button>
+        <button data-action="close">Close</button>
+      </div>`;
+  };
+}
+
 function dealerModal() {
   return () => {
     const s = game.state;
-    const cards = Object.values(VEHICLE_MODELS).filter((m) => m.forSale).map((m) => {
+    const allModels = Object.values(VEHICLE_MODELS).filter((m) => m.forSale);
+    const list = dealerUI.filter === 'exotic'
+      ? allModels.filter((m) => m.tier === 'exotic')
+      : dealerUI.filter === 'daily'
+        ? allModels.filter((m) => m.tier !== 'exotic')
+        : allModels;
+
+    const cards = list.map((m) => {
       const color = m.fixedColor || dealerUI.colors[m.id] || CAR_COLORS[0];
       const bar = (v) => `<div class="bar"><i style="width:${Math.round(Math.min(1, v) * 100)}%"></i></div>`;
+      const isExotic = m.tier === 'exotic';
       return `
-        <div class="car-card">
-          <h3>${m.name}</h3><div class="price">${money(m.price)}</div>
+        <div class="car-card ${isExotic ? 'exotic-card' : ''}">
+          <h3>${m.name} ${isExotic ? '<span class="exotic-badge">Signature</span>' : ''}</h3>
+          <div class="price">${money(m.price)}</div>
+          ${m.desc ? `<p class="muted" style="margin:2px 0 8px">${m.desc}</p>` : ''}
           <div class="bars">
-            <span>Top speed</span>${bar(m.maxSpeed / 46)}
-            <span>Acceleration</span>${bar(m.accel / 17)}
-            <span>Handling</span>${bar((m.grip / 9.5) * 0.6 + (m.steer / 0.62) * 0.4)}
+            <span>Top speed</span>${bar(m.maxSpeed / 52)}
+            <span>Acceleration</span>${bar(m.accel / 21)}
+            <span>Handling</span>${bar((m.grip / 10.5) * 0.6 + (m.steer / 0.62) * 0.4)}
           </div>
           <div class="row">
             <div class="swatches">${m.fixedColor ? '<span class="muted">Official taxi yellow</span>' : CAR_COLORS.map((c) => `<button class="swatch ${c === color ? 'active' : ''}" style="background:${c}" data-action="carColor" data-model="${m.id}" data-color="${c}" aria-label="colour ${c}"></button>`).join('')}</div>
@@ -1113,13 +1318,19 @@ function dealerModal() {
     }).join('');
     const owned = s.vehicles.map((v) => `<span class="pill">🚗 ${VEHICLE_MODELS[v.model].name}</span>`).join('');
     return `
-      <h2>Metro Motors</h2>
-      <p class="sub">Your garage: ${owned || 'empty'}</p>
+      <h2>🚗 Metro Motors — Exotics &amp; Dealership</h2>
+      <p class="sub">Your garage: ${owned || 'empty'} · Cash: <b>${money(s.cash)}</b></p>
       <div class="actions">
-        <button class="primary" data-action="mechDealer">🔧 Mechanic (city rates)</button>
+        <button class="primary" data-action="openModShop">🎨 Custom Mod Shop (Stripes, Rims &amp; Underglow)</button>
+        <button data-action="mechDealer">🔧 Mechanic (city rates)</button>
+      </div>
+      <div class="shop-tabs">
+        <button class="shop-tab ${dealerUI.filter === 'all' ? 'active' : ''}" data-action="dealerTab" data-tab="all">All Vehicles (${allModels.length})</button>
+        <button class="shop-tab ${dealerUI.filter === 'exotic' ? 'active' : ''}" data-action="dealerTab" data-tab="exotic">✨ Exotic &amp; Signature (4)</button>
+        <button class="shop-tab ${dealerUI.filter === 'daily' ? 'active' : ''}" data-action="dealerTab" data-tab="daily">🚙 Daily &amp; Fleet (5)</button>
       </div>
       ${cards}
-      <p class="muted">Tip: taxis earn +30% fares as a Metro Cab Driver. Press <kbd>V</kbd> anywhere to have the valet bring your last-driven car. Fuel: Lagoon / Harbor / Metro Fuels, marked F on the minimap.</p>`;
+      <p class="muted">Tip: Drive the open-top <b>Aero Spider Convertible</b> to show off your Maison Verve outfits while cruising! Press <kbd>V</kbd> anywhere for valet delivery.</p>`;
   };
 }
 
@@ -1171,6 +1382,52 @@ const modalActions = {
     saveGame(true);
   },
   carColor: ({ model, color }) => { dealerUI.colors[model] = color; },
+  dealerTab: ({ tab }) => { dealerUI.filter = tab || 'all'; },
+  openModShop: () => openCustomizer(),
+  customizeCar: ({ veh }) => openCustomizer(veh),
+  selectModCar: ({ veh }) => { customUI.vehId = veh; },
+  backToDealer: () => openModal(dealerModal()),
+  applyMod: ({ veh, kind, val }) => {
+    const res = Cust.applyVehicleMod(game.state, veh, kind, val);
+    if (!result(res)) return;
+    const live = game.vehicles.find((x) => x.data.id === veh);
+    if (live) live.applyCustomization();
+    sfx.wrench();
+    saveGame(true);
+  },
+  boutiqueTab: ({ tab }) => { boutiqueUI.tab = tab || 'bundles'; },
+  buyCloth: ({ slot, item }) => {
+    const res = Cust.buyOrEquipClothing(game.state, slot, item);
+    if (!res.ok) { sfx.error(); toast(res.msg, 'bad'); return; }
+    if (res.bought) sfx.cash(); else sfx.click();
+    toast(res.msg, res.bought ? 'money' : 'good');
+    game.player.char.setAppearance(game.state.appearance);
+    game.player.char.setOccupation(null);
+    if (net) net.setAppearance(game.state.appearance);
+    saveGame(true);
+  },
+  buyBundle: ({ bundle }) => {
+    const res = Cust.buyOrEquipBundle(game.state, bundle);
+    if (!res.ok) { sfx.error(); toast(res.msg, 'bad'); return; }
+    if (res.bought) sfx.cash(); else sfx.click();
+    toast(res.msg, res.bought ? 'money' : 'good');
+    game.player.char.setAppearance(game.state.appearance);
+    game.player.char.setOccupation(null);
+    if (net) net.setAppearance(game.state.appearance);
+    saveGame(true);
+  },
+  wardrobeColor: ({ key, val }) => {
+    game.state.appearance[key] = val;
+    game.player.char.setAppearance(game.state.appearance);
+    game.player.char.setOccupation(null);
+    if (net) net.setAppearance(game.state.appearance);
+    sfx.click();
+    saveGame(true);
+  },
+  openCreatorFromBoutique: () => {
+    closeModal();
+    openCreator();
+  },
   buyCar: ({ model }) => {
     const m = VEHICLE_MODELS[model];
     const spots = DEALERSHIP.deliverySpots;
@@ -1323,25 +1580,58 @@ function doClockOut() {
 $('btn-clockout').addEventListener('click', doClockOut);
 
 // ---------------------------------------------------------------------------
-// Character creator
+// Character creator & Personal Wardrobe
 // ---------------------------------------------------------------------------
 function buildCreatorUI() {
   const s = game.state;
   const swatch = (containerId, list, key) => {
-    $(containerId).innerHTML = list.map((c) => `<button class="swatch ${s.appearance[key] === c ? 'active' : ''}" data-key="${key}" data-val="${c}" style="background:${c}"></button>`).join('');
+    const el = $(containerId);
+    if (!el) return;
+    el.innerHTML = list.map((c) => `<button class="swatch ${s.appearance[key] === c ? 'active' : ''}" data-key="${key}" data-val="${c}" style="background:${c}"></button>`).join('');
   };
   const chips = (containerId, list, key) => {
-    $(containerId).innerHTML = list.map((c) => `<button class="chip ${s.appearance[key] === c ? 'active' : ''}" data-key="${key}" data-val="${c}">${c}</button>`).join('');
+    const el = $(containerId);
+    if (!el) return;
+    el.innerHTML = list.map((c) => `<button class="chip ${s.appearance[key] === c ? 'active' : ''}" data-key="${key}" data-val="${c}">${c}</button>`).join('');
+  };
+  const slotChips = (containerId, slot) => {
+    const el = $(containerId);
+    if (!el) return;
+    const items = Object.values(CLOTHING_ITEMS[slot] || {});
+    el.innerHTML = items.map((item) => {
+      const owned = Cust.ownsClothing(s, slot, item.id);
+      const active = (s.appearance[item.field] || '') === item.id;
+      const label = owned ? item.name : `🔒 ${item.name} (${money(item.price)})`;
+      return `<button class="chip ${active ? 'active' : ''} ${owned ? '' : 'locked'}" data-slot="${slot}" data-item="${item.id}">${label}</button>`;
+    }).join('');
   };
   swatch('cc-skin', SKIN_TONES, 'skin');
   swatch('cc-shirt', SHIRT_COLORS, 'shirt');
   swatch('cc-pants', PANTS_COLORS, 'pants');
+  swatch('cc-shoecolor', SHOE_COLORS, 'shoeColor');
+  swatch('cc-hatcolor', SHIRT_COLORS, 'hatColor');
   swatch('cc-hair', HAIR_COLORS, 'hair');
   chips('cc-hairstyle', HAIR_STYLES, 'hairStyle');
   chips('cc-build', Object.keys(BUILDS), 'build');
+  slotChips('cc-topstyle', 'top');
+  slotChips('cc-bottomstyle', 'bottom');
+  slotChips('cc-shoestyle', 'shoe');
+  slotChips('cc-hatstyle', 'hat');
+  slotChips('cc-glasses', 'glasses');
+  slotChips('cc-chain', 'chain');
   $('cc-name').value = s.appearance.name;
 }
 $('creator').addEventListener('click', (e) => {
+  const slotBtn = e.target.closest('[data-slot]');
+  if (slotBtn) {
+    const res = Cust.equipClothing(game.state, slotBtn.dataset.slot, slotBtn.dataset.item);
+    if (!res.ok) { sfx.error(); toast(res.msg, 'warn'); return; }
+    game.player.char.setAppearance(game.state.appearance);
+    game.player.char.setOccupation(null);
+    buildCreatorUI();
+    sfx.click();
+    return;
+  }
   const b = e.target.closest('[data-key]');
   if (!b) return;
   game.state.appearance[b.dataset.key] = b.dataset.val;
@@ -1352,9 +1642,22 @@ $('creator').addEventListener('click', (e) => {
 });
 $('cc-name').addEventListener('input', (e) => { game.state.appearance.name = e.target.value.trim() || 'Benz'; });
 $('cc-random').addEventListener('click', () => {
-  const app = Eco.randomAppearance(Math.random, game.state.appearance.name);
-  game.state.appearance = app;
-  game.player.char.setAppearance(app);
+  const s = game.state;
+  const pickOwned = (slot, fallback) => {
+    const owned = Object.values(CLOTHING_ITEMS[slot] || {}).filter((it) => Cust.ownsClothing(s, slot, it.id));
+    return owned.length ? owned[Math.floor(Math.random() * owned.length)].id : fallback;
+  };
+  const base = Eco.randomAppearance(Math.random, s.appearance.name);
+  s.appearance = {
+    ...base,
+    topStyle: pickOwned('top', 'tee'),
+    bottomStyle: pickOwned('bottom', 'jeans'),
+    shoeStyle: pickOwned('shoe', 'sneakers'),
+    hatStyle: pickOwned('hat', 'none'),
+    glasses: pickOwned('glasses', 'none'),
+    chain: pickOwned('chain', 'none'),
+  };
+  game.player.char.setAppearance(s.appearance);
   game.player.char.setOccupation(null);
   buildCreatorUI();
 });
@@ -1779,7 +2082,8 @@ function findInteraction() {
       const active = game.state.activeJob === st.occupation;
       consider(st.interact.x, st.interact.z, 2.6, `${st.name}: ${active ? 'on shift' : 'clock in'}`, () => openModal(stationModal(st.id)));
     }
-    consider(DEALERSHIP.interact.x, DEALERSHIP.interact.z, 2.6, 'Metro Motors: browse cars & mechanic', () => openModal(dealerModal()));
+    consider(DEALERSHIP.interact.x, DEALERSHIP.interact.z, 2.8, 'Metro Motors: exotics, customs & mechanic', () => openModal(dealerModal()));
+    consider(BOUTIQUE.interact.x, BOUTIQUE.interact.z, 2.8, 'Maison Verve Boutique: luxury outfits & chains', () => openBoutique());
     for (const st of Object.values(FUEL_STATIONS)) {
       consider(st.interact.x, st.interact.z, 3.4, `⛽ Refuel at ${st.name}`, () => startRefuel(st));
     }
@@ -2107,19 +2411,25 @@ function ensureRemote(peer) {
   return r;
 }
 
+function disposeCarParts(parts) {
+  if (!parts) return;
+  parts.paint?.dispose?.();
+  parts.rimMat?.dispose?.();
+  parts.brakeMat?.dispose?.();
+  parts.headFlareMat?.dispose?.();
+  parts.tailFlareMat?.dispose?.();
+}
+
 function removeRemote(id) {
   const r = remotes.get(id);
   if (!r) return;
-  scene.remove(r.char.group);
+  r.char.group.parent?.remove(r.char.group);
   r.char.dispose();
   r.label.mat.dispose();
   r.label.tex.dispose?.();
   if (r.car) {
     scene.remove(r.car);
-    r.car.traverse((o) => {
-      if (o.geometry) o.geometry.dispose?.();
-      if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose?.());
-    });
+    disposeCarParts(r.carParts);
   }
   remotes.delete(id);
 }
@@ -2139,24 +2449,46 @@ function updateRemotes(dt) {
     r.z += (peer.tz - r.z) * k;
     r.yaw = lerpAngle(r.yaw, peer.tyaw, Math.min(1, dt * 10));
 
-    const inCar = peer.veh && VEHICLE_MODELS[peer.veh] ? peer.veh : null;
-    if (inCar) {
-      const color = peer.app?.shirt || '#38bdf8';
-      if (!r.car || r.carModel !== inCar || r.carColor !== color) {
-        if (r.car) { scene.remove(r.car); r.car.traverse((o) => { o.geometry?.dispose?.(); }); }
-        r.carParts = buildCarMesh(inCar, color);
+    const spec = Cust.decodeNetVehicle(peer.veh, peer.app?.shirt || '#38bdf8');
+    if (spec) {
+      if (!r.car || r.carModel !== spec.model) {
+        if (r.car) {
+          if (r.char.group.parent === r.car) scene.add(r.char.group);
+          scene.remove(r.car);
+          disposeCarParts(r.carParts);
+        }
+        r.carParts = buildCarMesh(spec.model, spec.color, spec);
         r.car = r.carParts.group;
-        r.carModel = inCar;
-        r.carColor = color;
+        r.carModel = spec.model;
+        r.carToken = peer.veh;
         scene.add(r.car);
+      } else if (r.carToken !== peer.veh && r.carParts) {
+        r.carParts.applyMods(spec);
+        r.carToken = peer.veh;
       }
       r.car.visible = true;
       if (r.carParts) r.carParts.headBeams.visible = currentNightFactor > 0.08;
       r.car.position.set(r.x, city.groundY(r.x, r.z), r.z);
       r.car.rotation.y = r.yaw;
-      r.char.group.visible = false;
+      // Open-top roadster shows the remote driver's full outfit, shades & gold chain!
+      if (spec.model === 'roadster' && r.carParts) {
+        if (r.char.group.parent !== r.car) r.car.add(r.char.group);
+        r.char.group.visible = true;
+        r.char.group.position.copy(r.carParts.seat);
+        r.char.group.rotation.set(0, 0, 0);
+        r.char.group.scale.setScalar(r.carParts.seatScale);
+        r.char.setPose('sit');
+        r.char.animate(dt, 0);
+      } else {
+        r.char.group.visible = false;
+      }
     } else {
       if (r.car) r.car.visible = false;
+      if (r.char.group.parent !== scene) {
+        scene.add(r.char.group);
+        r.char.group.scale.setScalar(1);
+        r.char.setPose('stand');
+      }
       r.char.group.visible = true;
       r.char.group.position.set(r.x, city.groundY(r.x, r.z), r.z);
       r.char.group.rotation.y = r.yaw;
@@ -2340,7 +2672,7 @@ function netLocalState() {
     z: p.z,
     yaw: p.yaw,
     moving: v ? Math.abs(v.speed) > 0.4 : Math.hypot(p.vx, p.vz) > 0.3,
-    vehicle: v ? v.data.model : null,
+    vehicle: v ? Cust.encodeNetVehicle(v.data) : null,
     emote: !v && p.char?.emote ? p.char.emote : null,
   };
 }
@@ -2388,6 +2720,7 @@ function drawMinimap() {
   }
   for (const st of Object.values(STATIONS)) square(st.x, st.z, 13, st.color, st.id[0].toUpperCase());
   square(DEALERSHIP.x, DEALERSHIP.z, 13, DEALERSHIP.color, 'M');
+  square(BOUTIQUE.x, BOUTIQUE.z, 13, BOUTIQUE.color, 'B');
   for (const st of Object.values(FUEL_STATIONS)) square(st.x, st.z, 11, st.color, 'F');
   for (const t of game.traffic) dot(t.x, t.z, 1.6, '#e5e7eb');
   for (const cop of game.police) {
@@ -2510,6 +2843,10 @@ function frame() {
   if (game.autosaveTimer <= 0) { game.autosaveTimer = 60; saveGame(true); }
 
   for (const [i, car] of displayCars.entries()) car.rotation.y += dt * (0.25 + i * 0.05);
+  for (const [i, man] of boutiqueMannequins.entries()) {
+    man.group.rotation.y += dt * (0.32 + i * 0.04);
+    man.animate(dt, 0);
+  }
   city.update(game.elapsed);
   updatePrompt();
   updateCamera(dt);

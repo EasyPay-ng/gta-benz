@@ -85,8 +85,8 @@ Client → server:
 | `login` | `{name, pin}` | `no_account` / `bad_pin` / `locked`; issues a session token |
 | `join` | `{token}` or `{guest:true, name}`, plus `app` | must be first; guests skip accounts entirely |
 | `logout` | `{}` | revokes the current token |
-| `pos` | `{x, z, yaw, mv, veh, emote?}` | ≤10/s, validated and clamped server-side; optional `emote` id when on foot |
-| `look` | `{app}` | appearance change without reconnecting |
+| `pos` | `{x, z, yaw, mv, veh, emote?}` | ≤10/s, validated and clamped server-side; `veh` encodes `"model\|color\|livery\|rims\|underglow"` (≤56 chars); optional `emote` id when on foot |
+| `look` | `{app}` | appearance + 3D Boutique clothing/accessory change (`topStyle`, `bottomStyle`, `shoeStyle`, `hatStyle`, `glasses`, `chain`, colours) without reconnecting |
 | `chat` | `{m}` | ≤120 chars, broadcast to the room |
 | `ping` | `{ts}` | answered with `pong`, drives the RTT readout |
 

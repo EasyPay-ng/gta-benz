@@ -146,7 +146,7 @@ export class CityRoom {
         s.z = clampNum(msg.z, -400, 400, s.z);
         s.yaw = clampNum(msg.yaw, -10, 10, s.yaw);
         s.mv = msg.mv ? 1 : 0;
-        s.veh = typeof msg.veh === 'string' ? msg.veh.slice(0, 16) : null;
+        s.veh = typeof msg.veh === 'string' ? msg.veh.slice(0, 56) : null;
         s.emote = typeof msg.emote === 'string' ? msg.emote.slice(0, 16) : null;
         ws.serializeAttachment(s);
         this._maybeBroadcast(now);
@@ -473,7 +473,10 @@ function round(v, dp = 1) {
   return Math.round(v * f) / f;
 }
 
-const APP_KEYS = ['skin', 'shirt', 'pants', 'hair', 'hairStyle', 'build'];
+const APP_KEYS = [
+  'skin', 'shirt', 'pants', 'hair', 'hairStyle', 'build',
+  'topStyle', 'bottomStyle', 'shoeStyle', 'shoeColor', 'hatStyle', 'hatColor', 'glasses', 'chain',
+];
 
 function sanitizeApp(app) {
   const out = {};

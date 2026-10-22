@@ -1,7 +1,7 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 4; // v4: 24x in-game clock, vehicle lastServicedInGameMs, telemetry & roadside assist
+export const SAVE_VERSION = 5; // v5: unique signature vehicles, custom car mods, 3D clothing & Maison Verve Boutique
 
 export const STARTING_CASH = 500;
 export const PAYROLL_INTERVAL = 30; // real seconds per 12-in-game-minute shift (30s * 24 = 720s = 12m)
@@ -153,6 +153,7 @@ export const STATIONS = {
 };
 
 export const DEALERSHIP = { id: 'dealer', name: 'Metro Motors', x: -112.5, z: 37.5, face: -1, color: '#0f766e' };
+export const BOUTIQUE = { id: 'boutique', name: 'Maison Verve Boutique', x: -37.5, z: -112.5, face: 1, color: '#ec4899' };
 
 // ---------------------------------------------------------------------------
 // Vehicles
@@ -160,40 +161,76 @@ export const DEALERSHIP = { id: 'dealer', name: 'Metro Motors', x: -112.5, z: 37
 // dimensions in metres; speeds in m/s (1 m/s = 3.6 km/h)
 export const VEHICLE_MODELS = {
   hatch: {
-    id: 'hatch', name: 'Rusty Hatchback', price: 0, forSale: false,
+    id: 'hatch', name: 'Rusty Hatchback', price: 0, forSale: false, tier: 'standard',
+    tagline: 'Dependable daily beater.',
     len: 3.9, wid: 1.75, bodyH: 0.62, cabinH: 0.62, cabinLen: 2.1, cabinZ: -0.2, wheelR: 0.33,
     maxSpeed: 24, accel: 9, brake: 22, steer: 0.62, grip: 7, style: 'hatch',
     fuelPerKm: 3.0, fillPrice: 60,
   },
   sedan: {
-    id: 'sedan', name: 'Lagos Cruiser Sedan', price: 1800, forSale: true,
+    id: 'sedan', name: 'Lagos Cruiser Sedan', price: 1800, forSale: true, tier: 'standard',
+    tagline: 'Smooth executive commuter.',
     len: 4.6, wid: 1.85, bodyH: 0.6, cabinH: 0.6, cabinLen: 2.3, cabinZ: -0.15, wheelR: 0.35,
     maxSpeed: 31, accel: 11, brake: 26, steer: 0.58, grip: 8, style: 'sedan',
     fuelPerKm: 2.6, fillPrice: 120,
   },
   taxi: {
-    id: 'taxi', name: 'Metro Cab Taxi', price: 2200, forSale: true, fixedColor: '#facc15',
+    id: 'taxi', name: 'Metro Cab Taxi', price: 2200, forSale: true, fixedColor: '#facc15', tier: 'standard',
+    tagline: '+30% fare bonus on cabbie shifts.',
     len: 4.6, wid: 1.85, bodyH: 0.6, cabinH: 0.6, cabinLen: 2.3, cabinZ: -0.15, wheelR: 0.35,
     maxSpeed: 29, accel: 10.5, brake: 26, steer: 0.6, grip: 8, style: 'taxi',
     fuelPerKm: 2.7, fillPrice: 120,
   },
   pickup: {
-    id: 'pickup', name: 'Okada Ridge Pickup', price: 2600, forSale: true,
+    id: 'pickup', name: 'Okada Ridge Pickup', price: 2600, forSale: true, tier: 'standard',
+    tagline: 'High-clearance utility workhorse.',
     len: 5.1, wid: 2.0, bodyH: 0.8, cabinH: 0.7, cabinLen: 1.9, cabinZ: 0.55, wheelR: 0.44,
     maxSpeed: 28, accel: 10, brake: 24, steer: 0.55, grip: 7.5, style: 'pickup',
     fuelPerKm: 3.2, fillPrice: 130,
   },
   van: {
-    id: 'van', name: 'SwiftCargo Van', price: 3200, forSale: true,
+    id: 'van', name: 'SwiftCargo Van', price: 3200, forSale: true, tier: 'standard',
+    tagline: 'Heavy commercial delivery van.',
     len: 5.2, wid: 2.05, bodyH: 0.9, cabinH: 1.15, cabinLen: 4.1, cabinZ: -0.35, wheelR: 0.4,
     maxSpeed: 25, accel: 8.5, brake: 22, steer: 0.5, grip: 7, style: 'van',
     fuelPerKm: 3.4, fillPrice: 130,
   },
+  muscle: {
+    id: 'muscle', name: "'69 Stallion GT", price: 5200, forSale: true, tier: 'signature',
+    tagline: 'Supercharged V8 fastback with chrome blower & twin stripes.',
+    defaultLivery: 'twin_stripe',
+    len: 4.75, wid: 1.94, bodyH: 0.58, cabinH: 0.52, cabinLen: 2.0, cabinZ: -0.28, wheelR: 0.37,
+    maxSpeed: 41, accel: 15.8, brake: 27, steer: 0.57, grip: 8.1, style: 'muscle',
+    fuelPerKm: 3.8, fillPrice: 145,
+  },
   sports: {
-    id: 'sports', name: 'Benz V12 Sport', price: 6500, forSale: true,
+    id: 'sports', name: 'Benz V12 Sport', price: 6500, forSale: true, tier: 'signature',
+    tagline: 'Track-bred grand tourer coupe.',
     len: 4.5, wid: 1.95, bodyH: 0.5, cabinH: 0.48, cabinLen: 1.8, cabinZ: -0.35, wheelR: 0.36,
     maxSpeed: 46, accel: 17, brake: 32, steer: 0.55, grip: 9.5, style: 'sports',
     fuelPerKm: 3.6, fillPrice: 140,
+  },
+  roadster: {
+    id: 'roadster', name: 'Aero Spider Roadster', price: 8200, forSale: true, tier: 'exotic',
+    tagline: 'Open-top convertible speedster — show off your fit at 160 km/h.',
+    len: 4.4, wid: 1.96, bodyH: 0.48, cabinH: 0.46, cabinLen: 1.75, cabinZ: -0.15, wheelR: 0.36,
+    maxSpeed: 45, accel: 16.5, brake: 33, steer: 0.62, grip: 10.0, style: 'roadster',
+    fuelPerKm: 3.4, fillPrice: 140,
+  },
+  gwagen: {
+    id: 'gwagen', name: 'Benz G-Wagen 4x4', price: 9500, forSale: true, tier: 'exotic',
+    tagline: 'Commanding luxury 4x4 SUV with bullbar, roof rack & rear spare.',
+    len: 4.85, wid: 2.04, bodyH: 0.84, cabinH: 0.86, cabinLen: 3.25, cabinZ: -0.36, wheelR: 0.45,
+    maxSpeed: 38, accel: 14.2, brake: 29, steer: 0.56, grip: 9.3, style: 'gwagen',
+    fuelPerKm: 3.9, fillPrice: 160,
+  },
+  hyper: {
+    id: 'hyper', name: 'Valkyrie X12 Hypercar', price: 14500, forSale: true, tier: 'exotic',
+    tagline: 'Mid-engine V12 flagship — teardrop canopy, side intakes & quad exhausts.',
+    defaultLivery: 'carbon_hood',
+    len: 4.68, wid: 2.06, bodyH: 0.44, cabinH: 0.42, cabinLen: 1.85, cabinZ: -0.05, wheelR: 0.37,
+    maxSpeed: 52, accel: 19.5, brake: 36, steer: 0.58, grip: 10.5, style: 'hyper',
+    fuelPerKm: 4.1, fillPrice: 175,
   },
   police: {
     id: 'police', name: 'Metro Police Interceptor', price: 0, forSale: false, fixedColor: '#0f172a',
@@ -236,7 +273,37 @@ export const TELEMETRY_FUEL_BLINK = 10;        // blinking fuel icon + tick SFX 
 export const TELEMETRY_ENGINE_FAULT = 20;      // "ENGINE FAULT" banner + tailpipe smoke below 20%
 export const TELEMETRY_HZ = 2;                 // HUD bar refresh rate (Hz)
 
-export const CAR_COLORS = ['#dc2626', '#2563eb', '#16a34a', '#f8fafc', '#111827', '#9333ea', '#f97316', '#64748b', '#0d9488', '#be185d'];
+export const CAR_COLORS = [
+  '#dc2626', '#2563eb', '#16a34a', '#f8fafc', '#111827', '#9333ea', '#f97316',
+  '#64748b', '#0d9488', '#be185d', '#eab308', '#06b6d4', '#059669', '#d6d3d1',
+];
+
+// Custom Mod Shop options (paint respray, racing liveries, alloy rims & street underglow)
+export const RESPRAY_COST = 220;
+export const APEX_MOD_DISCOUNT = 0.75; // 25% discount on custom car mods when Apex Auto Garage is built
+
+export const CAR_LIVERIES = {
+  clean:       { id: 'clean',       name: 'Factory Clean',       price: 80,  stripeHex: null },
+  twin_stripe: { id: 'twin_stripe', name: 'Twin Racing Stripes', price: 360, stripeHex: '#f8fafc' },
+  gold_trim:   { id: 'gold_trim',   name: '24k Gold Stripes',    price: 580, stripeHex: '#fbbf24' },
+  carbon_hood: { id: 'carbon_hood', name: 'Carbon Aero Package', price: 460, stripeHex: '#18181b' },
+};
+
+export const RIM_FINISHES = {
+  silver: { id: 'silver', name: 'Alloy Silver',   hex: '#d4d4d8', price: 140 },
+  black:  { id: 'black',  name: 'Forged Stealth', hex: '#18181b', price: 320 },
+  gold:   { id: 'gold',   name: '24k Gold Spoke', hex: '#fbbf24', price: 520 },
+  cyan:   { id: 'cyan',   name: 'Cyber Anodized', hex: '#22d3ee', price: 460 },
+};
+
+export const UNDERGLOW_OPTIONS = {
+  none:    { id: 'none',    name: 'No Underglow', hex: null,      price: 0 },
+  cyan:    { id: 'cyan',    name: 'Miami Cyan',   hex: '#22d3ee', price: 480 },
+  purple:  { id: 'purple',  name: 'Ultraviolet',  hex: '#a855f7', price: 480 },
+  crimson: { id: 'crimson', name: 'Ruby Red',     hex: '#ef4444', price: 480 },
+  emerald: { id: 'emerald', name: 'Toxic Green',  hex: '#22c55e', price: 480 },
+  gold:    { id: 'gold',    name: 'Solar Gold',   hex: '#f59e0b', price: 560 },
+};
 
 // Fuel stations — one on each of three outer blocks (marked F on the minimap)
 export const FUEL_STATIONS = {
@@ -246,11 +313,12 @@ export const FUEL_STATIONS = {
 };
 
 // ---------------------------------------------------------------------------
-// Character appearance options
+// Character appearance & Maison Verve Boutique 3D Clothing Catalog
 // ---------------------------------------------------------------------------
 export const SKIN_TONES = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#5c3a1e', '#3b2412', '#ffdbac'];
-export const SHIRT_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316', '#14b8a6', '#f8fafc', '#111827', '#ec4899'];
-export const PANTS_COLORS = ['#1f2937', '#1e3a8a', '#78350f', '#374151', '#4d7c0f', '#0f172a', '#a8a29e'];
+export const SHIRT_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316', '#14b8a6', '#f8fafc', '#111827', '#ec4899', '#7f1d1d', '#d97706'];
+export const PANTS_COLORS = ['#1f2937', '#1e3a8a', '#78350f', '#374151', '#4d7c0f', '#0f172a', '#a8a29e', '#f8fafc', '#991b1b'];
+export const SHOE_COLORS = ['#1c1917', '#f8fafc', '#dc2626', '#2563eb', '#eab308', '#78350f', '#a855f7'];
 export const HAIR_COLORS = ['#111111', '#3b2412', '#6b4423', '#b8860b', '#9ca3af', '#7f1d1d'];
 export const HAIR_STYLES = ['short', 'buzz', 'afro', 'long', 'bald'];
 export const BUILDS = {
@@ -258,6 +326,82 @@ export const BUILDS = {
   Lean: { w: 0.86, h: 1.03 },
   Broad: { w: 1.22, h: 0.98 },
 };
+
+export const CLOTHING_ITEMS = {
+  top: {
+    tee:     { id: 'tee',     slot: 'top', field: 'topStyle', name: 'Classic Crew Tee',       price: 0,    desc: 'Clean fitted short-sleeve tee.' },
+    jersey:  { id: 'jersey',  slot: 'top', field: 'topStyle', name: 'Street Mesh Jersey',     price: 260,  desc: 'Sleeveless basketball cut with contrast trim.' },
+    hoodie:  { id: 'hoodie',  slot: 'top', field: 'topStyle', name: 'Heavyweight Hoodie',     price: 360,  desc: 'Long-sleeve hoodie with draped hood & kangaroo pouch.' },
+    bomber:  { id: 'bomber',  slot: 'top', field: 'topStyle', name: 'Varsity Bomber Jacket',  price: 620,  desc: 'Layered open bomber over white tee with shoulder stripes.' },
+    suit:    { id: 'suit',    slot: 'top', field: 'topStyle', name: 'Executive Suit & Tie',   price: 1150, desc: 'Tailored blazer with crisp dress shirt, lapels & silk tie.' },
+    senator: { id: 'senator', slot: 'top', field: 'topStyle', name: 'Royal Senator Tunic',    price: 1450, desc: 'Draped Nigerian Senator kaftan with gold chest embroidery.' },
+  },
+  bottom: {
+    jeans:   { id: 'jeans',   slot: 'bottom', field: 'bottomStyle', name: 'Tapered Denim',       price: 0,   desc: 'Everyday slim-fit street denim.' },
+    shorts:  { id: 'shorts',  slot: 'bottom', field: 'bottomStyle', name: 'Athletic Shorts',     price: 220, desc: 'Knee-length shorts with ribbed crew socks.' },
+    cargo:   { id: 'cargo',   slot: 'bottom', field: 'bottomStyle', name: 'Techwear Cargos',     price: 380, desc: 'Tactical utility trousers with 3D side thigh pockets.' },
+    slacks:  { id: 'slacks',  slot: 'bottom', field: 'bottomStyle', name: 'Tailored Dress Slacks', price: 480, desc: 'Pressed luxury wool trousers.' },
+  },
+  shoe: {
+    sneakers: { id: 'sneakers', slot: 'shoe', field: 'shoeStyle', name: 'Low-Top Sneakers',     price: 0,   desc: 'Clean street trainers with white cupsole.' },
+    hightops: { id: 'hightops', slot: 'shoe', field: 'shoeStyle', name: 'Retro High-Tops',      price: 380, desc: 'Padded high-ankle basketball kicks.' },
+    boots:    { id: 'boots',    slot: 'shoe', field: 'shoeStyle', name: 'Chelsea Lug Boots',    price: 460, desc: 'Chunky dark-lugged leather boots.' },
+    loafers:  { id: 'loafers',  slot: 'shoe', field: 'shoeStyle', name: 'Gold-Bit Loafers',     price: 680, desc: 'Italian dress loafers with 24k gold horsebit.' },
+  },
+  hat: {
+    none:     { id: 'none',     slot: 'hat', field: 'hatStyle', name: 'No Hat',              price: 0,    desc: 'Show off your hairstyle.' },
+    snapback: { id: 'snapback', slot: 'hat', field: 'hatStyle', name: 'Street Snapback',     price: 180,  desc: 'Structured flat-brim street cap.' },
+    bucket:   { id: 'bucket',   slot: 'hat', field: 'hatStyle', name: 'Designer Bucket Hat', price: 240,  desc: '360° sloped-brim streetwear bucket hat.' },
+    fila:     { id: 'fila',     slot: 'hat', field: 'hatStyle', name: 'Traditional Fila Cap', price: 420,  desc: 'Hand-woven folded Nigerian chief cap.' },
+    crown:    { id: 'crown',    slot: 'hat', field: 'hatStyle', name: '24k Tycoon Crown',    price: 2500, desc: 'Solid gold jewelled crown for city moguls.' },
+  },
+  glasses: {
+    none:         { id: 'none',         slot: 'glasses', field: 'glasses', name: 'No Eyewear',       price: 0,   desc: 'Clear natural gaze.' },
+    aviator:      { id: 'aviator',      slot: 'glasses', field: 'glasses', name: 'Dark Aviators',    price: 290, desc: 'Tinted teardrop lenses with sleek frame.' },
+    gold_shades:  { id: 'gold_shades',  slot: 'glasses', field: 'glasses', name: 'Cartier Gold',     price: 680, desc: 'Squared luxury shades with 24k gold bridge & temples.' },
+    cyber_shades: { id: 'cyber_shades', slot: 'glasses', field: 'glasses', name: 'Neon Cyber Visor', price: 820, desc: 'Luminous wrap-around synthwave visor.' },
+  },
+  chain: {
+    none:   { id: 'none',   slot: 'chain', field: 'chain', name: 'No Chain',             price: 0,    desc: 'Clean neckline.' },
+    silver: { id: 'silver', slot: 'chain', field: 'chain', name: 'Iced Cuban Silver',    price: 450,  desc: 'Heavy rhodium-plated Cuban link chain.' },
+    gold:   { id: 'gold',   slot: 'chain', field: 'chain', name: '24k Gold Medallion',   price: 1200, desc: 'Thick 24k gold chain with pendant medallion.' },
+  },
+};
+
+export const OUTFIT_BUNDLES = [
+  {
+    id: 'street_king',
+    name: 'Street King Drip',
+    price: 980,
+    tagline: 'Varsity bomber, tactical cargos, retro high-tops & dark aviators.',
+    items: [['top', 'bomber'], ['bottom', 'cargo'], ['shoe', 'hightops'], ['glasses', 'aviator']],
+    colors: { shirt: '#111827', pants: '#374151', shoeColor: '#dc2626' },
+  },
+  {
+    id: 'ceo_mogul',
+    name: 'Boardroom Mogul Set',
+    price: 2150,
+    tagline: 'Tailored suit & tie, pressed slacks, gold-bit loafers & Cartier shades.',
+    items: [['top', 'suit'], ['bottom', 'slacks'], ['shoe', 'loafers'], ['glasses', 'gold_shades']],
+    colors: { shirt: '#0f172a', pants: '#0f172a', shoeColor: '#1c1917' },
+  },
+  {
+    id: 'lagos_royalty',
+    name: 'Lagos Royalty Senator',
+    price: 2950,
+    tagline: 'Embroidered Senator tunic, traditional Fila cap, gold loafers & 24k medallion.',
+    items: [['top', 'senator'], ['bottom', 'slacks'], ['hat', 'fila'], ['shoe', 'loafers'], ['chain', 'gold']],
+    colors: { shirt: '#f8fafc', pants: '#f8fafc', hatColor: '#d97706', shoeColor: '#1c1917' },
+  },
+  {
+    id: 'night_runner',
+    name: 'Cyber Night Runner',
+    price: 1550,
+    tagline: 'Heavyweight hoodie, cargos, cyber visor & iced silver chain.',
+    items: [['top', 'hoodie'], ['bottom', 'cargo'], ['shoe', 'boots'], ['glasses', 'cyber_shades'], ['chain', 'silver']],
+    colors: { shirt: '#a855f7', pants: '#111827', shoeColor: '#1c1917' },
+  },
+];
 
 export const DEFAULT_APPEARANCE = {
   name: 'Benz',
@@ -267,6 +411,14 @@ export const DEFAULT_APPEARANCE = {
   hair: '#111111',
   hairStyle: 'short',
   build: 'Balanced',
+  topStyle: 'tee',
+  bottomStyle: 'jeans',
+  shoeStyle: 'sneakers',
+  shoeColor: '#1c1917',
+  hatStyle: 'none',
+  hatColor: '#111827',
+  glasses: 'none',
+  chain: 'none',
 };
 
 export const CITIZEN_NAMES = [

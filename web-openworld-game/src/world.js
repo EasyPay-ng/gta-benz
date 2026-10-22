@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   ROAD_LINES, ROAD_HALF, SIDEWALK_W, BLOCK_HALF, SIDEWALK_RING, BLOCK_CENTERS, BUSINESSES,
-  STATIONS, DEALERSHIP, FUEL_STATIONS, STREET_NAMES_X, STREET_NAMES_Z, MAX_BUSINESS_LEVEL,
+  STATIONS, DEALERSHIP, BOUTIQUE, FUEL_STATIONS, STREET_NAMES_X, STREET_NAMES_Z, MAX_BUSINESS_LEVEL,
   STREET_LAMP_POOL,
 } from './data.js';
 import { mulberry32 } from './economy.js';
@@ -446,6 +446,7 @@ export class City {
     for (const b of Object.values(BUSINESSES)) if (b.x === bx && b.z === bz) return (f) => this._buildLotBase(f, b);
     for (const s of Object.values(FUEL_STATIONS)) if (s.x === bx && s.z === bz) return (f) => this._buildFuelStation(f, s);
     if (DEALERSHIP.x === bx && DEALERSHIP.z === bz) return (f) => this._buildDealership(f);
+    if (BOUTIQUE.x === bx && BOUTIQUE.z === bz) return (f) => this._buildBoutique(f);
     return null;
   }
 
@@ -623,26 +624,33 @@ export class City {
   // ----- dealership ----------------------------------------------------------
   _buildDealership(frame) {
     const g = this.frameGroup(frame);
-    const trim = new THREE.MeshStandardMaterial({ color: DEALERSHIP.color, roughness: 0.35, metalness: 0.35 });
+    const trim = new THREE.MeshStandardMaterial({ color: DEALERSHIP.color, roughness: 0.3, metalness: 0.45 });
+    const neonBlue = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
     this.box(g, 0, 0.05, -8, 30, 0.1, 18, this.mats.plaza, { cast: false });
     // glass showroom
-    this.box(g, 0, 3, -16.8, 30, 6, 0.4, new THREE.MeshStandardMaterial({ color: 0xd6d3d1, roughness: 0.65 })); // back wall
+    this.box(g, 0, 3, -16.8, 30, 6, 0.4, new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.55 })); // sleek dark back wall
     this.box(g, -14.8, 3, -8, 0.4, 6, 18, this.mats.glass, { cast: false });
     this.box(g, 14.8, 3, -8, 0.4, 6, 18, this.mats.glass, { cast: false });
     this.box(g, 0, 6.2, -8, 30.6, 0.4, 18.4, trim);
+    this.box(g, 0, 6.45, 0.25, 30.7, 0.08, 0.14, neonBlue, { cast: false });
     for (const x of [-14.8, -5, 5, 14.8]) this.box(g, x, 3, 0.8, 0.4, 6, 0.4, this.mats.metal);
-    this.sign(g, ['METRO MOTORS', 'NEW & USED CARS'], 0, 7.4, 1, 14, 2, { bg: DEALERSHIP.color });
-    this.box(g, 0, 7.4, 0.85, 14.4, 2.2, 0.2, this.mats.darkMetal);
+    this.sign(g, ['METRO MOTORS', 'EXOTICS · CUSTOMS · DEALERSHIP'], 0, 7.45, 1, 16, 2.1, { bg: DEALERSHIP.color, border: '#38bdf8' });
+    this.box(g, 0, 7.45, 0.85, 16.4, 2.3, 0.2, this.mats.darkMetal);
     this.frameCollider(frame, 0, -16.8, 30, 1);
     this.frameCollider(frame, -14.8, -8, 0.8, 18);
     this.frameCollider(frame, 14.8, -8, 0.8, 18);
     // display platforms (cars placed by game.js)
     this.dealerDisplays = [];
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
     for (const x of [-9, 0, 9]) {
-      const plat = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 2.8, 0.25, 24), this.mats.metal);
-      plat.position.set(x, 0.12, -9);
+      const plat = new THREE.Mesh(new THREE.CylinderGeometry(2.85, 2.95, 0.26, 28), this.mats.darkMetal);
+      plat.position.set(x, 0.13, -9);
       plat.receiveShadow = true;
       g.add(plat);
+      const glow = new THREE.Mesh(new THREE.RingGeometry(2.75, 2.92, 28), ringMat);
+      glow.rotation.x = -Math.PI / 2;
+      glow.position.set(x, 0.27, -9);
+      g.add(glow);
       const p = this.toWorld(frame, x, -9);
       this.dealerDisplays.push({ x: p.x, z: p.z, yaw: frame.face === 1 ? 0.6 : Math.PI + 0.6 });
       this.frameCollider(frame, x, -9, 4.6, 5.2);
@@ -659,6 +667,70 @@ export class City {
       return { x: q.x, z: q.z, yaw: Math.PI / 2 };
     });
     for (const lx of [-12, -4, 4, 12]) this.box(g, lx, 0.02, 17, 0.2, 0.02, 6, this.mats.white, { cast: false });
+  }
+
+  // ----- luxury fashion boutique (Maison Verve) ------------------------------
+  _buildBoutique(frame) {
+    const g = this.frameGroup(frame);
+    const obsidian = new THREE.MeshStandardMaterial({ color: 0x14141b, roughness: 0.35, metalness: 0.35 });
+    const goldMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.22, metalness: 0.9 });
+    const velvetMat = new THREE.MeshStandardMaterial({ color: 0x9f1239, roughness: 0.82 });
+    const warmBackdrop = new THREE.MeshBasicMaterial({ color: 0xfdf2f8 });
+    const neonPink = new THREE.MeshBasicMaterial({ color: 0xf472b6 });
+
+    // Marble forecourt plaza + crimson VIP runway carpet
+    this.box(g, 0, 0.04, -3, 28, 0.08, 22, this.mats.plaza, { cast: false });
+    this.box(g, 0, 0.09, 4.5, 3.8, 0.03, 9, velvetMat, { cast: false });
+
+    // 2-story Art-Deco obsidian flagship building + gold pilasters
+    this.box(g, 0, 4.6, -9, 26, 9.2, 13, obsidian);
+    this.frameCollider(frame, 0, -9, 26.4, 13.4);
+    this.box(g, 0, 9.35, -9, 26.8, 0.38, 13.8, goldMat);
+    this.box(g, 0, 4.9, -2.35, 26.4, 0.22, 0.35, goldMat);
+    this.box(g, 0, 9.58, -2.15, 26.8, 0.09, 0.14, neonPink, { cast: false });
+
+    for (const px of [-12.6, -5.2, 5.2, 12.6]) {
+      this.box(g, px, 4.6, -2.35, 0.55, 9.2, 0.55, goldMat);
+    }
+
+    // Illuminated window display alcoves + panoramic boutique glass
+    for (const wx of [-8.8, 8.8]) {
+      this.box(g, wx, 2.2, -2.55, 6.2, 3.8, 0.12, warmBackdrop, { cast: false });
+      this.box(g, wx, 2.2, -2.15, 6.4, 3.9, 0.08, this.mats.glass, { cast: false });
+    }
+    // Central grand glass double doors + gold awning canopy
+    this.box(g, 0, 2.1, -2.38, 3.6, 4.0, 0.12, this.mats.glass, { cast: false });
+    this.box(g, 0, 4.25, -0.8, 6.2, 0.24, 3.2, goldMat);
+
+    // Flagship signage
+    this.sign(g, ['MAISON VERVE', 'LUXURY FASHION · CHAINS · HAUTE COUTURE'], 0, 7.1, -2.28, 18, 2.2, {
+      bg: '#18181b', fg: '#fbcfe8', border: '#fbbf24',
+    });
+
+    // 3 Golden Mannequin Display Pedestals right in front of the illuminated windows (dressed by game.js)
+    this.boutiqueDisplays = [];
+    for (const lx of [-8.8, 0, 8.8]) {
+      const zLocal = lx === 0 ? -0.9 : -1.45;
+      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 0.22, 20), goldMat);
+      ped.position.set(lx, 0.15, zLocal);
+      ped.receiveShadow = true;
+      g.add(ped);
+      const wp = this.toWorld(frame, lx, zLocal);
+      this.boutiqueDisplays.push({
+        x: wp.x,
+        z: wp.z,
+        y: CURB_Y + 0.26,
+        yaw: frame.face === 1 ? 0 : Math.PI,
+      });
+    }
+
+    // Glowing rose-pink interaction ring on the VIP runway
+    const pad = this._marker(new THREE.Color(BOUTIQUE.color));
+    const p = this.toWorld(frame, 0, 7.5);
+    pad.position.set(p.x, CURB_Y + 0.04, p.z);
+    this.root.add(pad);
+    this.stationMarkers.push(pad);
+    BOUTIQUE.interact = { x: p.x, z: p.z };
   }
 
   // ----- buildable lots --------------------------------------------------------

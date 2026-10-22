@@ -251,3 +251,44 @@ button.big { padding: 12px 22px; font-size: 1.05rem; }
 .login-alt button { flex: 1; font-size: 12px; opacity: 0.85; }
 #btn-account.on { border-color: var(--primary); color: var(--primary); }
 .peer-tag { color: #7dd3fc; }
+
+/* ===== Boutique, Exotic Showroom & Car Customizer ===== */
+#creator { max-height: calc(100vh - 32px); overflow-y: auto; }
+.chip.locked { opacity: 0.55; border-style: dashed; }
+.shop-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 12px; }
+.shop-tab {
+  font-size: 12px; padding: 6px 11px; border-radius: 999px;
+  background: rgba(30, 41, 59, 0.72); border: 1px solid rgba(148, 163, 184, 0.28);
+}
+.shop-tab.active {
+  background: rgba(56, 189, 248, 0.22); border-color: var(--accent); color: #f8fafc; font-weight: 700;
+}
+.boutique-tab.active {
+  background: rgba(236, 72, 153, 0.24); border-color: #f472b6; color: #fdf2f8; font-weight: 700;
+}
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px; margin: 10px 0; }
+.shop-item {
+  background: rgba(15, 23, 42, 0.62); border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 11px; padding: 10px 12px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px;
+}
+.shop-item.equipped { border-color: #4ade80; background: rgba(22, 101, 52, 0.2); }
+.shop-item.exotic { border-color: rgba(251, 191, 36, 0.45); background: linear-gradient(145deg, rgba(30, 27, 75, 0.55), rgba(15, 23, 42, 0.78)); }
+.shop-item h4 { margin: 0; font-size: 14px; display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.shop-item p { margin: 0; font-size: 12px; color: #cbd5e1; line-height: 1.4; }
+.car-card.exotic-card {
+  border-color: rgba(251, 191, 36, 0.5);
+  background: linear-gradient(145deg, rgba(30, 27, 75, 0.52), rgba(15, 23, 42, 0.8));
+}
+.exotic-badge {
+  display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px; background: rgba(251, 191, 36, 0.2); color: #fde68a; border: 1px solid rgba(251, 191, 36, 0.5);
+}
+.mod-section {
+  margin: 10px 0; padding: 10px 12px; border-radius: 10px;
+  background: rgba(15, 23, 42, 0.52); border: 1px solid rgba(148, 163, 184, 0.2);
+}
+.mod-section h4 { margin: 0 0 8px; font-size: 13px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+.mod-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.mod-chip { font-size: 12px; padding: 6px 10px; border-radius: 8px; }
+.mod-chip.active { border-color: #4ade80; background: rgba(34, 197, 94, 0.2); color: #bbf7d0; font-weight: 700; }
+
