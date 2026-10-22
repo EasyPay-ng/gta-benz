@@ -44,6 +44,7 @@ export class NetClient {
 
     this.status = 'idle';
     this.rtt = null;
+    this.serverClock = null; // { inGameBase, perfBase, speed, day, hhmm } from server
     this.peers = new Map(); // id -> { id, name, app, x, z, yaw, mv, veh, visible, tx, tz, tyaw }
     this.chat = [];         // last few messages, for the UI
 
@@ -276,6 +277,25 @@ export class NetClient {
     return [...this.peers.values()].filter((p) => p.visible);
   }
 
+  /** Current authoritative server in-game clock (ms), or null when disconnected. */
+  clockNow() {
+    if (!this.connected || !this.serverClock) return null;
+    const elapsed = Math.max(0, performance.now() - this.serverClock.perfBase);
+    return this.serverClock.inGameBase + elapsed * this.serverClock.speed;
+  }
+
+  _syncClock(c) {
+    if (!c || !Number.isFinite(c.inGameMs)) return;
+    this.serverClock = {
+      inGameBase: c.inGameMs,
+      perfBase: performance.now(),
+      speed: Number.isFinite(c.speed) && c.speed > 0 ? c.speed : 24,
+      day: c.day ?? null,
+      hhmm: c.hhmm ?? null,
+    };
+    this.handlers.onClock?.(this.clockNow(), c);
+  }
+
   // ---------------------------------------------------------------------------
   _handle(msg) {
     switch (msg.t) {
@@ -313,9 +333,14 @@ export class NetClient {
         this.playerId = msg.you?.playerId || this.playerId;
         this.restore = msg.restore || null;
         this._setStatus('online');
+        if (msg.clock) this._syncClock(msg.clock);
         this.nextSend = 0;
         this.nextPing = performance.now(); // measure RTT straight after the handshake
         this.handlers.onWelcome?.(msg);
+        break;
+      }
+      case 'clock': {
+        this._syncClock(msg);
         break;
       }
       case 'join': {

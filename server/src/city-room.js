@@ -21,6 +21,7 @@ import {
   revokeToken,
   accountCount,
 } from './accounts.js';
+import { RoomClock } from './city-clock.js';
 
 const MAX_MESSAGE_BYTES = 2048;   // hard cap per inbound frame
 const BROADCAST_MS = 200;         // 5 Hz snapshot rate
@@ -60,6 +61,8 @@ export class CityRoom {
     this.state = state;
     this.env = env;
     this.room = state.id.name || 'city';
+    const tickMs = Number(env?.CLOCK_TICK_MS) || undefined;
+    this.clock = new RoomClock(state.storage, { tickMs });
   }
 
   // ---------------------------------------------------------------------------
@@ -283,16 +286,20 @@ export class CityRoom {
       .filter((o) => o.ws !== ws && o.s.id && now - o.s.lastSeen < DROP_AFTER_MS)
       .map(({ s: o }) => ({ id: o.id, name: o.name, app: o.app, x: o.x, z: o.z, yaw: o.yaw, veh: o.veh, account: !!o.account }));
 
+    const { clock, nextTickAt } = await this.clock.onJoin(now, peers.length === 0);
+
     this._send(ws, {
       t: 'welcome',
       id: s.id,
       room: this.room,
       tick: BROADCAST_MS,
+      clock,
       peers,
       you: { id: s.id, name: s.name, playerId: s.playerId, account: !!s.account },
       restore,
       now,
     });
+    this._scheduleFlush(nextTickAt);
 
     this._broadcastAll(
       { t: 'join', id: s.id, name: s.name, app: s.app, x: s.x, z: s.z, yaw: s.yaw, veh: s.veh, account: !!s.account },
@@ -306,8 +313,17 @@ export class CityRoom {
   async _leave(ws, code) {
     const s = ws.deserializeAttachment();
     if (!s?.id) return;
+    const leftId = s.id;
+    s.id = null;
+    try { ws.serializeAttachment(s); } catch { /* closing */ }
     if (s.account) await this._persistPosition(s, ws);
-    this._broadcastAll({ t: 'leave', id: s.id, code });
+    this._broadcastAll({ t: 'leave', id: leftId, code }, ws);
+
+    const remaining = this._sessions().filter((o) => o.ws !== ws && o.s.id);
+    if (remaining.length === 0) {
+      await this.clock.onEmpty(Date.now());
+      try { await this.state.storage.deleteAlarm(); } catch { /* none set */ }
+    }
   }
 
   _persistPosition(s, ws) {
@@ -346,6 +362,12 @@ export class CityRoom {
   // If a socket isn't due yet we set a single alarm to catch the trailing update —
   // otherwise the last few metres of movement before a player stops would be lost.
   _maybeBroadcast(now) {
+    const nextDue = this._flushSnapshots(now);
+    if (Number.isFinite(nextDue)) this._scheduleFlush(nextDue);
+    return nextDue;
+  }
+
+  _flushSnapshots(now) {
     let nextDue = Infinity;
     for (const { ws, s } of this._sessions()) {
       if (!s.id) continue;
@@ -357,7 +379,7 @@ export class CityRoom {
       if (now >= due) this._sendSnapshot(ws, s, now);
       else nextDue = Math.min(nextDue, due);
     }
-    if (Number.isFinite(nextDue)) this._scheduleFlush(nextDue);
+    return nextDue;
   }
 
   _scheduleFlush(at) {
@@ -370,9 +392,29 @@ export class CityRoom {
       .catch(() => {});
   }
 
-  // Fires the deferred trailing snapshot, then the object is free to hibernate again.
+  // Fires the deferred trailing snapshot and/or 30s city clock tick, then hibernates
+  // between ticks (or stops completely when no joined players remain).
   async alarm() {
-    this._maybeBroadcast(Date.now());
+    const now = Date.now();
+    const joined = this._sessions().filter((o) => o.s.id);
+    if (joined.length === 0) {
+      await this.clock.onEmpty(now);
+      return;
+    }
+    const nextSnapDue = this._flushSnapshots(now);
+    const nextClockDue = await this.clock.maybeTick(now, (msg) => this._broadcastJoined(msg));
+    const nextAlarm = Math.min(nextSnapDue, nextClockDue);
+    if (Number.isFinite(nextAlarm)) {
+      try { await this.state.storage.setAlarm(nextAlarm); } catch { /* ignore */ }
+    }
+  }
+
+  _broadcastJoined(msg) {
+    const text = JSON.stringify(msg);
+    for (const { ws, s } of this._sessions()) {
+      if (!s.id) continue;
+      try { ws.send(text); } catch { /* closing */ }
+    }
   }
 
   _sendSnapshot(ws, me, now) {

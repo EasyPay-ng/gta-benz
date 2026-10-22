@@ -5,6 +5,8 @@
 //
 // Override the target with SERVER_URL=ws://localhost:8787/ws?room=test npm test
 
+import { RoomClock, CLOCK_SPEED, CLOCK_TICK_MS, formatClockPayload } from '../src/city-clock.js';
+
 const URL = process.env.SERVER_URL || 'ws://127.0.0.1:8787/ws?room=test';
 const ROOM_URL = URL.includes('room=') ? URL : `${URL}?room=test`;
 
@@ -62,18 +64,53 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 console.log(`\nMetroVenture city server smoke test → ${ROOM_URL}\n`);
 
+// --- RoomClock unit checks (persistence + 30s tick + empty-room resume) ---
+{
+  const kv = new Map();
+  const storage = {
+    async get(k) { return kv.get(k); },
+    async put(k, v) { kv.set(k, structuredClone(v)); },
+  };
+  const rc1 = new RoomClock(storage);
+  const { clock: w0, nextTickAt } = await rc1.onJoin(1_000_000, true);
+  check('RoomClock starts at Day 1 · 08:00', w0.day === 1 && w0.hhmm === '08:00', JSON.stringify(w0));
+  check('RoomClock schedules next broadcast in 30 real s', nextTickAt === 1_000_000 + CLOCK_TICK_MS, String(nextTickAt));
+  let broadcasted = null;
+  await rc1.maybeTick(1_000_000 + CLOCK_TICK_MS, (msg) => { broadcasted = msg; });
+  check('30 real s tick advances city time by 12 in-game min (08:12)', broadcasted?.t === 'clock' && broadcasted?.hhmm === '08:12', JSON.stringify(broadcasted));
+  await rc1.onEmpty(1_000_000 + CLOCK_TICK_MS);
+  // Simulate DO eviction and cold restart 2.5 real minutes later (1 hour in-game = 09:12)
+  const rc2 = new RoomClock(storage);
+  const { clock: wAfter } = await rc2.onJoin(1_000_000 + CLOCK_TICK_MS + 150_000, true);
+  check('RoomClock resumes continuously across empty-room restart', wAfter.hhmm === '09:12' && wAfter.inGameMs > broadcasted.inGameMs, JSON.stringify(wAfter));
+  check('formatClockPayload rolls Day counter cleanly', formatClockPayload(24 * 3_600_000 * 2 + 5 * 3_600_000).day === 3 && CLOCK_SPEED === 24);
+}
+
 const a = client({ name: 'Amara', x: 0, z: 0 });
 await a.ready;
 a.join();
 const welcomeA = await a.waitFor((m) => m.t === 'welcome');
 check('A gets a welcome with an id', typeof welcomeA.id === 'string' && welcomeA.id.startsWith('p_'), JSON.stringify(welcomeA));
 check('welcome carries the 5 Hz tick', welcomeA.tick === 200);
+check(
+  'welcome includes authoritative city clock { inGameMs, day, hhmm }',
+  welcomeA.clock
+    && typeof welcomeA.clock.inGameMs === 'number'
+    && welcomeA.clock.day >= 1
+    && /^\d{2}:\d{2}$/.test(welcomeA.clock.hhmm),
+  JSON.stringify(welcomeA.clock),
+);
 
 const b = client({ name: 'Bayo', x: 5, z: 0 });
 await b.ready;
 b.join();
 const welcomeB = await b.waitFor((m) => m.t === 'welcome');
 check('B is told about A on join', welcomeB.peers.some((p) => p.id === welcomeA.id && p.name === 'Amara'));
+check(
+  'B receives monotonic room clock >= A',
+  welcomeB.clock && welcomeB.clock.inGameMs >= welcomeA.clock.inGameMs,
+  `${welcomeA.clock?.inGameMs} -> ${welcomeB.clock?.inGameMs}`,
+);
 
 const joinForA = await a.waitFor((m) => m.t === 'join' && m.id === welcomeB.id);
 check('A is told B joined', joinForA.name === 'Bayo' && joinForA.app.skin === '#8d5524');
@@ -127,7 +164,20 @@ const left = await a.waitFor((m) => m.t === 'leave' && m.id === welcomeB.id);
 check('room is told when a player leaves', !!left);
 
 a.close();
-await sleep(200);
+await sleep(250);
+
+// Empty-room reconnect: clock persists and advances monotonically while room had 0 sockets.
+const c = client({ name: 'Chioma', x: 0, z: 0 });
+await c.ready;
+c.join();
+const welcomeC = await c.waitFor((m) => m.t === 'welcome');
+check(
+  'room clock stays monotonic across empty-room reconnect',
+  welcomeC.clock && welcomeC.clock.inGameMs > welcomeA.clock.inGameMs,
+  `${welcomeA.clock?.inGameMs} -> ${welcomeC.clock?.inGameMs}`,
+);
+c.close();
+await sleep(150);
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length) {

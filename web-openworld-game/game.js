@@ -3,14 +3,17 @@ import * as THREE from 'three';
 import {
   SAVE_KEY, OCCUPATIONS, BUSINESSES, STATIONS, DEALERSHIP, VEHICLE_MODELS, CAR_COLORS, MAX_BUSINESS_LEVEL,
   SKIN_TONES, SHIRT_COLORS, PANTS_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, TOTAL_CITIZENS, ROAD_LINES,
-  ROAD_HALF, WORLD_LIMIT, PAYROLL_INTERVAL, BLOCK_CENTERS, BLOCK_HALF, DEFAULT_APPEARANCE,
+  ROAD_HALF, WORLD_LIMIT, BLOCK_CENTERS, BLOCK_HALF, DEFAULT_APPEARANCE,
   FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
+  ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
+import * as Time from './src/time.js';
+import * as VCard from './src/vehCard.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
-import { Vehicle, TrafficCar, buildCarMesh } from './src/vehicles.js';
+import { Vehicle, TrafficCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
 import { NetClient, discoverServerUrl } from './src/net.js';
 
 const $ = (id) => document.getElementById(id);
@@ -39,7 +42,8 @@ scene.background = SKY;
 scene.fog = new THREE.Fog(SKY, 150, 430);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 900);
-scene.add(new THREE.HemisphereLight(0xe0f2fe, 0x4d6b35, 1.9));
+const hemi = new THREE.HemisphereLight(0xe0f2fe, 0x4d6b35, 1.9);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -47,6 +51,13 @@ Object.assign(sun.shadow.camera, { left: -65, right: 65, top: 65, bottom: -65, n
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.03;
 scene.add(sun, sun.target);
+
+// Single real headlight attached only to the player's currently driven car (UPGRADE_PLAN.md §11 D2)
+const playerHeadlight = new THREE.SpotLight(0xfffbeb, 0, 48, 0.54, 0.45, 1.35);
+playerHeadlight.castShadow = false;
+playerHeadlight.visible = false;
+let currentSunOffset = { x: 45, y: 90, z: 30 };
+let currentNightFactor = 0;
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -95,6 +106,7 @@ const sfx = {
   stall() { this.tone(150, 0.25, 'sawtooth', 0.09); this.tone(85, 0.45, 'sawtooth', 0.09, 0.18); },
   pump() { for (let i = 0; i < 6; i++) this.tone(280 + i * 45, 0.09, 'square', 0.05, i * 0.28); },
   wrench() { [0, 0.22, 0.44, 0.66].forEach((w, i) => this.tone(210 + (i % 2) * 70, 0.09, 'square', 0.05, w)); },
+  fuelTick() { this.tone(940, 0.035, 'sine', 0.045); },
   setEngine(on, speed) {
     if (!this.engine) return;
     const t = this.ctx.currentTime;
@@ -110,14 +122,15 @@ const city = new City(scene);
 const navNodes = city.navNodes;
 
 // Showroom display cars at Metro Motors
-const displayCars = ['sedan', 'sports', 'pickup'].map((model, i) => {
+const displayCarParts = ['sedan', 'sports', 'pickup'].map((model, i) => {
   const parts = buildCarMesh(model, ['#2563eb', '#dc2626', '#0d9488'][i]);
   const spot = city.dealerDisplays[i];
   parts.group.position.set(spot.x, CURB_Y + 0.25, spot.z);
   parts.group.rotation.y = spot.yaw;
   scene.add(parts.group);
-  return parts.group;
+  return parts;
 });
+const displayCars = displayCarParts.map((p) => p.group);
 
 // Task waypoint marker
 const marker = (() => {
@@ -152,13 +165,125 @@ const game = {
   creatorOpen: false,
   helpOpen: false,
   loginOpen: false,
-  time: 0,
+  elapsed: 0,
+  time: null,      // window.__mv.time = { now(), set(inGameMs), fastForwardTo(inGameMs), phase(), label() }
+  telemetry: null, // window.__mv.telemetry = () => snapshot of all owned vehicles' cond
   valetCooldown: 0,
   autosaveTimer: 60,
   prompt: null,
 };
 window.__mv = game; // handy for debugging in the console
 game.renderer = renderer;
+
+let debugClockOverride = null; // optional QA override when window.__mv.time.set(ms) is used while online
+let lastShiftIndex = null;
+let dayNightTimer = 0;
+let clockHudTimer = 0;
+let telemetryTimer = 0;
+let fuelTickTimer = 0;
+
+/** Single authoritative clock source (server-sourced when online, local fallback offline). */
+function getClock() {
+  if (debugClockOverride) return Time.inGameNowMs(debugClockOverride, Date.now());
+  const srv = net?.clockNow?.();
+  if (srv != null) return srv;
+  return Time.inGameNowMs(game.state?.clock, Date.now());
+}
+
+function updateDayNight(inGameMs, force = false) {
+  if (!force && dayNightTimer > 0) return;
+  dayNightTimer = 0.1;
+  const L = Time.lightingAt(inGameMs);
+  currentNightFactor = L.night;
+  currentSunOffset = L.sunOffset;
+  SKY.setHex(L.skyHex);
+  scene.fog.color.copy(SKY);
+  hemi.color.setHex(L.hemiSkyHex);
+  hemi.groundColor.setHex(L.hemiGroundHex);
+  hemi.intensity = L.hemiIntensity;
+  sun.color.setHex(L.sunHex);
+  sun.intensity = L.sunIntensity;
+  sun.castShadow = L.shadows;
+  city.setDayNight(L.night, L.lampFactor, game.player.x, game.player.z);
+  setVehicleNightFactor(L.night);
+  const nightBeams = L.night > 0.08;
+  for (const p of displayCarParts) p.headBeams.visible = nightBeams;
+  const pv = game.player.vehicle;
+  const headOn = !!(pv && pv.cond.hp > 0 && pv.cond.fuel > 0 && nightBeams);
+  playerHeadlight.visible = headOn;
+  playerHeadlight.intensity = headOn ? 4.2 * L.night : 0;
+}
+
+function ensureWarnState(v) {
+  if (!v.warnState) v.warnState = VCard.createWarningState(v.cond);
+  return v.warnState;
+}
+
+function updateVehicleTelemetry(dt, force = false) {
+  const v = game.player.vehicle;
+  if (!v) return;
+  const tracker = ensureWarnState(v);
+  // Low-fuel (<10%) tick SFX while driving, capped at 3 s per episode (§9 A)
+  const fuelCritDriving = v.cond.hp > 0 && v.cond.fuel > 0 && v.cond.fuel < 10 && Math.abs(v.speed) > 0.4;
+  if (fuelCritDriving && tracker.fuelTickElapsed < 3.0) {
+    tracker.fuelTickElapsed += dt;
+    fuelTickTimer -= dt;
+    if (fuelTickTimer <= 0) {
+      fuelTickTimer = 0.6;
+      sfx.fuelTick();
+    }
+  } else if (!fuelCritDriving) {
+    fuelTickTimer = 0;
+  }
+
+  telemetryTimer -= dt;
+  if (!force && telemetryTimer > 0) return;
+  telemetryTimer = 1 / TELEMETRY_HZ;
+
+  for (const { key } of VCard.TELEMETRY_BARS) {
+    const val = Math.max(0, Math.min(100, v.cond[key]));
+    const { cls } = VCard.barTier(val);
+    const barEl = $(`vbar-${key}`);
+    const pctEl = $(`vpct-${key}`);
+    if (barEl) {
+      barEl.style.width = `${val.toFixed(1)}%`;
+      if (barEl.className !== cls) barEl.className = cls;
+    }
+    if (pctEl) pctEl.textContent = `${Math.round(val)}%`;
+  }
+  const step = VCard.stepWarnings(tracker, v.cond);
+  for (const alert of step.alerts) toast(alert.msg, alert.kind);
+  $('vicon-fuel')?.classList.toggle('blink', step.fuelBlink);
+  $('veh-fault')?.classList.toggle('hidden', !step.engineFault);
+}
+
+game.time = {
+  now: () => getClock(),
+  set(inGameMs) {
+    const target = Math.max(0, Number(inGameMs) || 0);
+    if (game.state?.clock) Time.setClock(game.state.clock, target, Date.now());
+    debugClockOverride = net?.connected ? Time.createClock(Date.now(), target, Time.CLOCK_SPEED) : null;
+    lastShiftIndex = Time.shiftIndex(target);
+    if (game.state?.stats) {
+      game.state.stats.day = Time.dayOf(target);
+      game.state.stats.payrollTimer = Time.secondsToNextShift(target);
+    }
+    updateDayNight(target, true);
+    updateHUD(true);
+    return Time.clockLabel(target);
+  },
+  fastForwardTo(inGameMs) {
+    if (game.state?.clock) Time.fastForwardTo(game.state.clock, inGameMs, Date.now());
+    const cur = getClock();
+    lastShiftIndex = Time.shiftIndex(cur);
+    updateDayNight(cur, true);
+    updateHUD(true);
+    return Time.clockLabel(cur);
+  },
+  phase: () => Time.phase(getClock()),
+  label: () => Time.clockLabel(getClock()),
+};
+game.telemetry = () => VCard.telemetrySnapshot(game.vehicles);
 
 game.player.char = new Character(Eco.createInitialState().appearance);
 scene.add(game.player.char.group);
@@ -342,11 +467,20 @@ function applyState() {
   cam.yaw = p.yaw;
   // vehicles
   for (const v of game.vehicles) v.dispose();
-  game.vehicles = s.vehicles.map((d) => new Vehicle(scene, d));
+  game.vehicles = s.vehicles.map((d) => {
+    const veh = new Vehicle(scene, d);
+    veh.warnState = VCard.createWarningState(veh.cond);
+    return veh;
+  });
   for (const v of game.vehicles) v.syncMesh(city.groundY(v.x, v.z));
   // citizens
   for (const c of game.citizens) c.dispose();
   game.citizens = s.citizens.map((d) => new CitizenAgent(d));
+  const nowInGame = getClock();
+  lastShiftIndex = Time.shiftIndex(nowInGame);
+  s.stats.day = Time.dayOf(nowInGame);
+  s.stats.payrollTimer = Time.secondsToNextShift(nowInGame, s.clock?.speed);
+  updateDayNight(nowInGame, true);
   if (s.player.inVehicle) {
     const v = game.vehicles.find((x) => x.data.id === s.player.inVehicle);
     if (v && v.cond.hp > 0) enterVehicle(v, true);
@@ -364,6 +498,7 @@ function snapshotState() {
     s.player.x = p.x; s.player.z = p.z; s.player.inVehicle = null;
   }
   s.player.yaw = p.yaw;
+  if (s.clock) Time.setClock(s.clock, getClock(), Date.now());
 }
 
 function saveGame(silent = false) {
@@ -426,6 +561,7 @@ window.addEventListener('keydown', (e) => {
     case 'Space': if (!game.player.vehicle) interact(); break;
     case 'KeyF': toggleVehicle(); break;
     case 'KeyV': valet(); break;
+    case 'KeyT': openGarageModal(); break;
     case 'KeyC': game.creatorOpen ? closeCreator() : openCreator(); break;
     case 'KeyH': showHelp(); break;
     case 'KeyM': toggleMute(); break;
@@ -457,7 +593,7 @@ canvas.addEventListener('pointermove', (e) => {
   cam.drag.x = e.clientX; cam.drag.y = e.clientY;
   cam.yaw -= dx * 0.006;
   cam.pitch = THREE.MathUtils.clamp(cam.pitch + dy * 0.004, 0.05, 1.25);
-  cam.lastDrag = game.time;
+  cam.lastDrag = game.elapsed;
 });
 const endDrag = (e) => { if (cam.drag && cam.drag.id === e.pointerId) cam.drag = null; };
 canvas.addEventListener('pointerup', endDrag);
@@ -534,8 +670,11 @@ function updateHUD(force = false) {
   $('hud-startups').textContent = `${Eco.builtCount(s)} / ${Object.keys(BUSINESSES).length}`;
   $('hud-employment').textContent = `${Eco.employedCount(s)} / ${TOTAL_CITIZENS} citizens hired`;
   $('hud-vehicles').textContent = `${s.vehicles.length} vehicle${s.vehicles.length === 1 ? '' : 's'}`;
-  $('hud-day').textContent = `Day ${s.stats.day}`;
-  $('hud-payday').textContent = Eco.builtCount(s) ? `Payday in ${Math.ceil(s.stats.payrollTimer)}s` : 'No startups yet';
+  if (force || clockHudTimer <= 0) {
+    clockHudTimer = 1.0; // tick #hud-day at 1 Hz (UPGRADE_PLAN.md §11A B)
+    $('hud-day').textContent = Time.clockLabel(getClock());
+  }
+  $('hud-payday').textContent = Eco.builtCount(s) ? `Shift in ${Math.ceil(s.stats.payrollTimer)}s` : 'No startups yet';
   const netEl = $('hud-net');
   if (netEl) {
     if (!net) netEl.textContent = 'Single-player';
@@ -623,7 +762,7 @@ function lotModal(bizId) {
           <div><b>${Eco.jobSlots(1)} jobs</b><span>Starting job slots (+2 per upgrade)</span></div>
           <div><b>+${money(def.revenuePerWorker - def.wagePerWorker)}</b><span>Profit per worker each payday</span></div>
         </div>
-        <p class="muted">Launch the startup, then hire unemployed citizens to create jobs and earn passive profit every ${PAYROLL_INTERVAL}s payday.</p>
+        <p class="muted">Launch the startup, then hire unemployed citizens to create jobs and earn passive profit every 12-min shift (30s).</p>
         <div class="actions">
           <button class="primary" data-action="buy" data-biz="${bizId}" ${s.cash < def.cost ? 'disabled' : ''}>Buy &amp; build · ${money(def.cost)}</button>
         </div>
@@ -729,6 +868,13 @@ function towSpotNear(x, z) {
   return { x: x + 0, z: z + 8, yaw: Math.PI / 2 };
 }
 
+function preferredShop() {
+  if (game.state?.businesses?.garage) {
+    return { name: 'Apex Auto Garage', markup: 1, ...city.lots.garage.interact };
+  }
+  return { name: 'Metro Motors', markup: MOTORS_REPAIR_MARKUP, ...DEALERSHIP.interact };
+}
+
 function openMechanicAt(shop) {
   game.modalShop = shop;
   openModal(mechanicModal(shop));
@@ -740,31 +886,49 @@ function mechanicModal(shop) {
     const rows = s.vehicles.map((d) => {
       const v = game.vehicles.find((x) => x.data.id === d.id);
       const cond = v ? v.cond : d.cond;
-      const m = VEHICLE_MODELS[d.model];
-      const wrecked = d.wrecked || cond.hp <= 0;
-      const needs = !wrecked && (cond.hp < 100 || cond.tires < 100 || cond.engine < 100);
-      const opts = VCond.repairOptions(cond, shop.markup);
-      const bar = (val) => `<div class="condbar"><i class="${val < 25 ? 'c-bad' : val < 50 ? 'c-warn' : 'c-ok'}" style="width:${Math.max(0, Math.min(100, val))}%"></i></div>`;
-      const status = wrecked ? '<span class="pill bad">WRECKED</span>' : needs ? '<span class="pill warn">Needs service</span>' : '<span class="pill good">Healthy</span>';
-      return `
-        <div class="vehcard">
-          <div class="vehcard-head"><b>🚗 ${m.name}</b>${status}</div>
-          <div class="condgrid">
-            <span>Body</span>${bar(cond.hp)}
-            <span>⛽ Fuel</span><span class="muted">${Math.ceil(cond.fuel)}% — top up at a station</span>
-            <span>Tyres</span>${bar(cond.tires)}
-            <span>Engine</span>${bar(cond.engine)}
-          </div>
-          <div class="actions">
-            ${wrecked ? `<button class="primary" data-action="tow" data-veh="${d.id}" ${s.cash < TOW_PRICE ? 'disabled' : ''}>Tow here · ${money(TOW_PRICE)}</button>` : ''}
-            ${opts.total > 0 ? `<button class="primary" data-action="repair" data-veh="${d.id}" ${s.cash < opts.total ? 'disabled' : ''}>Repair all · ${money(opts.total)}</button>` : ''}
-          </div>
-        </div>`;
+      return VCard.renderVehicleCard(
+        { ...d, cond },
+        { interactive: true, mode: 'shop', markup: shop.markup, cash: s.cash },
+      );
     }).join('');
     return `
       <h2>🔧 ${shop.name} — Mechanic</h2>
-      <p class="sub">${shop.markup > 1 ? 'City rates — 20% markup.' : 'House rates — no markup.'}</p>
+      <p class="sub">${shop.markup > 1 ? 'City rates — 20% markup. Build Apex Auto Garage for house rates.' : 'House rates — no markup.'}</p>
       ${rows || '<p class="muted">You don\'t own any vehicles yet.</p>'}
+      <div class="actions"><button data-action="close">Close</button></div>`;
+  };
+}
+
+function openGarageModal(focusVehId = null) {
+  if (game.creatorOpen) closeCreator();
+  const focus = focusVehId || game.player.vehicle?.data.id || game.state?.lastVehicleId || null;
+  openModal(garageModal(focus));
+}
+
+function garageModal(focusVehId = null) {
+  return () => {
+    const s = game.state;
+    const hasGarage = !!s.businesses.garage;
+    const shop = preferredShop();
+    const rows = s.vehicles.map((d) => {
+      const v = game.vehicles.find((x) => x.data.id === d.id);
+      const cond = v ? v.cond : d.cond;
+      return VCard.renderVehicleCard(
+        { ...d, cond },
+        {
+          interactive: true,
+          mode: 'roadside',
+          hasGarage,
+          shopName: shop.name,
+          cash: s.cash,
+          highlight: d.id === focusVehId,
+        },
+      );
+    }).join('');
+    return `
+      <h2>🛠 Garage &amp; Roadside Assist</h2>
+      <p class="sub">Live telemetry for your fleet · call a tow to <b>${shop.name}</b> (${money(TOW_PRICE)}) or dispatch a mobile mechanic anywhere (${money(ROADSIDE_CALLOUT_FEE)} call-out + ${hasGarage ? '15% Apex owner' : '40% mobile'} parts).</p>
+      ${rows || '<p class="muted">You don\'t own any vehicles yet. Visit Metro Motors!</p>'}
       <div class="actions"><button data-action="close">Close</button></div>`;
   };
 }
@@ -851,6 +1015,7 @@ const modalActions = {
     const res = Eco.buyVehicle(game.state, model, m.fixedColor || dealerUI.colors[model] || CAR_COLORS[0], spot);
     if (!result(res)) return;
     const v = new Vehicle(scene, res.vehicle);
+    v.warnState = VCard.createWarningState(v.cond);
     v.syncMesh(city.groundY(v.x, v.z));
     game.vehicles.push(v);
     saveGame(true);
@@ -865,6 +1030,8 @@ const modalActions = {
     s.cash -= cost;
     v.cond.fuel = 100;
     v.stallNotified = false;
+    VCard.rearmWarnings(ensureWarnState(v), v.cond);
+    updateVehicleTelemetry(0, true);
     sfx.pump();
     result({ ok: true, msg: `⛽ ${v.model.name} refuelled (${money(cost)})` });
     saveGame(true);
@@ -886,8 +1053,12 @@ const modalActions = {
     s.cash -= opts.total;
     VCond.applyRepairs(v.cond, shop.markup);
     v.data.wrecked = false;
+    v.data.lastServicedInGameMs = Math.round(getClock());
     v.smoke.visible = false;
+    v.exhaustSmoke.visible = false;
     v.parts.paint.color.set(v.data.color);
+    VCard.rearmWarnings(ensureWarnState(v), v.cond);
+    updateVehicleTelemetry(0, true);
     sfx.wrench();
     result({ ok: true, msg: `🔧 ${v.model.name} repaired (${money(opts.total)})` });
     saveGame(true);
@@ -899,10 +1070,67 @@ const modalActions = {
     if (!shop || !v) return;
     if (s.cash < TOW_PRICE) { result({ ok: false, msg: `You need ${money(TOW_PRICE - s.cash)} more.` }); return; }
     s.cash -= TOW_PRICE;
+    if (game.player.vehicle === v) exitVehicle();
     const spot = towSpotNear(shop.x, shop.z);
     v.teleport(spot.x, spot.z, spot.yaw);
     sfx.tone(110, 0.5, 'sawtooth', 0.06);
     result({ ok: true, msg: `🚛 ${v.model.name} towed to ${shop.name}.` });
+    saveGame(true);
+  },
+  roadsideRepair: ({ veh }) => {
+    const s = game.state;
+    const v = game.vehicles.find((x) => x.data.id === veh);
+    if (!v) return;
+    const hasGarage = !!s.businesses.garage;
+    const quote = VCond.roadsideRepairQuote(v.cond, hasGarage);
+    if (quote.total <= 0) { result({ ok: false, msg: 'Nothing to repair.' }); return; }
+    if (s.cash < quote.total) { result({ ok: false, msg: `You need ${money(quote.total - s.cash)} more.` }); return; }
+    s.cash -= quote.total;
+    VCond.applyRoadsideRepairs(v.cond, hasGarage);
+    v.data.wrecked = false;
+    v.data.lastServicedInGameMs = Math.round(getClock());
+    v.smoke.visible = false;
+    v.exhaustSmoke.visible = false;
+    v.parts.paint.color.set(v.data.color);
+    VCard.rearmWarnings(ensureWarnState(v), v.cond);
+    updateVehicleTelemetry(0, true);
+    sfx.wrench();
+    result({ ok: true, msg: `🔧 Mobile mechanic repaired your ${v.model.name} on the spot (${money(quote.total)})` });
+    saveGame(true);
+  },
+  roadsideFuel: ({ veh }) => {
+    const s = game.state;
+    const v = game.vehicles.find((x) => x.data.id === veh);
+    if (!v || !VCond.canEmergencyRefuel(v.cond)) return;
+    if (s.cash < ROADSIDE_FUEL_FEE) { result({ ok: false, msg: `You need ${money(ROADSIDE_FUEL_FEE - s.cash)} more.` }); return; }
+    s.cash -= ROADSIDE_FUEL_FEE;
+    const { added } = VCond.applyEmergencyRefuel(v.cond);
+    v.stallNotified = false;
+    VCard.rearmWarnings(ensureWarnState(v), v.cond);
+    updateVehicleTelemetry(0, true);
+    sfx.pump();
+    result({ ok: true, msg: `⛽ Roadside assist added +${Math.round(added)}% fuel (${money(ROADSIDE_FUEL_FEE)})` });
+    saveGame(true);
+  },
+  roadsideTow: ({ veh }) => {
+    const s = game.state;
+    const shop = preferredShop();
+    const v = game.vehicles.find((x) => x.data.id === veh);
+    if (!v) return;
+    if (s.cash < TOW_PRICE) { result({ ok: false, msg: `You need ${money(TOW_PRICE - s.cash)} more.` }); return; }
+    s.cash -= TOW_PRICE;
+    const wasInCar = game.player.vehicle === v;
+    if (wasInCar) detachFromVehicle();
+    const spot = towSpotNear(shop.x, shop.z);
+    v.teleport(spot.x, spot.z, spot.yaw);
+    if (wasInCar) {
+      game.player.x = shop.x;
+      game.player.z = shop.z;
+      game.player.vx = game.player.vz = 0;
+      unstickPlayer();
+    }
+    sfx.tone(110, 0.5, 'sawtooth', 0.06);
+    result({ ok: true, msg: `🚛 ${v.model.name} towed to ${shop.name} (${money(TOW_PRICE)}).` });
     saveGame(true);
   },
 };
@@ -984,6 +1212,7 @@ function closeCreator() {
   if (net) net.setAppearance(game.state.appearance);
 }
 $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
+$('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
 
 // Help
 function showHelp() { game.helpOpen = true; $('help').classList.remove('hidden'); }
@@ -1025,6 +1254,7 @@ function nearestOwnedVehicle(maxDist) {
 function enterVehicle(v, silent = false) {
   const p = game.player;
   p.vehicle = v;
+  v.occupied = true;
   game.state.lastVehicleId = v.data.id;
   const ch = p.char;
   v.mesh.add(ch.group);
@@ -1033,21 +1263,39 @@ function enterVehicle(v, silent = false) {
   ch.group.scale.setScalar(v.parts.seatScale);
   ch.setPose('sit');
   ch.parcel.visible = false;
+  v.mesh.add(playerHeadlight);
+  v.mesh.add(playerHeadlight.target);
+  playerHeadlight.position.set(0, 0.72, v.model.len / 2 - 0.1);
+  playerHeadlight.target.position.set(0, 0.1, v.model.len / 2 + 16);
+  v.syncMesh(city.groundY(v.x, v.z));
+  updateDayNight(getClock(), true);
   cam.yaw = v.yaw;
   $('vehicle-hud').classList.remove('hidden');
   $('veh-name').textContent = v.model.name;
+  updateVehicleTelemetry(0, true);
   if (!silent) sfx.tone(120, 0.3, 'sawtooth', 0.05);
 }
 
 function detachFromVehicle() {
   const p = game.player;
+  const prev = p.vehicle;
   const ch = p.char;
   scene.add(ch.group);
   ch.group.scale.setScalar(1);
   ch.setPose('stand');
   ch.setCarrying(!!(game.task && game.task.carrying));
   p.vehicle = null;
+  if (prev) {
+    prev.occupied = false;
+    prev.syncMesh(city.groundY(prev.x, prev.z));
+  }
+  playerHeadlight.visible = false;
+  scene.add(playerHeadlight);
+  scene.add(playerHeadlight.target);
   $('vehicle-hud').classList.add('hidden');
+  $('veh-fault')?.classList.add('hidden');
+  $('vicon-fuel')?.classList.remove('blink');
+  fuelTickTimer = 0;
   sfx.setEngine(false, 0);
 }
 
@@ -1081,7 +1329,7 @@ function wreckVehicle(v) {
   sfx.setEngine(false, 0);
   sfx.crash(14);
   if (game.player.vehicle === v) exitVehicle();
-  toast(`💥 Your ${v.model.name} is wrecked! Metro Motors${game.state.businesses.garage ? ' or your Apex Auto Garage' : ''} can tow it in (${money(TOW_PRICE)}) and repair it.`, 'bad');
+  toast(`💥 Your ${v.model.name} is wrecked! Press T (or E nearby) to call a tow (${money(TOW_PRICE)}) or mobile mechanic.`, 'danger');
   saveGame(true);
 }
 
@@ -1090,8 +1338,8 @@ function toggleVehicle() {
   if (game.player.vehicle) { exitVehicle(); return; }
   const v = nearestOwnedVehicle(3.2);
   if (v) enterVehicle(v);
-  else if (game.vehicles.some((x) => x.cond.hp <= 0 && dist2(x, game.player) < 4.2 * 4.2)) toast('That car is wrecked — a mechanic needs to tow and repair it first.', 'bad');
-  else if (game.state.vehicles.length) toast('No car nearby. Press V to call the valet.', '');
+  else if (game.vehicles.some((x) => x.cond.hp <= 0 && dist2(x, game.player) < 4.2 * 4.2)) toast('That car is wrecked — press E or T to call a tow or mobile mechanic.', 'warn');
+  else if (game.state.vehicles.length) toast('No car nearby. Press V for valet or T for Garage & Roadside.', '');
   else toast('You don\'t own a car. Visit Metro Motors!', 'bad');
 }
 
@@ -1311,7 +1559,7 @@ function updatePassenger(dt) {
     const P = game.player.vehicle || game.player;
     ps.char.group.rotation.y = Math.atan2(P.x - ps.x, P.z - ps.z);
     ps.char.animate(dt, 0);
-    ps.char.armR.rotation.x = -2.6 + Math.sin(game.time * 8) * 0.3;
+    ps.char.armR.rotation.x = -2.6 + Math.sin(game.elapsed * 8) * 0.3;
   } else if (ps.state === 'riding') {
     ps.char.animate(dt, 0);
   } else if (ps.state === 'leaving') {
@@ -1342,7 +1590,13 @@ function findInteraction() {
       else out.e = { text: step.verb, action: completeStep };
     }
   }
-  if (inCar) { out.f = { text: 'Exit vehicle' }; return out; }
+  if (inCar) {
+    if (!out.e && p.vehicle.cond.fuel <= 0) {
+      out.e = { text: 'Roadside assist / emergency fuel', action: () => openGarageModal(p.vehicle.data.id) };
+    }
+    out.f = { text: 'Exit vehicle' };
+    return out;
+  }
   if (!out.e) {
     let best = null; let bd = Infinity;
     // weight > 1 lowers priority (moving citizens shouldn't steal the prompt from fixed places)
@@ -1361,6 +1615,16 @@ function findInteraction() {
     for (const [id, lot] of Object.entries(city.lots)) {
       const def = BUSINESSES[id]; const biz = game.state.businesses[id];
       consider(lot.interact.x, lot.interact.z, 2.8, biz ? `Manage ${def.name}` : `Vacant lot: ${def.name} (${money(def.cost)})`, () => openModal(lotModal(id)));
+    }
+    for (const ov of game.vehicles) {
+      const wrecked = ov.data.wrecked || ov.cond.hp <= 0;
+      const stalled = !wrecked && ov.cond.fuel <= 0;
+      if (wrecked || stalled) {
+        const label = wrecked
+          ? `🚛 Roadside assist for wrecked ${ov.model.name}`
+          : `⛽ Roadside assist for stalled ${ov.model.name}`;
+        consider(ov.x, ov.z, 3.8 + ov.model.len * 0.25, label, () => openGarageModal(ov.data.id), 2);
+      }
     }
     for (const c of game.citizens) {
       const label = c.data.employer ? `Chat with ${c.data.name}` : `Talk to ${c.data.name} (looking for work)`;
@@ -1422,24 +1686,19 @@ function updatePlayer(dt) {
     const dmg = VCond.applyImpact(v.cond, impact);
     if (dmg > 0 && v.cond.hp <= 0) { wreckVehicle(v); return; }
     else if (dmg >= 12) cam.shake = Math.min(0.8, cam.shake + 0.15);
-    // fuel warnings
+    // fuel stall warning (tiered <50 / <25 warnings live in updateVehicleTelemetry)
     if (v.cond.fuel <= 0 && !v.stallNotified) {
       v.stallNotified = true;
       sfx.setEngine(false, 0); sfx.stall(); sfx.horn();
-      toast('⛽ Out of fuel — the engine stalls. Find a fuel station (F on the minimap)!', 'bad');
+      toast('⛽ Out of fuel — engine stalled. Press E or T for Roadside Assist, or visit a fuel station!', 'danger');
     } else if (v.cond.fuel > 40) v.stallNotified = false;
-    if (v.cond.fuel > 0 && v.cond.fuel < 25 && !v.lowFuelNotified) {
-      v.lowFuelNotified = true;
-      toast('⛽ Low fuel — Lagoon / Harbor / Metro Fuels (F on the minimap)', '');
-    } else if (v.cond.fuel > 40) v.lowFuelNotified = false;
     v.syncMesh(city.groundY(v.x, v.z), dt);
     p.x = v.x; p.z = v.z; p.yaw = v.yaw;
     p.char.animate(dt, 0);
     p.char.armL.rotation.z = p.char.armR.rotation.z = -v.steer * 0.4;
     sfx.setEngine(v.cond.fuel > 0 && v.cond.hp > 0, v.speed);
     $('veh-speed').textContent = Math.round(Math.abs(v.speed) * 3.6);
-    $('veh-fuel').textContent = `⛽ ${Math.ceil(v.cond.fuel)}%`;
-    $('veh-fuel').classList.toggle('low', v.cond.fuel < 25);
+    updateVehicleTelemetry(dt);
     return;
   }
   // on foot
@@ -1476,8 +1735,8 @@ function updateCamera(dt) {
   const p = game.player;
   // Q / R orbit
   if (!anyOverlay() && !isTyping()) {
-    if (k('KeyQ')) { cam.yaw += dt * 2; cam.lastDrag = game.time; }
-    if (k('KeyR')) { cam.yaw -= dt * 2; cam.lastDrag = game.time; }
+    if (k('KeyQ')) { cam.yaw += dt * 2; cam.lastDrag = game.elapsed; }
+    if (k('KeyR')) { cam.yaw -= dt * 2; cam.lastDrag = game.elapsed; }
   }
   const target = new THREE.Vector3();
   let dist = cam.dist; let pitch = cam.pitch;
@@ -1493,7 +1752,7 @@ function updateCamera(dt) {
   if (p.vehicle) {
     const v = p.vehicle;
     target.set(v.x, v.y + 1.3, v.z);
-    if (game.time - cam.lastDrag > 1.6) {
+    if (game.elapsed - cam.lastDrag > 1.6) {
       const behind = v.speed < -2 ? v.yaw + Math.PI : v.yaw;
       cam.yaw = lerpAngle(cam.yaw, behind, Math.min(1, dt * 2.5));
       cam.pitch += (0.27 - cam.pitch) * Math.min(1, dt * 2);
@@ -1520,8 +1779,12 @@ function updateCamera(dt) {
     cam.shake = Math.max(0, cam.shake - dt * 2);
   }
   camera.lookAt(target);
-  // keep the shadow camera centred on the action
-  sun.position.set(target.x + 45, target.y + 90, target.z + 30);
+  // keep the orbiting sun/shadow frustum centred on the action
+  sun.position.set(
+    target.x + currentSunOffset.x,
+    target.y + currentSunOffset.y,
+    target.z + currentSunOffset.z,
+  );
   sun.target.position.set(target.x, 0, target.z);
 }
 
@@ -1611,12 +1874,14 @@ function updateRemotes(dt) {
       const color = peer.app?.shirt || '#38bdf8';
       if (!r.car || r.carModel !== inCar || r.carColor !== color) {
         if (r.car) { scene.remove(r.car); r.car.traverse((o) => { o.geometry?.dispose?.(); }); }
-        r.car = buildCarMesh(inCar, color).group;
+        r.carParts = buildCarMesh(inCar, color);
+        r.car = r.carParts.group;
         r.carModel = inCar;
         r.carColor = color;
         scene.add(r.car);
       }
       r.car.visible = true;
+      if (r.carParts) r.carParts.headBeams.visible = currentNightFactor > 0.08;
       r.car.position.set(r.x, city.groundY(r.x, r.z), r.z);
       r.car.rotation.y = r.yaw;
       r.char.group.visible = false;
@@ -1718,6 +1983,16 @@ function startNet(identity = null) {
         for (const p of msg.peers) ensureRemote(p);
         hideLogin();
         applyPlayerName(msg.you?.name);
+        if (msg.clock) {
+          debugClockOverride = null;
+          if (game.state?.clock) Time.setClock(game.state.clock, msg.clock.inGameMs, Date.now());
+          lastShiftIndex = Time.shiftIndex(msg.clock.inGameMs);
+          if (game.state?.stats) {
+            game.state.stats.day = Time.dayOf(msg.clock.inGameMs);
+            game.state.stats.payrollTimer = Time.secondsToNextShift(msg.clock.inGameMs);
+          }
+          updateDayNight(msg.clock.inGameMs, true);
+        }
         if (msg.restore && !game.player.vehicle) {
           game.player.x = msg.restore.x; game.player.z = msg.restore.z;
           game.player.yaw = msg.restore.yaw;
@@ -1727,6 +2002,13 @@ function startNet(identity = null) {
         }
         toast(`🌐 ${msg.room} · ${msg.peers.length + 1} ${msg.peers.length ? 'players' : 'player'} online`, 'good');
         updateHUD(true);
+      },
+      onClock(clockMsg) {
+        if (!debugClockOverride && game.state?.clock) {
+          Time.setClock(game.state.clock, clockMsg.inGameMs, Date.now());
+          updateDayNight(clockMsg.inGameMs, true);
+          updateHUD(true);
+        }
       },
       onJoin(peer) { ensureRemote(peer); },
       onLeave(id) { removeRemote(id); },
@@ -1836,7 +2118,7 @@ function drawMinimap() {
   for (const v of game.vehicles) if (v !== game.player.vehicle) dot(v.x, v.z, 2.6, '#38bdf8');
   if (game.task) {
     const st = game.task.steps[game.task.idx];
-    const pulse = 3 + Math.sin(game.time * 6) * 1.2;
+    const pulse = 3 + Math.sin(game.elapsed * 6) * 1.2;
     g.strokeStyle = '#f43f5e'; g.lineWidth = 2;
     g.beginPath(); g.arc(toMM(st.x), toMM(st.z), pulse + 2, 0, Math.PI * 2); g.stroke();
     dot(st.x, st.z, 2.5, '#f43f5e');
@@ -1862,7 +2144,9 @@ let mmTimer = 0;
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), 0.05);
-  game.time += dt;
+  game.elapsed += dt;
+  clockHudTimer -= dt;
+  dayNightTimer -= dt;
   const s = game.state;
 
   updatePlayer(dt);
@@ -1909,23 +2193,37 @@ function frame() {
     let pay = game.task.pay;
     if (game.task.taxiBonus && game.player.vehicle?.data.model === 'taxi') pay = Math.round(pay * 1.3);
     $('task-pay').textContent = `${money(Math.round(pay * Eco.payMultiplier(s.jobXP[game.task.occ] || 0)))}`;
-    marker.arrow.position.y = 3.2 + Math.sin(game.time * 3) * 0.35;
-    marker.arrow.rotation.y = game.time * 2;
+    marker.arrow.position.y = 3.2 + Math.sin(game.elapsed * 3) * 0.35;
+    marker.arrow.rotation.y = game.elapsed * 2;
   }
 
-  // economy
-  const pay = Eco.tickPayroll(s, dt);
-  if (pay) {
-    if (pay.total > 0) { sfx.cash(); toast(`💼 Payday (day ${s.stats.day}): +${money(pay.total)} profit stored at your startups`, 'money'); }
-    else if (Eco.builtCount(s) && !Eco.employedCount(s)) toast('Your startups have no workers. Hire citizens to earn profit!', '');
+  // clock-aligned 12-in-game-minute (30 real s) shift payroll + day/night cycle
+  const nowInGame = getClock();
+  s.stats.day = Time.dayOf(nowInGame);
+  s.stats.payrollTimer = Time.secondsToNextShift(nowInGame, s.clock?.speed);
+  const curShift = Time.shiftIndex(nowInGame);
+  if (lastShiftIndex === null) lastShiftIndex = curShift;
+  if (curShift > lastShiftIndex) {
+    const cycles = Math.min(4, curShift - lastShiftIndex);
+    lastShiftIndex = curShift;
+    let totalPay = 0;
+    for (let i = 0; i < cycles; i++) totalPay += Eco.runPayrollCycle(s).total;
+    if (totalPay > 0) {
+      sfx.cash();
+      toast(`💼 Shift payout (${Time.hhmm(nowInGame)}): +${money(totalPay)} stored at your startups`, 'money');
+    } else if (Eco.builtCount(s) && !Eco.employedCount(s)) {
+      toast('Your startups have no workers. Hire citizens to earn profit!', '');
+    }
     if (game.modal) renderModal();
   }
+  updateDayNight(nowInGame);
+
   game.valetCooldown = Math.max(0, game.valetCooldown - dt);
   game.autosaveTimer -= dt;
   if (game.autosaveTimer <= 0) { game.autosaveTimer = 60; saveGame(true); }
 
   for (const [i, car] of displayCars.entries()) car.rotation.y += dt * (0.25 + i * 0.05);
-  city.update(game.time);
+  city.update(game.elapsed);
   updatePrompt();
   updateCamera(dt);
   updateHUD();

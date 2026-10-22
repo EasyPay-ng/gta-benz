@@ -105,3 +105,21 @@ test('wear factors: limp-home top speed and slidey tyres', () => {
   assert.equal(V.gripFactor(100), 1);
   assert.equal(V.gripFactor(0), 0.55);
 });
+
+test('roadside repair quote includes call-out fee and garage owner discount; emergency fuel caps at 100', () => {
+  assert.equal(V.roadsideRepairQuote(V.freshCond(), false).total, 0);
+  const c = { ...V.freshCond(), hp: 80 };
+  const std = V.roadsideRepairQuote(c, false);
+  const apex = V.roadsideRepairQuote(c, true);
+  assert.ok(std.callout > 0 && std.total === std.callout + std.partsTotal);
+  assert.ok(apex.total < std.total, 'owning Apex Auto Garage discounts mobile parts');
+
+  const paid = V.applyRoadsideRepairs(c, false);
+  assert.equal(paid, std.total);
+  assert.equal(c.hp, 100);
+
+  const dry = { ...V.freshCond(), fuel: 0 };
+  assert.equal(V.canEmergencyRefuel(dry), true);
+  const top = V.applyEmergencyRefuel(dry);
+  assert.ok(top.added > 0 && dry.fuel === top.added);
+});
