@@ -434,3 +434,22 @@ body.build-mode #fp-reticle { border-color: #38bdf8; }
   .build-hint { display: none; }
   #floor-badge { top: 74px; font-size: 11px; max-width: 86vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* =========================================================================
+   Public-place service desks (hotel, hospital, museum, mall, gym, library)
+   ========================================================================= */
+.svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 12px 0; }
+.svc-card {
+  background: rgba(15, 23, 42, 0.68); border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.svc-card .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.svc-card button { font-size: 12px; }
+.svc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: #e2e8f0; }
+.svc-price { font-size: 12px; font-weight: 800; color: #fde68a; white-space: nowrap; }
+.svc-banner {
+  margin: 10px 0; padding: 10px 12px; border-radius: 10px;
+  background: rgba(245, 158, 11, 0.14); border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fef3c7; font-size: 12.5px; display: flex; flex-direction: column; gap: 8px;
+}
+.svc-banner .row { display: flex; gap: 8px; flex-wrap: wrap; }

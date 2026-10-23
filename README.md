@@ -43,7 +43,7 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 | `WASD` / arrows: move · `Shift`: sprint | `W`/`S`: gas, brake & reverse · `A`/`D`: steer |
 | `X` / `P` (or HUD `🎥`): toggle **1st-Person** / **3rd-Person** camera | `X` / `P` (or HUD `🎥`): toggle **Outside Chase** / **3D Cockpit Interior** |
 | Mouse drag, `Q`/`R`: look / orbit camera · wheel: zoom | Mouse drag, `Q`/`R` in cockpit: look around cabin, mirrors & side windows |
-| `E`: interact · `Space`: jump | `Space`: handbrake (drift & twin tyre skids!) · `G`: horn · `E`: waypoints |
+| `E`: interact · open/close doors · use furniture · ride lift · `Space`: jump | `Space`: handbrake (drift & twin tyre skids!) · `G`: horn · `E`: waypoints |
 | `B` or `1`–`8`: character actions, greetings & dances | `F`: exit · `T`: Garage & Roadside Assist |
 | `U` (or HUD `🎓`): **Metro Grand University** (1,105 courses) | High-speed hits & explosions raise **Police Heat (`★`–`★★★`)** |
 | `Y` (or HUD `🏗`): **3D Architect Build Mode** · `E` at a **Metro Lift** to ride floors | `E` place · `X` demolish · `Q`/`R` rotate · `C` colour · `Tab` item · `PgUp`/`PgDn` storey |
@@ -62,7 +62,7 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - **1,105 Real-World Academic Courses across 12 Faculties:** browse and instant-search recognizable programs across *Computer Science, AI & Cybersecurity*, *Engineering & Architecture*, *Medicine, Nursing & Public Health*, *Business, Finance & Economics*, *Law, Criminology & Public Policy*, *Natural & Physical Sciences*, *Media, Design & Performing Arts*, *Humanities & Social Sciences*, *Education*, *Agriculture & Environmental Science*, *Aviation, Maritime & Logistics*, and *Culinary, Automotive & Applied Trades* — from **$0 Free Undergraduate Certificates** up to **BSc / BA / BEng / LLB / MBBS / MBA / MSc / PhD** tracks.
   - **Open Enrollment Roleplay + Lectures, Exams & Career Boosts:** freely enroll or switch active majors anytime, carry an official **Student ID & GPA transcript**, attend live campus lectures (`+50%` stipend bonus on campus) or library/lab study sessions to earn credits, and pass **3-question faculty final exams** to earn official Degrees, cash Fellowship Grants, **automatic Graduation Gown & Mortarboard Cap unlocks** in your Wardrobe, and **permanent career & startup revenue multipliers** (up to `2.25×`).
 
-- **Every Building Is Walk-In — Multi-Storey Skyscrapers with Working Metro Lifts (`src/world.js`, `src/interiors.js`).** Walk straight through the open front doors of *every* building in Metro City: the 8 skyline towers (each one is sliced into up to **18 real storeys** plus an open-air **Sky Deck**), the job HQs (Express Courier, City Security, Metro Cab), **Maison Verve**, **Metro Motors**, the four startup lots (garage, diner, logistics, tech) and all three **Metro Grand University** halls.
+- **Every Building Is Walk-In — Multi-Storey Skyscrapers with Working Metro Lifts (`src/world.js`, `src/interiors.js`).** Walk straight through the open front doors of *every* building in Metro City: the 18 skyline towers (each one is sliced into up to **10 real storeys** plus an open-air **Sky Deck**), the job HQs (Express Courier, City Security, Metro Cab), **Maison Verve**, **Metro Motors**, the four startup lots (garage, diner, logistics, tech) and all three **Metro Grand University** halls.
   - **Real Storeys, Not Fake Backgrounds:** each tower has a walkable slab for every floor, a perimeter with windows, a furnished lobby, a **Metro Lift** core at the corner, and a rooftop parapet so you can stand on the sky deck and look out over the city in 1st or 3rd person.
   - **A Metro Lift on Every Corner (`E`):** press `E` at the glowing lift panel to open the floor directory — *Lobby, Floor 2 · Open-Plan Office, Floor 3 · Boardroom, Floor 7 · Penthouse, Sky Deck…* — and ride instantly. Reception desks inside shops & job HQs (`E`) open the same menus as their street pads, so you can manage your startup, browse Maison Verve or clock in from inside the building.
   - **Every Floor Is Furnished in 3D:** desks & monitors, boardroom tables, sofas, beds, kitchens, pool tables, server racks, lab benches, hospital beds, pallets and planters are generated deterministically per theme (*Corporate, Residential, Grand Hotel, Tech, Medical*), complete with glass window bands, ceiling light panels, lift doors and warm interior lighting. Indoor camera ceilings are clamped automatically for both camera modes.
@@ -70,6 +70,13 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - **Structure on a 4 m grid:** marble & hardwood floor slabs, solid walls, window walls, doorway walls, glass curtain walls, **climbable 3D stairs (+1 storey)**, support pillars, glass balcony railings and pitched gable roofs.
   - **Furniture on a 0.5 m grid:** lounge sofas, king beds, executive desks with monitors, dining/conference tables, widescreen TVs, tall bookshelves, warm floor lamps and indoor palms.
   - **Sculpted 3D previews & controls:** a translucent snapping ghost follows your crosshair; `Q`/`R` rotate, `C` cycles 9 architectural colours, `Tab`/`1`–`9` switch pieces, `PageUp`/`PageDown` raise the build plane a storey at a time, `E` places and `X` demolishes. Everything you build is **solid** (walls & furniture collide), **walkable** (floors & stair risers are real surfaces) and **saved** with your game (`SAVE_VERSION = 8`, `state.builds`).
+
+- **Every Piece of Furniture Is Interactive — Wellbeing, Rest & Public Services (`src/props.js`, `src/publicPlaces.js`).** 27 prop types across the whole city respond to `E`: sofas, armchairs, chairs, park/promenade benches, king beds, sun loungers, hospital treatment beds, TV walls, bookshelves, desks, lab benches, kitchens, bars, pool tables, server racks, pianos, sculptures, planters, lamps, reception counters, treadmills, gym benches, dumbbell racks, cinema screens, art frames, dining tables and checkout counters — including **everything you place yourself in 3D Architect mode**.
+  - **Sit / lie / watch / cook / train:** your character drops into a real seated or lying pose, the camera follows, and the prop restores the right wellbeing stat. Live **Wellbeing** HUD row (energy · comfort · hotel key): energy drains as you walk and sprint, and low energy slows your sprint; comfort, health and fitness each have their own effects. Sitting regenerates energy & comfort, beds restore energy overnight, TV/bookshelf/desk hook into leisure & university study, the kitchen feeds you for $12, the bar pours a drink, the server rack pays a freelance bonus, the pool table, piano and gym equipment each have their own verb, and every prop has a cooldown so bonuses can't be farmed.
+  - **Reception desks open their real menus:** clock in at the courier/security/cab desks, browse Maison Verve, run your startup, or check in at the hotel — all from inside the building.
+- **South Waterfront — Hotel, Hospital, Museum, Mall, Gym & Library District (`src/publicPlaces.js`, `src/world.js`).** A brand-new civic district runs south of `3rd St` (map labels **H A C G L**): the **13-storey Grand Meridian Hotel** (standard $120 / deluxe $260 / penthouse $640 a night — book a room, ride the lift, sleep in a real hotel bed, check out), **Metro General Hospital** (checkup $45, emergency $120, full treatment $260 plus interactive treatment beds), the **Museum of Art** (3 ticket tiers, three galleries and a sculpture court), **Metro Central Mall & Cineplex** (fashion boutiques, a food court of 6 meals & a six-screen cinema), **Metro Iron Fitness Club** (day pass, PT session, protein bar) and **Metro Public Library** (free borrowing, quiet study desks, borrowable books that boost study).
+  - **The district is a real place:** a new cross avenue with street lamps, a palm-lined promenade with benches, sun loungers, a lifeguard tower and a sea wall over the beach, all walk-in with openable doors and reception counters.
+  - **Denser downtown:** every skyline block now packs a 3×3 parcel of towers, all street-facing, so the skyline and your lift directory grew with it.
 
 - **Realistic PBR visuals & atmospheric city.** Procedural diffuse, normal, roughness and emissive PBR maps (`src/textures.js`) with ACES Filmic tone mapping, PMREM environment reflections and a custom atmospheric `SkyDome` shader (dawn/sunset horizon scatter, drifting clouds and twinkling night stars). Features tyre-polished weathered asphalt, irregular flagstone sidewalks, curb storm drains, 6 brick/limestone/glass-curtain architectural facades, multi-cluster avenue trees and soft additive streetlamp & vehicle lens flares.
 - **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
@@ -93,7 +100,7 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - At 0 HP the car is **wrecked** and smokes until towed or repaired.
   - **Shop & Roadside service:** visit **Metro Motors' mechanic** (+20% city rates) or your **Apex Auto Garage** (house rates), OR press **`T`** anywhere (or **`E`** beside a wrecked/stalled car) to open **Garage & Roadside Assist** and call a tow ($250), dispatch a mobile mechanic ($150 call-out + parts), or buy an emergency +35% fuel can ($95).
 - **AI traffic.** 12 cars drive right-hand lanes across the grid and brake for pedestrians, cars and you. They honk if you block them.
-- **Save system.** `localStorage` key `metroventure_openworld_save_v1` (v8). Stores cash, look, job XP, startups, employees, vehicles, positions and every 3D piece you have built (`state.builds`). Old v2–v7 saves migrate automatically with an empty build plot.
+- **Save system.** `localStorage` key `metroventure_openworld_save_v1` (v9). Stores cash, look, job XP, startups, employees, vehicles, positions, every 3D piece you have built (`state.builds`) and your **wellbeing & hotel stay** (`state.leisure`). Old v2–v8 saves migrate automatically with an empty build plot, a fresh wellbeing meter and no booked room.
 
 ## Project layout
 
@@ -106,6 +113,8 @@ web-openworld-game/
   src/camera.js       pure 1st/3rd-person & 3D car cockpit camera state, freelook & world-pose math
   src/university.js   pure 1,105-course catalog across 12 faculties, live campus schedule, exams & pay multipliers
   src/interiors.js    pure multi-storey plans, floor archetypes, lift stops, furniture & interior collision
+  src/props.js        pure interactive-furniture catalogue, wellbeing/energy model, cooldowns, swing-door state
+  src/publicPlaces.js pure South Waterfront places, hotel booking, hospital, museum, mall, gym & library services
   src/build.js        pure 3D Architect catalog, grid snapping, placement/collision, stairs & save migration
   src/time.js         pure 24× city clock, day/night lighting & shift boundaries
   src/economy.js      pure game-state logic & save migrations (unit-tested, no DOM)
@@ -139,9 +148,9 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode & interiors) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors & public places) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
 
-- **64 client tests** — `npm test`
+- **69 client tests** — `npm test`
 - **89 server tests** — `npm --prefix server run test:all` (smoke, accounts & NetClient E2E)
 
 ## Deploy to GitHub Pages

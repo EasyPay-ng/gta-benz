@@ -18,6 +18,7 @@ import {
   academicBusinessMultiplier,
 } from './university.js';
 import { normalizeBuildState } from './build.js';
+import { createLeisureState, normalizeLeisureState } from './props.js';
 
 // Small deterministic PRNG so citizens look the same for every new game.
 export function mulberry32(seed) {
@@ -91,6 +92,7 @@ export function createInitialState(wallNow = Date.now()) {
     wardrobe: starterWardrobe(),
     academic: createAcademicState(),
     builds: { pieces: [] },
+    leisure: createLeisureState(),
     activeJob: null,
     jobXP,
     businesses,
@@ -127,6 +129,7 @@ export function migrateState(raw, wallNow = Date.now()) {
   s.wardrobe = normalizeWardrobe(raw.wardrobe, s.appearance);
   s.academic = normalizeAcademicState(raw.academic);
   s.builds = normalizeBuildState(raw.builds);
+  s.leisure = normalizeLeisureState(raw.leisure);
   s.jobXP = { ...base.jobXP, ...(raw.jobXP || {}) };
   s.businesses = { ...base.businesses, ...(raw.businesses || {}) };
   for (const id of Object.keys(s.businesses)) {

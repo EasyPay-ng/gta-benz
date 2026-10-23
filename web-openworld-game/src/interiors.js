@@ -157,6 +157,13 @@ export const PROP_SPECS = {
   medbed:       { w: 1.2, d: 2.3, h: 0.75, collide: true, label: 'hospital bed' },
   lounger:      { w: 0.9, d: 1.9, h: 0.6, collide: true, label: 'sun lounger' },
   stairs_visual:{ w: 0.9, d: 0.9, h: 0.9, collide: false, label: 'decor' },
+  treadmill:    { w: 1.25, d: 2.3, h: 1.45, collide: true, label: 'treadmill' },
+  gymbench:     { w: 1.35, d: 2.1, h: 1.25, collide: true, label: 'weight bench' },
+  dumbbellrack: { w: 2.3, d: 0.7, h: 1.55, collide: true, label: 'dumbbell rack' },
+  cinema_screen:{ w: 8.0, d: 0.5, h: 4.4, collide: true, label: 'cinema screen' },
+  artframe:     { w: 2.3, d: 0.35, h: 2.7, collide: true, label: 'artwork' },
+  bench:        { w: 2.4, d: 0.65, h: 0.9, collide: true, label: 'bench' },
+  counter:      { w: 3.0, d: 0.9, h: 1.15, collide: true, label: 'shop counter' },
   piano:        { w: 2.1, d: 1.4, h: 1.15, collide: true, label: 'grand piano' },
   sculpture:    { w: 1.1, d: 1.1, h: 2.1, collide: true, label: 'sculpture' },
 };

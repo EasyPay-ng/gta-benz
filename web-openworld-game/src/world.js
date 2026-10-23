@@ -7,6 +7,8 @@ import {
 } from './data.js';
 import { mulberry32 } from './economy.js';
 import * as Interiors from './interiors.js';
+import * as Props from './props.js';
+import { PUBLIC_PLACES, DISTRICT } from './publicPlaces.js';
 import {
   makeAsphaltPBR,
   makeFlagstonePBR,
@@ -234,6 +236,12 @@ export class City {
     this._activeFloor = null;      // { id, level, group, colliders } lazily dressed floor
     this._pm = null;               // shared interior prop materials
     this._towerCount = 0;          // stable unique tower names
+    this.doors = [];               // interactive swing doors on every walk-in building
+    this.serviceSpots = [];        // hotel check-in, hospital reception, gym desk…
+    this.propSpots = [];           // static interactive furniture (shops, halls, parks)
+    this._activePropSpots = [];    // interactive furniture on the current tower floor
+    this.districtSpots = [];       // public-place entrance markers
+    this.palms = [];
     this.lectureBoard = null;      // live 3D smartboard canvas in the Main Lecture Amphitheatre
     this._lastBoardKey = '';
     this.boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -246,6 +254,7 @@ export class City {
     this._buildRoads();
     this._buildBlocks();
     this._buildUniversity();
+    this._buildDistrict();
     this._buildStreetLamps();
     this._buildSidewalkGraph();
     this._buildOutskirts();
@@ -491,6 +500,55 @@ export class City {
         this.box(g, 0, 0.66, -0.76, 0.84, 0.5, 0.14, m.fabricLight).rotation.x = -0.6;
         for (const dx of [-0.38, 0.38]) for (const dz of [-0.85, 0.85]) this.box(g, dx, 0.14, dz, 0.08, 0.28, 0.08, m.dark);
         break;
+      case 'treadmill':
+        this.box(g, 0, 0.12, 0, 1.2, 0.24, 2.2, m.black);
+        this.box(g, 0, 0.26, 0.1, 1.0, 0.06, 1.7, m.dark);
+        this.box(g, 0, 0.9, -0.95, 1.15, 0.08, 0.5, m.black);
+        this.box(g, 0, 1.35, -1.02, 1.15, 0.9, 0.12, m.black);
+        this.box(g, 0, 1.5, -0.95, 0.7, 0.34, 0.05, m.screen, { cast: false });
+        for (const dx of [-0.5, 0.5]) this.box(g, dx, 1.1, -0.98, 0.08, 1.9, 0.08, m.metal, { cast: false });
+        break;
+      case 'gymbench':
+        this.box(g, 0, 0.42, 0, 0.5, 0.16, 1.9, m.dark);
+        this.box(g, 0, 0.5, 0.1, 0.46, 0.06, 1.6, m.fabric);
+        for (const dz of [-0.75, 0.75]) this.box(g, 0, 0.2, dz, 0.42, 0.36, 0.14, m.metal);
+        for (const dx of [-0.62, 0.62]) {
+          this.box(g, dx, 0.95, -0.55, 0.1, 1.9, 0.1, m.metal);
+          this.box(g, dx, 0.24, -0.55, 0.34, 0.1, 0.9, m.metal);
+        }
+        this.box(g, 0, 1.28, -0.55, 2.0, 0.08, 0.08, m.metal);
+        for (const dx of [-0.82, 0.82]) this.box(g, dx, 1.28, -0.55, 0.26, 0.52, 0.26, m.black);
+        break;
+      case 'dumbbellrack':
+        this.box(g, 0, 0.07, 0, 2.2, 0.14, 0.66, m.black);
+        this.box(g, 0, 0.9, -0.3, 2.2, 1.7, 0.12, m.dark);
+        for (let r = 0; r < 3; r++) {
+          this.box(g, 0, 0.55 + r * 0.45, 0, 2.2, 0.08, 0.6, m.metal);
+          for (let i = 0; i < 6; i++) this.box(g, -0.9 + i * 0.36, 0.66 + r * 0.45, 0.05, 0.16, 0.14, 0.16, m.black);
+        }
+        break;
+      case 'cinema_screen':
+        this.box(g, 0, 2.4, 0, 7.8, 4.0, 0.12, m.black);
+        this.box(g, 0, 2.4, 0.09, 7.4, 3.7, 0.04, m.screen, { cast: false });
+        this.box(g, 0, 0.28, 0.6, 6.0, 0.56, 1.2, m.dark);
+        for (let i = 0; i < 4; i++) this.box(g, 0, 0.6, 2.0 + i * 1.5, 6.4, 0.5, 0.5, m.blue);
+        break;
+      case 'artframe':
+        this.box(g, 0, 1.5, 0, 2.3, 2.7, 0.12, m.gold);
+        this.box(g, 0, 1.5, 0.08, 2.05, 2.45, 0.06, [m.red, m.blue, m.green, m.cream][Math.abs(Math.round(prop.x + prop.z)) % 4], { cast: false });
+        this.box(g, 0, 1.5, 0.12, 1.4, 1.7, 0.03, m.cream, { cast: false });
+        break;
+      case 'bench':
+        this.box(g, 0, 0.45, 0, 2.4, 0.12, 0.62, m.wood);
+        this.box(g, 0, 0.78, -0.28, 2.4, 0.5, 0.12, m.wood);
+        for (const dx of [-1.0, 1.0]) this.box(g, dx, 0.22, 0, 0.1, 0.45, 0.55, m.dark);
+        break;
+      case 'counter':
+        this.box(g, 0, 0.6, 0, 3.0, 1.15, 0.9, m.woodDark);
+        this.box(g, 0, 1.2, 0, 3.2, 0.1, 1.06, m.marble);
+        this.box(g, 0, 1.45, -0.32, 2.6, 0.4, 0.1, m.led, { cast: false });
+        this.box(g, -1.0, 1.32, 0.1, 0.22, 0.24, 0.16, m.black);
+        break;
       case 'piano':
         this.box(g, 0, 0.92, 0, 2.1, 0.5, 1.4, m.black);
         this.box(g, 0, 1.2, -0.1, 2.0, 0.08, 1.2, m.black).rotation.x = 0.12;
@@ -554,7 +612,20 @@ export class City {
     const plan = Interiors.floorPlan({
       themeId: building.themeId, kindId, level, floors, width: w, depth: d, seed: building.seed,
     });
-    for (const prop of plan.props) this._addProp(group, prop);
+    const spots = [];
+    for (const prop of plan.props) {
+      this._addProp(group, prop);
+      if (!Props.isInteractable(prop.type)) continue;
+      const cos = Math.cos(building.yaw || 0); const sin = Math.sin(building.yaw || 0);
+      const wx = building.x + prop.x * cos + prop.z * sin;
+      const wz = building.z - prop.x * sin + prop.z * cos;
+      spots.push({
+        type: prop.type, x: +wx.toFixed(2), z: +wz.toFixed(2),
+        y: +(building.baseY + level * fh).toFixed(2),
+        rot: +((prop.rot || 0) + (building.yaw || 0)).toFixed(3),
+        buildingId: building.id, level,
+      });
+    }
 
     // glowing lift door frame on the core face (so every floor has a visible elevator)
     const coreX = -w / 2 + 1.6 + Interiors.ELEVATOR_SIZE / 2;
@@ -562,7 +633,7 @@ export class City {
     this.box(group, coreX + Interiors.ELEVATOR_SIZE / 2 + 0.03, 1.35, coreZ, 0.06, 2.5, 1.7, m.screen, { cast: false });
     this.box(group, coreX + Interiors.ELEVATOR_SIZE / 2 + 0.05, 2.75, coreZ, 0.04, 0.34, 1.1, m.led, { cast: false });
 
-    return { group, colliders: Interiors.propColliders(Interiors.floorLayout(building, level)), layout: plan };
+    return { group, colliders: Interiors.propColliders(Interiors.floorLayout(building, level)), layout: plan, spots };
   }
 
   /** Swap in the furnished floor the player is currently standing on. */
@@ -572,7 +643,11 @@ export class City {
     const building = this.enterables.find((b) => b.id === id);
     if (!building) return null;
     const dressed = this._dressFloor(building, level);
-    this._activeFloor = { id, level, group: dressed.group, colliders: dressed.colliders, layout: dressed.layout, building };
+    this._activeFloor = {
+      id, level, group: dressed.group, colliders: dressed.colliders,
+      layout: dressed.layout, building, spots: dressed.spots,
+    };
+    this._activePropSpots = dressed.spots;
     return this._activeFloor;
   }
 
@@ -583,6 +658,7 @@ export class City {
       if (o.isMesh && o.geometry && o.geometry !== this.boxGeo) o.geometry.dispose?.();
     });
     this._activeFloor = null;
+    this._activePropSpots = [];
   }
 
   activeInteriorColliders() {
@@ -641,12 +717,12 @@ export class City {
    * Build a walk-in, multi-storey tower: hollow facade with an open doorway,
    * one walkable slab per storey, a lift core, roof parapet & sky deck.
    */
-  _buildTower({ x, z, w, d, h, mat, roofMat, yaw, seed, name, themeId }) {
+  _buildTower({ x, z, w, d, h, mat, roofMat, yaw, seed, name, themeId, id: idOverride }) {
     const baseY = CURB_Y;
     const fh = Interiors.FLOOR_HEIGHT;
     const floors = Interiors.floorCountForHeight(h - 1.5);
     const theme = themeId || Interiors.themeForSeed(seed);
-    const id = `bld-${this.enterables.length}-${Math.round(x)}-${Math.round(z)}`;
+    const id = idOverride || `bld-${this.enterables.length}-${Math.round(x)}-${Math.round(z)}`;
     const building = {
       id, kind: 'tower', name: name || `${Interiors.themeFor(theme).name}`,
       x, z, width: w, depth: d, height: h, baseY, floors, floorHeight: fh,
@@ -685,16 +761,13 @@ export class City {
     this.box(g, 0, doorH + 0.12, d / 2, doorW + 0.9, 0.24, t + 0.3, this.mats.darkMetal);
     this.box(g, -(doorW / 2 + 0.2), doorH / 2, d / 2, 0.4, doorH, t + 0.24, this.mats.darkMetal);
     this.box(g, (doorW / 2 + 0.2), doorH / 2, d / 2, 0.4, doorH, t + 0.24, this.mats.darkMetal);
-    // propped-open glass double doors
-    const doorGlass = new THREE.MeshPhysicalMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.24, roughness: 0.08, depthWrite: false });
-    for (const s of [-1, 1]) {
-      const leaf = new THREE.Group();
-      leaf.position.set(s * (doorW / 2 - 0.15), 0, d / 2 + 0.12);
-      leaf.rotation.y = s * 1.2;
-      this.box(leaf, -s * 1.0, doorH * 0.46, 0, 2.0, doorH * 0.9, 0.07, doorGlass, { cast: false });
-      this.box(leaf, -s * 1.0, doorH * 0.46, 0, 2.04, 0.08, 0.1, this.mats.darkMetal, { cast: false });
-      g.add(leaf);
-    }
+    // interactive glass double doors (open / close with E)
+    this._addSwingDoor({
+      x: x + Math.sin(yaw) * (d / 2),
+      z: z + Math.cos(yaw) * (d / 2),
+      y: baseY, yaw, width: doorW, height: doorH,
+      label: `${name || 'Tower'} doors`, buildingId: id,
+    });
     // entrance planters also stop cars from driving inside
     for (const s of [-1, 1]) {
       const px = s * (doorW / 2 + 1.4);
@@ -746,6 +819,567 @@ export class City {
 
     // ground-floor lobby dressing is handled by setActiveInterior(level 0)
     return building;
+  }
+
+
+  // =========================================================================
+  // Interactive swing doors (every walk-in building has them)
+  // =========================================================================
+  _addSwingDoor({
+    x, z, y = CURB_Y, yaw = 0, width = 4.4, height = 3.4,
+    label = 'doors', buildingId = null, leaves = 2, open = false, glass = true,
+  }) {
+    const door = Props.createDoorState({ x, z, y, yaw, width, height, label, buildingId, leaves, open });
+    const root = new THREE.Group();
+    root.position.set(x, y, z);
+    root.rotation.y = yaw;
+    this.root.add(root);
+
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.36, metalness: 0.82 });
+    const brass = new THREE.MeshStandardMaterial({ color: 0xc9a227, roughness: 0.28, metalness: 0.92 });
+    const leafMat = glass
+      ? new THREE.MeshPhysicalMaterial({
+        color: 0xbae6fd, transparent: true, opacity: 0.28, roughness: 0.06,
+        metalness: 0.12, depthWrite: false, side: THREE.DoubleSide,
+      })
+      : new THREE.MeshStandardMaterial({ color: 0x6b4b2a, roughness: 0.7 });
+
+    const n = leaves === 2 ? 2 : 1;
+    const leafW = (width - 0.12) / n;
+    const parts = [];
+    for (let i = 0; i < n; i++) {
+      const side = n === 2 ? (i === 0 ? -1 : 1) : 1;
+      const hingeX = n === 2 ? side * (width / 2) : -width / 2;
+      const pivot = new THREE.Group();
+      pivot.position.set(hingeX, 0, 0);
+      root.add(pivot);
+      const dir = n === 2 ? -side : 1;
+      // leaf panel
+      const panel = this.box(pivot, dir * (leafW / 2), height / 2, 0, leafW, height - 0.1, 0.07, leafMat, { cast: false });
+      panel.castShadow = false;
+      // frame + rails
+      this.box(pivot, dir * (leafW / 2), height / 2, 0, leafW, 0.07, 0.12, frameMat);
+      this.box(pivot, dir * (leafW / 2), height - 0.06, 0, leafW, 0.1, 0.12, frameMat);
+      this.box(pivot, dir * (leafW / 2), 0.06, 0, leafW, 0.12, 0.12, frameMat);
+      this.box(pivot, dir * (leafW - 0.05), height / 2, 0, 0.09, height - 0.08, 0.12, frameMat);
+      this.box(pivot, dir * (leafW - 0.16), height * 0.46, 0.07, 0.05, 0.5, 0.05, brass, { cast: false });
+      parts.push({ pivot, side });
+    }
+    door.root = root;
+    door.parts = parts;
+    door.glass = glass;
+    this.doors.push(door);
+    return door;
+  }
+
+  /** Animate every door leaf toward its target swing angle. */
+  updateDoors(dt) {
+    for (const d of this.doors) {
+      const before = d.amount;
+      Props.stepDoor(d, dt);
+      if (d.amount === before || !d.parts) continue;
+      const angle = Props.DOOR_SWING * d.amount;
+      for (const part of d.parts) part.pivot.rotation.y = part.side === 1 ? angle : -angle;
+    }
+  }
+
+  /** Closed-door colliders for the storey the player is standing on. */
+  doorCollidersAt(feetY) {
+    return Props.doorColliders(this.doors, feetY);
+  }
+
+  nearestDoor(x, z, y = CURB_Y, radius = 3.6) {
+    let best = null; let bd = Infinity;
+    for (const d of this.doors) {
+      if (Math.abs((d.y || 0) - y) > 4.2) continue;
+      const dist = Props.doorDistance(d, x, z);
+      const reach = radius + d.width * 0.35;
+      if (dist < reach && dist < bd) { bd = dist; best = d; }
+    }
+    return best;
+  }
+
+  // =========================================================================
+  // Interactable furniture spots
+  // =========================================================================
+  _registerPropSpot({ buildingId = null, level = 0, type, x, z, y = CURB_Y, rot = 0, name = '' }) {
+    if (!Props.isInteractable(type)) return null;
+    const def = Props.interactionFor(type);
+    const spot = {
+      type, x: +x.toFixed(2), z: +z.toFixed(2), y: +y.toFixed(2), rot: +rot.toFixed(3),
+      buildingId, level, name: name || def.verb, icon: def.icon,
+    };
+    this.propSpots.push(spot);
+    return spot;
+  }
+
+  /** Register every prop of a frame-local interior and return the persisted list. */
+  _registerFrameProps(building, frame, props, level = 0) {
+    const list = [];
+    for (const prop of props) {
+      const world = this.toWorld(frame, prop.x, prop.z);
+      const spot = this._registerPropSpot({
+        buildingId: building.id, level, type: prop.type,
+        x: world.x, z: world.z, y: building.baseY + 0.1, rot: prop.rot + (frame.face === 1 ? 0 : Math.PI),
+      });
+      if (spot) list.push(spot);
+    }
+    return list;
+  }
+
+  _registerWorldProps(building, props, level = 0) {
+    const cos = Math.cos(building.yaw || 0);
+    const sin = Math.sin(building.yaw || 0);
+    const out = [];
+    for (const prop of props) {
+      const wx = building.x + prop.x * cos + prop.z * sin;
+      const wz = building.z - prop.x * sin + prop.z * cos;
+      const spot = this._registerPropSpot({
+        buildingId: building.id, level, type: prop.type,
+        x: wx, z: wz, y: building.baseY + level * Interiors.FLOOR_HEIGHT,
+        rot: (prop.rot || 0) + (building.yaw || 0),
+      });
+      if (spot) out.push(spot);
+    }
+    return out;
+  }
+
+  propSpotsNear(x, z, y = CURB_Y, radius = 2.4) {
+    const out = [];
+    for (const s of this.propSpots) {
+      if (Math.abs(s.y - y) > 1.8) continue;
+      if ((s.x - x) ** 2 + (s.z - z) ** 2 < radius * radius) out.push(s);
+    }
+    for (const s of this._activePropSpots) {
+      if (Math.abs(s.y - y) > 1.8) continue;
+      if ((s.x - x) ** 2 + (s.z - z) ** 2 < radius * radius) out.push(s);
+    }
+    return out;
+  }
+
+  serviceSpotsNear(x, z, y = CURB_Y, radius = 3.6) {
+    const out = [];
+    for (const s of this.serviceSpots) {
+      if (Math.abs((s.y || 0) - y) > 2.4) continue;
+      if ((s.x - x) ** 2 + (s.z - z) ** 2 < radius * radius) out.push(s);
+    }
+    return out;
+  }
+
+  _registerServiceSpot(spot) {
+    const entry = { y: CURB_Y, ...spot };
+    this.serviceSpots.push(entry);
+    return entry;
+  }
+
+  // =========================================================================
+  // South Waterfront civic district (hotel, hospital, museum, mall, gym, library)
+  // =========================================================================
+  _palm(x, z, scale = 1) {
+    const g = new THREE.Group();
+    g.position.set(x, CURB_Y, z);
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * scale, 0.26 * scale, 6.4 * scale, 7), this.mats.trunk);
+    trunk.position.y = 3.2 * scale;
+    trunk.rotation.z = (this.rand() - 0.5) * 0.12;
+    trunk.castShadow = true;
+    g.add(trunk);
+    const frondMat = this.mats.leaf2;
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2;
+      const frond = new THREE.Mesh(new THREE.ConeGeometry(0.34 * scale, 3.1 * scale, 5), frondMat);
+      frond.position.set(Math.cos(a) * 1.05 * scale, 6.4 * scale, Math.sin(a) * 1.05 * scale);
+      frond.rotation.z = Math.cos(a) * 1.12;
+      frond.rotation.x = -Math.sin(a) * 1.12;
+      frond.castShadow = true;
+      g.add(frond);
+    }
+    this.root.add(g);
+    this.addCollider(x - 0.32, x + 0.32, z - 0.32, z + 0.32);
+    this.palms.push({ x, z });
+    return g;
+  }
+
+  _buildCivicHall(place) {
+    const { id, name, width: w, depth: d, height: h, yaw, color } = place;
+    const m = this._propMaterials();
+    const g = new THREE.Group();
+    g.position.set(place.x, CURB_Y, place.z);
+    g.rotation.y = yaw;
+    this.root.add(g);
+
+    const building = {
+      id, kind: 'hall', name, x: place.x, z: place.z, width: w, depth: d, height: h,
+      baseY: CURB_Y, floors: 0, themeId: place.themeId, seed: Math.round(place.x * 17 + place.z * 5), yaw,
+    };
+    this.enterables.push(building);
+    this.interiorFurniture[id] = [];
+
+    const pair = this.windowPairs[place.type === 'museum' ? 1 : place.type === 'mall' ? 2 : 5];
+    const wallMat = new THREE.MeshStandardMaterial({
+      map: cloneRepeat(pair.map, 4, 3),
+      normalMap: cloneRepeat(pair.normalMap, 4, 3),
+      roughnessMap: cloneRepeat(pair.roughnessMap, 4, 3),
+      roughness: 0.86, metalness: 0.12,
+      emissive: 0xffffff,
+      emissiveMap: cloneRepeat(pair.emissive, 4, 3),
+      emissiveIntensity: 0,
+      side: THREE.DoubleSide,
+    });
+    this.windowMats.push(wallMat);
+    const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.35, metalness: 0.55 });
+    const cream = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 });
+
+    const t = 0.6;
+    const doorW = 7.0; const doorH = 4.4;
+    const front = d / 2;
+
+    // shell
+    this.box(g, 0, 0.07, 0, w - 1.2, 0.14, d - 1.2, place.type === 'gym' ? m.carpet : m.marble, { cast: false });
+    this.box(g, 0, h - 0.3, 0, w - 0.4, 0.4, d - 0.4, cream);
+    this.box(g, 0, h + 0.35, 0, w + 0.8, 0.5, d + 0.8, accent);
+    this.box(g, 0, h + 0.75, 0, w + 1.2, 0.22, d + 1.2, this.mats.darkMetal);
+    this.box(g, 0, h / 2, -d / 2, w, h, t, wallMat);
+    this.frameWorldCollider(building, 0, -d / 2, w, t);
+    for (const sx of [-w / 2, w / 2]) {
+      this.box(g, sx, h / 2, 0, t, h, d, wallMat);
+      this.frameWorldCollider(building, sx, 0, t, d);
+    }
+    const segW = (w - doorW) / 2;
+    for (const sgn of [-1, 1]) {
+      const x = sgn * (doorW / 2 + segW / 2);
+      this.box(g, x, h / 2, front, segW, h, t, wallMat);
+      this.frameWorldCollider(building, x, front, segW, t);
+      this.box(g, x, 2.4, front + t / 2 + 0.02, Math.max(1, segW - 2.2), 3.0, 0.12, this.mats.glass, { cast: false });
+      this.box(g, x, 4.1, front + t / 2 + 0.02, Math.max(1, segW - 2.2), 0.22, t + 0.1, accent, { cast: false });
+    }
+    this.box(g, 0, doorH + (h - doorH) / 2, front, doorW + 0.5, h - doorH, t + 0.1, wallMat);
+    this.box(g, 0, doorH + 0.2, front, doorW + 1.6, 0.3, t + 0.5, accent);
+    // columned portico
+    for (const sgn of [-1, 1]) {
+      this.box(g, sgn * (doorW / 2 + 1.3), (h * 0.55) / 2, front + 1.9, 0.66, h * 0.55, 0.66, cream);
+      this.box(g, sgn * (doorW / 2 + 1.3), h * 0.55 + 0.22, front + 1.9, 1.0, 0.4, 1.0, accent);
+    }
+    this.box(g, 0, h * 0.55 + 0.9, front + 1.9, doorW + 3.4, 0.4, 2.6, accent);
+    this.sign(g, [name.toUpperCase(), place.blurb.split('.')[0].toUpperCase()], 0, h + 1.35, front + 0.1, Math.min(w - 4, 22), 2.0, {
+      bg: '#0b1220', fg: '#f8fafc', border: color,
+    });
+
+    // interior furniture & service desk
+    const props = this._civicProps(place, w, d);
+    for (const prop of props) this._addProp(g, prop);
+    this._registerWorldProps(building, props, 0);
+    for (const prop of props) {
+      const spec = Interiors.PROP_SPECS[prop.type];
+      if (!spec || !spec.collide) continue;
+      this.frameWorldCollider(building, prop.x, prop.z, spec.w, spec.d);
+    }
+
+    // doors
+    this._addSwingDoor({
+      x: place.x + Math.sin(yaw) * front,
+      z: place.z + Math.cos(yaw) * front,
+      yaw, width: doorW, height: doorH,
+      label: `${name} doors`, buildingId: id,
+    });
+
+    // entrance marker & service spot in front of the desk
+    const marker = this._marker(new THREE.Color(color));
+    const mx = place.x + Math.sin(yaw) * (front + 6.5);
+    const mz = place.z + Math.cos(yaw) * (front + 6.5);
+    marker.position.set(mx, CURB_Y + 0.04, mz);
+    this.root.add(marker);
+    this.stationMarkers.push(marker);
+
+    this.districtSpots.push({ x: mx, z: mz, id, name, icon: place.icon, place });
+
+    const desk = props.find((p) => p.type === 'reception') || { x: 0, z: -d / 2 + 4 };
+    const cos = Math.cos(yaw); const sin = Math.sin(yaw);
+    this._registerServiceSpot({
+      placeId: id,
+      serviceId: place.services[0],
+      name,
+      prompt: `${name} — ${place.services[0] === 'hotel' ? 'check in / check out' : place.services[0] === 'hospital' ? 'reception & treatment' : place.services[0] === 'museum' ? 'tickets & gallery' : place.services[0] === 'mall' ? 'concierge, shops & cinema' : place.services[0] === 'gym' ? 'front desk & training' : 'librarian & study desks'}`,
+      x: place.x + desk.x * cos + (desk.z + 2.2) * sin,
+      z: place.z - desk.x * sin + (desk.z + 2.2) * cos,
+      y: CURB_Y,
+    });
+    return building;
+  }
+
+  frameWorldCollider(building, lx, lz, w, d) {
+    const cos = Math.cos(building.yaw || 0);
+    const sin = Math.sin(building.yaw || 0);
+    const cx = building.x + lx * cos + lz * sin;
+    const cz = building.z - lx * sin + lz * cos;
+    const quarter = Math.abs(Math.round((building.yaw || 0) / (Math.PI / 2))) % 2 === 1;
+    const ww = quarter ? d : w;
+    const dd = quarter ? w : d;
+    this.addCollider(cx - ww / 2, cx + ww / 2, cz - dd / 2, cz + dd / 2);
+  }
+
+  /** Deterministic furniture for each civic building type. */
+  _civicProps(place, w, d) {
+    const hd = d / 2;
+    const hw = w / 2;
+    switch (place.type) {
+      case 'hospital':
+        return [
+          { type: 'reception', x: 0, z: -hd + 4.0, rot: Math.PI },
+          { type: 'medbed', x: -hw + 4.0, z: -hd + 8.2, rot: Math.PI / 2 },
+          { type: 'medbed', x: -hw + 4.0, z: -hd + 11.0, rot: Math.PI / 2 },
+          { type: 'medbed', x: hw - 4.0, z: -hd + 8.2, rot: -Math.PI / 2 },
+          { type: 'medbed', x: hw - 4.0, z: -hd + 11.0, rot: -Math.PI / 2 },
+          { type: 'deskpair', x: -hw + 6.0, z: 1.0, rot: 0 },
+          { type: 'labbench', x: hw - 6.0, z: 1.6, rot: Math.PI },
+          { type: 'chair', x: -3.2, z: -hd + 6.4, rot: Math.PI },
+          { type: 'chair', x: -2.4, z: -hd + 6.4, rot: Math.PI },
+          { type: 'chair', x: 2.4, z: -hd + 6.4, rot: Math.PI },
+          { type: 'chair', x: 3.2, z: -hd + 6.4, rot: Math.PI },
+          { type: 'planter', x: -hw + 2.0, z: hd - 2.6, rot: 0 },
+          { type: 'planter', x: hw - 2.0, z: hd - 2.6, rot: 0 },
+        ];
+      case 'museum':
+        return [
+          { type: 'reception', x: 3.0, z: -hd + 3.6, rot: Math.PI },
+          { type: 'artframe', x: -8.0, z: -hd + 0.6, rot: 0 },
+          { type: 'artframe', x: 0.0, z: -hd + 0.6, rot: 0 },
+          { type: 'artframe', x: 8.0, z: -hd + 0.6, rot: 0 },
+          { type: 'artframe', x: -hw + 0.75, z: -2.0, rot: Math.PI / 2 },
+          { type: 'artframe', x: hw - 0.75, z: -2.0, rot: -Math.PI / 2 },
+          { type: 'sculpture', x: -7.5, z: 1.6, rot: 0 },
+          { type: 'sculpture', x: 0.0, z: -2.6, rot: 0 },
+          { type: 'sculpture', x: 7.5, z: 1.6, rot: 0 },
+          { type: 'bench', x: 0, z: 5.2, rot: 0 },
+          { type: 'bench', x: -5.5, z: 5.2, rot: 0 },
+          { type: 'bench', x: 5.5, z: 5.2, rot: 0 },
+          { type: 'planter', x: -hw + 2.0, z: hd - 2.4, rot: 0 },
+          { type: 'planter', x: hw - 2.0, z: hd - 2.4, rot: 0 },
+        ];
+      case 'mall':
+        return [
+          { type: 'reception', x: 0, z: -hd + 3.4, rot: Math.PI },
+          { type: 'counter', x: -11.0, z: -hd + 8.5, rot: Math.PI / 2 },
+          { type: 'counter', x: 11.0, z: -hd + 8.5, rot: -Math.PI / 2 },
+          { type: 'bookshelf', x: -hw + 2.4, z: -2.0, rot: Math.PI / 2 },
+          { type: 'bookshelf', x: -hw + 2.4, z: 1.6, rot: Math.PI / 2 },
+          { type: 'dinetable', x: -8.0, z: 3.6, rot: 0 },
+          { type: 'dinetable', x: -2.5, z: 3.6, rot: 0 },
+          { type: 'dinetable', x: 3.0, z: 3.6, rot: 0 },
+          { type: 'kitchen', x: 9.5, z: 4.6, rot: Math.PI },
+          { type: 'bar', x: 9.5, z: 1.0, rot: 0 },
+          { type: 'sofa', x: 12.5, z: -1.0, rot: -Math.PI / 2 },
+          { type: 'planter', x: -hw + 2.0, z: hd - 2.4, rot: 0 },
+          { type: 'planter', x: hw - 2.0, z: hd - 2.4, rot: 0 },
+          { type: 'cinema_screen', x: 0, z: -hd + 0.9, rot: 0 },
+        ].filter((p, i, arr) => {
+          // the cinema screen lives on the east wing; keep it clear of the counters
+          if (p.type === 'cinema_screen') return true;
+          return i < arr.length;
+        });
+      case 'gym':
+        return [
+          { type: 'reception', x: 0, z: -hd + 3.4, rot: Math.PI },
+          { type: 'treadmill', x: -9.0, z: -3.0, rot: 0 },
+          { type: 'treadmill', x: -6.2, z: -3.0, rot: 0 },
+          { type: 'treadmill', x: -9.0, z: 1.4, rot: 0 },
+          { type: 'treadmill', x: -6.2, z: 1.4, rot: 0 },
+          { type: 'gymbench', x: 3.0, z: -2.4, rot: 0 },
+          { type: 'gymbench', x: 7.4, z: -2.4, rot: 0 },
+          { type: 'dumbbellrack', x: hw - 2.2, z: 2.6, rot: -Math.PI / 2 },
+          { type: 'dumbbellrack', x: hw - 2.2, z: 5.2, rot: -Math.PI / 2 },
+          { type: 'bench', x: -3.0, z: hd - 3.0, rot: 0 },
+          { type: 'planter', x: -hw + 2.0, z: hd - 2.4, rot: 0 },
+        ];
+      case 'library':
+      default:
+        return [
+          { type: 'reception', x: 0, z: -hd + 3.4, rot: Math.PI },
+          { type: 'bookshelf', x: -9.6, z: -3.4, rot: 0 },
+          { type: 'bookshelf', x: -6.8, z: -3.4, rot: 0 },
+          { type: 'bookshelf', x: 6.8, z: -3.4, rot: 0 },
+          { type: 'bookshelf', x: 9.6, z: -3.4, rot: 0 },
+          { type: 'bookshelf', x: -hw + 2.0, z: 0.4, rot: Math.PI / 2 },
+          { type: 'bookshelf', x: hw - 2.0, z: 0.4, rot: -Math.PI / 2 },
+          { type: 'desk', x: -5.0, z: 3.2, rot: 0 },
+          { type: 'desk', x: 0.0, z: 3.2, rot: 0 },
+          { type: 'desk', x: 5.0, z: 3.2, rot: 0 },
+          { type: 'chair', x: -5.0, z: 2.2, rot: Math.PI },
+          { type: 'chair', x: 0.0, z: 2.2, rot: Math.PI },
+          { type: 'chair', x: 5.0, z: 2.2, rot: Math.PI },
+          { type: 'bench', x: 0, z: hd - 3.4, rot: 0 },
+          { type: 'planter', x: -hw + 2.0, z: hd - 2.4, rot: 0 },
+          { type: 'planter', x: hw - 2.0, z: hd - 2.4, rot: 0 },
+        ];
+    }
+  }
+
+  _buildDistrict() {
+    const m = this._propMaterials();
+    const D = DISTRICT;
+
+    // ---------------------------------------------------------------- roads
+    // Extend all five avenues south and add a new cross avenue at z = 190.
+    const roadZ = new THREE.PlaneGeometry(ROAD_HALF * 2, 70);
+    for (const r of ROAD_LINES) {
+      const strip = new THREE.Mesh(roadZ, this.mats.roadZ);
+      strip.rotation.x = -Math.PI / 2;
+      strip.position.set(r, 0.021, 192.5);
+      strip.receiveShadow = true;
+      this.root.add(strip);
+    }
+    const roadX = new THREE.PlaneGeometry(320, ROAD_HALF * 2);
+    const cross = new THREE.Mesh(roadX, this.mats.roadX);
+    cross.rotation.x = -Math.PI / 2;
+    cross.position.set(0, 0.022, D.avenueZ);
+    cross.receiveShadow = true;
+    this.root.add(cross);
+
+    // ------------------------------------------------------------- pavements
+    const padGeo = this.boxGeo;
+    const padMat = this.mats.plaza;
+    const pad = (cx, cz, w, d) => {
+      const b = new THREE.Mesh(padGeo, padMat);
+      b.scale.set(w, CURB_Y, d);
+      b.position.set(cx, CURB_Y / 2, cz);
+      b.receiveShadow = true;
+      this.root.add(b);
+    };
+    for (const bx of BLOCK_CENTERS) {
+      pad(bx, 169.75, 58, 24.5);   // north band (gym & library)
+      pad(bx, 212.75, 58, 29.5);   // south band (hotel, hospital, museum, mall)
+    }
+
+    // --------------------------------------------------------------- beach
+    // beachfront promenade deck then sand
+    pad(0, 228.5, 324, 5.0);
+    const sand = new THREE.MeshStandardMaterial({ color: 0xe8d3a0, roughness: 0.95 });
+    const sandMesh = new THREE.Mesh(padGeo, sand);
+    sandMesh.scale.set(324, 0.14, 11.0);
+    sandMesh.position.set(0, 0.03, 234.0);
+    sandMesh.receiveShadow = true;
+    this.root.add(sandMesh);
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(340, 60), new THREE.MeshPhysicalMaterial({
+      color: 0x0e7490, roughness: 0.12, metalness: 0.2, transparent: true, opacity: 0.92,
+    }));
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.set(0, 0.04, 269);
+    this.root.add(sea);
+    const surf = new THREE.Mesh(new THREE.PlaneGeometry(324, 3.2), new THREE.MeshBasicMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.55 }));
+    surf.rotation.x = -Math.PI / 2;
+    surf.position.set(0, 0.055, 240.0);
+    this.root.add(surf);
+
+    // promenade: palms, benches, lamps and a lifeguard tower
+    for (let i = 0; i < 12; i++) {
+      const x = -150 + i * 27.5;
+      this._palm(x + 6, 227.5);
+      this._palm(x - 6, 229.5);
+    }
+    for (let i = 0; i < 7; i++) {
+      const x = -132 + i * 44;
+      const bench = new THREE.Group();
+      bench.position.set(x, CURB_Y, 225.6);
+      this.box(bench, 0, 0.45, 0, 3.0, 0.12, 0.7, m.wood);
+      this.box(bench, 0, 0.78, -0.32, 3.0, 0.5, 0.12, m.wood);
+      for (const dx of [-1.25, 1.25]) this.box(bench, dx, 0.22, 0, 0.12, 0.45, 0.6, this.mats.darkMetal);
+      this.root.add(bench);
+      this.addCollider(x - 1.55, x + 1.55, 225.25, 225.95);
+      this._registerPropSpot({ buildingId: null, level: -1, type: 'bench', x, z: 225.6, y: CURB_Y, rot: 0, name: 'Promenade bench' });
+    }
+    // lifeguard tower
+    const tower = new THREE.Group();
+    tower.position.set(0, CURB_Y, 234.0);
+    for (const dx of [-1.4, 1.4]) for (const dz of [-1.4, 1.4]) this.box(tower, dx, 1.1, dz, 0.2, 2.2, 0.2, m.white);
+    this.box(tower, 0, 2.3, 0, 3.6, 0.24, 3.6, m.wood);
+    this.box(tower, 0, 3.1, -1.5, 3.6, 1.5, 0.14, m.white);
+    this.box(tower, 0, 3.9, 0, 4.2, 0.24, 4.2, new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.6 }));
+    this.box(tower, 0, 5.0, 0, 0.1, 2.0, 0.1, this.mats.metal);
+    this.box(tower, 0.8, 5.6, 0, 1.4, 0.8, 0.06, new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+    this.root.add(tower);
+    this.addCollider(-1.9, 1.9, 232.1, 235.9);
+    // sea wall keeps players on the sand (and cars out of the water)
+    this.addCollider(DISTRICT.minX, DISTRICT.maxX, 238.4, 240.2);
+    for (let x = DISTRICT.minX; x <= DISTRICT.maxX; x += 8) {
+      this.box(this.root, x, 0.5, 239.3, 7.6, 1.0, 0.5, this.mats.plaza);
+    }
+
+    // ------------------------------------------------------- civic buildings
+    for (const place of PUBLIC_PLACES) {
+      if (place.kind === 'tower') {
+        const pair = this.windowPairs[place.type === 'hotel' ? 1 : 2];
+        const rx = Math.max(2, Math.round(place.width / 6));
+        const ry = Math.max(3, Math.round(place.height / 6));
+        const mat = new THREE.MeshStandardMaterial({
+          map: cloneRepeat(pair.map, rx, ry),
+          normalMap: cloneRepeat(pair.normalMap, rx, ry),
+          roughnessMap: cloneRepeat(pair.roughnessMap, rx, ry),
+          roughness: 0.86, metalness: 0.16,
+          emissive: 0xffffff,
+          emissiveMap: cloneRepeat(pair.emissive, rx, ry),
+          emissiveIntensity: 0,
+        });
+        this.windowMats.push(mat);
+        const building = this._buildTower({
+          x: place.x, z: place.z, w: place.width, d: place.depth, h: place.height,
+          mat, roofMat: this.mats.roofDark, yaw: place.yaw, seed: 8100 + Math.round(place.x),
+          name: place.name, themeId: place.themeId, id: place.id,
+        });
+        building.civic = true;
+        // hotel lobby extras & service desk
+        const cos = Math.cos(place.yaw); const sin = Math.sin(place.yaw);
+        this._registerServiceSpot({
+          placeId: place.id,
+          serviceId: 'hotel',
+          name: place.name,
+          prompt: 'The Grand Meridian Hotel — check in / check out',
+          x: place.x + 3.2 * cos + (place.depth / 2 - 4.6) * sin,
+          z: place.z - 3.2 * sin + (place.depth / 2 - 4.6) * cos,
+          y: CURB_Y,
+        });
+        // entrance marker
+        const marker = this._marker(new THREE.Color(place.color));
+        marker.position.set(place.x + Math.sin(place.yaw) * (place.depth / 2 + 6), CURB_Y + 0.04, place.z + Math.cos(place.yaw) * (place.depth / 2 + 6));
+        this.root.add(marker);
+        this.stationMarkers.push(marker);
+        this.districtSpots.push({ x: marker.position.x, z: marker.position.z, id: place.id, name: place.name, icon: place.icon, place });
+      } else {
+        this._buildCivicHall(place);
+      }
+    }
+
+    // ---------------------------------------------------------- gateway signs
+    // Monument sign beside the avenue, facing north up the city so drivers see it.
+    const gate = new THREE.Group();
+    gate.position.set(-136, CURB_Y, 180.0);
+    gate.rotation.y = Math.PI;
+    this.root.add(gate);
+    this.box(gate, 0, 0.35, 0, 12.0, 0.7, 0.7, m.marble);
+    this.box(gate, 0, 4.55, 0, 11.0, 0.5, 0.5, m.gold);
+    for (const sx of [-5.2, 5.2]) this.box(gate, sx, 2.4, 0, 0.42, 4.4, 0.42, this.mats.darkMetal);
+    this.sign(gate, ['SOUTH WATERFRONT', 'HOTEL · HOSPITAL · MUSEUM · MALL · GYM · LIBRARY'], 0, 3.2, 0.26, 9.4, 2.1, {
+      bg: '#0e7490', fg: '#f0fdfa', border: '#f59e0b',
+    });
+    this.addCollider(-141.5, -130.5, 179.2, 180.8);
+    // Beach promenade sign
+    const beachSign = new THREE.Group();
+    beachSign.position.set(60, CURB_Y, 230.2);
+    beachSign.rotation.y = Math.PI;
+    this.root.add(beachSign);
+    for (const sx of [-2.2, 2.2]) this.box(beachSign, sx, 1.25, 0, 0.18, 2.5, 0.18, this.mats.darkMetal);
+    this.sign(beachSign, ['METRO BEACH', 'PROMENADE · SEA WALL'], 0, 2.1, 0.12, 4.8, 1.05, {
+      bg: '#0f766e', fg: '#ecfeff', border: '#67e8f9',
+    });
+
+    // street lamps along the new avenue
+    for (const lx of [-120, -60, 0, 60, 120]) {
+      const lamp = new THREE.Group();
+      lamp.position.set(lx, CURB_Y, D.avenueZ - ROAD_HALF - 1.4);
+      this.box(lamp, 0, 3.1, 0, 0.18, 6.2, 0.18, this.mats.darkMetal);
+      this.box(lamp, 0.7, 6.1, 0, 1.6, 0.16, 0.16, this.mats.darkMetal);
+      this.box(lamp, 1.45, 5.95, 0, 0.5, 0.22, 0.4, new THREE.MeshBasicMaterial({ color: 0xfef3c7 }));
+      this.root.add(lamp);
+      this.addCollider(lx - 0.2, lx + 0.2, D.avenueZ - ROAD_HALF - 1.6, D.avenueZ - ROAD_HALF - 1.2);
+    }
   }
 
   sign(parent, text, x, y, z, w, h, opts = {}) {
@@ -977,12 +1611,13 @@ export class City {
   // ----- skyline -------------------------------------------------------------
   _buildSkylineBlock(frame) {
     const r = this.rand;
-    const spots = [[-13, -13], [13, -13], [-13, 13], [13, 13]];
+    // Dense downtown: a 3×3 parcel grid per block (up to 9 walk-in towers each)
+    const spots = [[-18, -18], [0, -18], [18, -18], [-18, 0], [0, 0], [18, 0], [-18, 18], [0, 18], [18, 18]];
     for (const [lx, lz] of spots) {
-      if (r() < 0.15) { const p = this.toWorld(frame, lx, lz); this.tree(p.x, p.z, 1.2); continue; }
-      const w = 14 + r() * 8;
-      const d = 14 + r() * 8;
-      const h = 12 + r() * (Math.abs(frame.x) < 80 ? 50 : 30);
+      if (r() < 0.12) { const p = this.toWorld(frame, lx, lz); this.tree(p.x, p.z, 1.2); continue; }
+      const w = 10.5 + r() * 3.5;
+      const d = 10.5 + r() * 3.5;
+      const h = 11 + r() * (Math.abs(frame.x) < 80 ? 34 : 24);
       const p = this.toWorld(frame, lx, lz);
       const pair = this.windowPairs[Math.floor(r() * this.windowPairs.length)];
       const floorsGuess = Interiors.floorCountForHeight(h - 1.5);
@@ -1006,12 +1641,15 @@ export class City {
       this.windowMats.push(mat);
       // Every skyline tower is now a walk-in, multi-storey building with a lift
       // and a roof sky deck. Doors face the nearest avenue (east or west).
-      const ox = p.x - frame.x;
+      // Doors face the closest open street: side columns face outward, middle faces the block front
+      let yaw = lz > 0 ? 0 : Math.PI;
+      if (lx < -6) yaw = -Math.PI / 2;
+      else if (lx > 6) yaw = Math.PI / 2;
       this._buildTower({
         x: p.x, z: p.z, w, d, h,
         mat,
         roofMat: this.mats.roofDark,
-        yaw: ox >= 0 ? Math.PI / 2 : -Math.PI / 2,
+        yaw,
         seed: Math.round(p.x * 31 + p.z * 17 + w * 7),
         themeId: Interiors.themeForSeed(Math.round(p.x * 31 + p.z * 17)),
         name: TOWER_NAMES[this._towerCount++ % TOWER_NAMES.length],
@@ -1043,7 +1681,7 @@ export class City {
       const p = this.toWorld(frame, lx, lz);
       this.tree(p.x, p.z, 1 + this.rand() * 0.4);
     }
-    // benches
+    // benches (interactive — press E to sit)
     for (const [lx, lz, rot] of [[-4, 9, 0], [4, -9, Math.PI], [9, 4, Math.PI / 2], [-9, -4, -Math.PI / 2]]) {
       const b = new THREE.Group();
       b.position.set(lx, 0, lz); b.rotation.y = rot;
@@ -1052,6 +1690,8 @@ export class City {
       this.box(b, -0.9, 0.22, 0, 0.1, 0.45, 0.5, this.mats.darkMetal);
       this.box(b, 0.9, 0.22, 0, 0.1, 0.45, 0.5, this.mats.darkMetal);
       g.add(b);
+      const world = this.toWorld(frame, lx, lz);
+      this._registerPropSpot({ buildingId: null, level: -1, type: 'bench', x: world.x, z: world.z, y: CURB_Y, rot: rot + (frame.face === 1 ? 0 : Math.PI), name: 'Park bench' });
     }
   }
 
@@ -1107,13 +1747,12 @@ export class City {
     this.box(g, 0, doorH + 1.8, -1.95, doorW + 0.4, 3.6, t, wallMat);
     this.box(g, -(doorW / 2 + 0.15), doorH / 2, -1.95, 0.3, doorH, t + 0.2, trimMat);
     this.box(g, (doorW / 2 + 0.15), doorH / 2, -1.95, 0.3, doorH, t + 0.2, trimMat);
-    for (const sgn of [-1, 1]) {
-      const leaf = new THREE.Group();
-      leaf.position.set(sgn * (doorW / 2 - 0.1), 0, -1.8);
-      leaf.rotation.y = sgn * 1.15;
-      this.box(leaf, -sgn * 0.95, doorH * 0.45, 0, 1.9, doorH * 0.9, 0.06, this.mats.glass, { cast: false });
-      g.add(leaf);
-    }
+    const stationDoor = this.toWorld(frame, 0, -1.95);
+    this._addSwingDoor({
+      x: stationDoor.x, z: stationDoor.z, y: CURB_Y,
+      yaw: frame.face === 1 ? 0 : Math.PI,
+      width: doorW, height: doorH, label: `${st.name} doors`, buildingId: building.id,
+    });
     this.box(g, 0, 4.4, -1.4, 21, 0.3, 1.4, trimMat);                     // awning
     this.sign(g, [st.name.toUpperCase(), 'NOW HIRING'], 0, 5.9, -1.84, 14, 1.9, { bg: st.color, fg: st.id === 'cab' ? '#111827' : '#ffffff' });
 
@@ -1159,6 +1798,7 @@ export class City {
         });
       }
     }
+    this._registerFrameProps(building, frame, props);
     this.box(g, 0, 0.06, -9, 3.4, 0.06, 12.4, m.cream, { cast: false }); // entry runner rug
 
     // interior reception pad (press E at the desk)
@@ -1283,15 +1923,13 @@ export class City {
       this.box(g, wx, 2.2, -2.52, 6.2, 3.8, 0.12, warmBackdrop, { cast: false });
       this.box(g, wx, 2.2, -2.15, 6.4, 3.9, 0.08, this.mats.glass, { cast: false });
     }
-    // Propped-open grand glass double doors + gold awning canopy
-    for (const sgn of [-1, 1]) {
-      const leaf = new THREE.Group();
-      leaf.position.set(sgn * 1.7, 0, -2.4);
-      leaf.rotation.y = sgn * 1.25;
-      this.box(leaf, -sgn * 0.9, 1.9, 0, 1.8, 3.8, 0.06, this.mats.glass, { cast: false });
-      this.box(leaf, -sgn * 0.9, 1.9, 0, 1.84, 0.08, 0.1, goldMat, { cast: false });
-      g.add(leaf);
-    }
+    // Interactive grand glass doors + gold awning canopy
+    const boutiqueDoor = this.toWorld(frame, 0, -2.7);
+    this._addSwingDoor({
+      x: boutiqueDoor.x, z: boutiqueDoor.z, y: CURB_Y,
+      yaw: frame.face === 1 ? 0 : Math.PI,
+      width: 3.8, height: 4.0, label: 'Maison Verve doors', buildingId: shop.id,
+    });
     this.box(g, 0, 4.25, -0.8, 6.2, 0.24, 3.2, goldMat);
 
     // ----- boutique interior: rails, fitting rooms, gold counter, chandelier
@@ -1314,6 +1952,7 @@ export class City {
         });
       }
     }
+    this._registerFrameProps(shop, frame, props);
     // fitting rooms (velvet booths with mirrors)
     for (const sx of [-9.4, 9.4]) {
       this.box(g, sx, 1.4, -12.6, 2.4, 2.8, 2.4, velvetMat);
@@ -1515,6 +2154,14 @@ export class City {
         const spec = Interiors.PROP_SPECS[prop.type];
         if (spec && spec.collide) this.frameCollider(frame, prop.x, prop.z, spec.w, spec.d, list);
       }
+      const techBuilding = this.buildingById(lotId);
+      if (techBuilding) this._registerFrameProps(techBuilding, frame, lobbyProps);
+      const techDoor = this.toWorld(frame, 0, front);
+      this._addSwingDoor({
+        x: techDoor.x, z: techDoor.z, y: CURB_Y,
+        yaw: frame.face === 1 ? 0 : Math.PI,
+        width: doorW, height: 4.0, label: 'ByteForge lobby doors', buildingId: lotId,
+      });
       this.indoorSpots.push({
         x: this.toWorld(frame, 0, cz + 5.6).x, z: this.toWorld(frame, 0, cz + 5.6).z,
         type: 'lot', lot: 'tech', id: 'tech', name: 'ByteForge Tech Hub',
@@ -1620,6 +2267,13 @@ export class City {
           });
         }
       }
+      this._registerFrameProps({ id: lotId, baseY: CURB_Y }, frame, props);
+      const lotDoor = this.toWorld(frame, 0, front);
+      this._addSwingDoor({
+        x: lotDoor.x, z: lotDoor.z, y: CURB_Y,
+        yaw: frame.face === 1 ? 0 : Math.PI,
+        width: doorW, height: doorH, label: `${def.name} doors`, buildingId: lotId,
+      });
       this.indoorSpots.push({
         x: this.toWorld(frame, 0, cz + 5.2).x, z: this.toWorld(frame, 0, cz + 5.2).z,
         type: 'lot', lot: bizId, id: bizId, name: def.name,
@@ -1636,6 +2290,7 @@ export class City {
   _addHollowShell({
     parent, minX, maxX, minZ, maxZ, height, doorX, doorW = 6.8, doorH = 4.6,
     wallMat, roofMat, trimMat, interiorFloorMat, ceilingLightColor = 0xfef3c7,
+    doorLabel = 'University hall doors', buildingId = null, doorOpen = false,
   }) {
     const cx = (minX + maxX) * 0.5;
     const cz = (minZ + maxZ) * 0.5;
@@ -1695,13 +2350,12 @@ export class City {
     this.box(parent, doorX, y0 + doorH + lintelH * 0.5, maxZ, doorW + 0.4, lintelH, t + 0.1, wallMat);
     this.box(parent, leftEnd, y0 + doorH * 0.5, maxZ, 0.35, doorH, t + 0.2, trimMat);
     this.box(parent, rightStart, y0 + doorH * 0.5, maxZ, 0.35, doorH, t + 0.2, trimMat);
+    // Interactive hall doors — open & close them with E, just like any building
+    this._addSwingDoor({
+      x: doorX, z: maxZ, y: y0, yaw: 0, width: doorW, height: doorH,
+      label: doorLabel, buildingId, open: doorOpen,
+    });
     for (const sx of [-1, 1]) {
-      const leaf = new THREE.Group();
-      leaf.position.set(doorX + sx * (doorW * 0.5 - 0.2), y0, maxZ + 0.1);
-      leaf.rotation.y = sx * 1.18; // swung wide open invitingly!
-      this.box(leaf, -sx * 0.85, doorH * 0.46, 0, 1.7, doorH * 0.9, 0.08, winGlass, { cast: false });
-      this.box(leaf, -sx * 0.85, doorH * 0.46, 0, 1.74, 0.1, 0.1, trimMat, { cast: false });
-      parent.add(leaf);
       // Exterior brass/stone pedestrian bollards (blocks vehicles from driving indoors while players walk right in!)
       const bx = doorX + sx * 1.65;
       const bz = maxZ + 2.6;
@@ -1797,6 +2451,7 @@ export class City {
       parent: g,
       minX: -34, maxX: 34, minZ: -230, maxZ: -194,
       height: 8.8, doorX: 0, doorW: 7.2, doorH: 5.0,
+      doorLabel: 'Chancellor Rotunda doors', buildingId: 'mgu-rotunda',
       wallMat: limestone, roofMat: royalRoof, trimMat: stoneTrim, interiorFloorMat: marbleFloor,
     });
 
@@ -1894,6 +2549,7 @@ export class City {
       parent: g,
       minX: -74, maxX: -40, minZ: -226, maxZ: -194,
       height: 7.8, doorX: -57, doorW: 6.4, doorH: 4.5,
+      doorLabel: 'Grand Library doors', buildingId: 'mgu-library',
       wallMat: limestone, roofMat: royalRoof, trimMat: stoneTrim, interiorFloorMat: marbleFloor,
     });
     this.sign(
@@ -1930,6 +2586,7 @@ export class City {
       parent: g,
       minX: 40, maxX: 74, minZ: -226, maxZ: -194,
       height: 7.8, doorX: 57, doorW: 6.4, doorH: 4.5,
+      doorLabel: 'Science & Medical Hall doors', buildingId: 'mgu-science',
       wallMat: limestone, roofMat: royalRoof, trimMat: stoneTrim, interiorFloorMat: marbleFloor,
       ceilingLightColor: 0xe0f2fe,
     });
@@ -2118,6 +2775,8 @@ export class City {
       if (Math.max(Math.abs(x), Math.abs(z)) < 165) continue;
       // Keep the North Metro Grand University Campus clear of random outskirts trees!
       if (x > -90 && x < 90 && z < -154) continue;
+      // Keep the South Waterfront civic district clear too
+      if (z > 150 && z < 248 && x > -172 && x < 172) continue;
       this.tree(Math.max(-236, Math.min(236, x)), Math.max(-236, Math.min(236, z)), 1 + r() * 0.8);
     }
     for (let i = 0; i < 26; i++) {
@@ -2185,7 +2844,17 @@ export class City {
   }
 
   // ----- queries ---------------------------------------------------------------
+  inDistrict(x, z) {
+    return z > MAP_EDGE && z <= DISTRICT.maxZ + 4 && x >= DISTRICT.minX && x <= DISTRICT.maxX;
+  }
+
   isOnRoad(x, z) {
+    if (this.inDistrict(x, z)) {
+      if (Math.abs(z - DISTRICT.avenueZ) < ROAD_HALF + 0.6) return true;
+      // the avenues stop at the beachfront promenade
+      if (z < DISTRICT.promenadeZ - 1 && ROAD_LINES.some((r) => Math.abs(x - r) < ROAD_HALF + 0.6)) return true;
+      return false;
+    }
     if (Math.abs(x) > MAP_EDGE || Math.abs(z) > MAP_EDGE) return false;
     for (const r of ROAD_LINES) if (Math.abs(x - r) < ROAD_HALF || Math.abs(z - r) < ROAD_HALF) return true;
     return false;
@@ -2197,6 +2866,8 @@ export class City {
       if (Math.abs(x) < 7.5 && z > -178) return 0; // entry driveway off 1st St
       return CURB_Y;
     }
+    // South Waterfront civic district (hotel, hospital, museum, mall, gym, library)
+    if (this.inDistrict(x, z)) return this.isOnRoad(x, z) ? 0 : CURB_Y;
     if (Math.abs(x) > MAP_EDGE || Math.abs(z) > MAP_EDGE) return 0;
     return this.isOnRoad(x, z) ? 0 : CURB_Y;
   }
@@ -2268,7 +2939,8 @@ export class City {
     return `${STREET_NAMES_X[bi]} & ${STREET_NAMES_Z[bj]}`;
   }
 
-  update(t) {
+  update(t, dt = 0) {
+    if (dt > 0) this.updateDoors(dt);
     for (const m of this.stationMarkers) {
       m.material.opacity = 0.55 + Math.sin(t * 3) * 0.3;
       m.rotation.z = t * 0.6;

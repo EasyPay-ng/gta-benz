@@ -19,6 +19,8 @@ import * as Cam from './src/camera.js';
 import * as Uni from './src/university.js';
 import * as Build from './src/build.js';
 import * as Interiors from './src/interiors.js';
+import * as Props from './src/props.js';
+import * as Places from './src/publicPlaces.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -158,6 +160,10 @@ const sfx = {
     o.start(t); o.stop(t + 0.15);
   },
   click() { this.tone(660, 0.05, 'square', 0.04); },
+  door() {
+    this.tone(150, 0.1, 'triangle', 0.06);
+    this.tone(96, 0.22, 'sine', 0.05, 0.05);
+  },
   error() { this.tone(180, 0.18, 'square', 0.06); },
   rankUp() { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.1, i * 0.09)); },
   stall() { this.tone(150, 0.25, 'sawtooth', 0.09); this.tone(85, 0.45, 'sawtooth', 0.09, 0.18); },
@@ -295,6 +301,9 @@ const game = {
   buildMeshes: new Map(),
   buildSurfaces: [],
   elevatorBuilding: null,
+  seat: null,          // { spot, pose, yOffset } while sitting / lying on furniture
+  nearDoor: null,      // door the player is standing next to
+  placeService: null,  // public-place id whose service desk is open
   emotes: EMOTES,
   valetCooldown: 0,
   autosaveTimer: 60,
@@ -590,6 +599,9 @@ function applyState() {
   // player
   const p = game.player;
   if (p.vehicle) detachFromVehicle();
+  game.seat = null;
+  p.char.setPose('stand');
+  if (!s.leisure) s.leisure = Props.createLeisureState();
   p.char.setAppearance(s.appearance);
   p.char.setOccupation(s.activeJob);
   p.char.setCarrying(false);
@@ -689,6 +701,7 @@ function triggerJump() {
 
 function triggerEmote(id) {
   if (game.player.vehicle) { toast('Step out of the car to perform emotes.', 'bad'); return false; }
+  if (game.seat) standUpFromProp(true);
   if (game.creatorOpen) return false;
   const def = EMOTE_BY_ID[id];
   if (!def) return false;
@@ -1064,6 +1077,13 @@ function updateHUD(force = false) {
       uniEl.textContent = '1,105 courses (U)';
     }
   }
+  const wellEl = $('hud-well');
+  if (wellEl) {
+    const leisure = s.leisure || Props.createLeisureState();
+    const hotel = Places.hotelStatus(s);
+    const base = `${Props.wellbeingLabel(leisure)} · ⚡${Math.round(leisure.energy)}% · 🛋${Math.round(leisure.comfort)}%`;
+    wellEl.textContent = hotel ? `${base} · 🗝 ${hotel.room}` : base;
+  }
   $('hud-vehicles').textContent = `${s.vehicles.length} vehicle${s.vehicles.length === 1 ? '' : 's'}`;
   const heatRow = $('hud-heat-row');
   if (heatRow) {
@@ -1121,6 +1141,14 @@ $('modal-body').addEventListener('click', (e) => {
 
 function result(res) {
   if (res.ok) { sfx.cash(); toast(res.msg, 'good'); } else { sfx.error(); toast(res.msg, 'bad'); }
+  return res.ok;
+}
+
+/** Apply a public-service result, persist and refresh the HUD. */
+function serviceResult(res) {
+  if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); }
+  else { sfx.error(); toast(res.msg, 'warn'); }
+  updateHUD(true);
   return res.ok;
 }
 
@@ -1833,6 +1861,39 @@ function dealerModal() {
 const modalActions = {
   close: () => closeModal(),
   rideLift: ({ level }) => rideElevator(Number(level)),
+  openUni: () => { closeModal(); openUniversity(); },
+  hotelBook: ({ room, nights }) => {
+    const res = Places.bookHotelRoom(game.state, { roomType: room, nights: Number(nights) || 1, day: Time.dayOf(getClock()) });
+    if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); } else { sfx.error(); toast(res.msg, 'warn'); }
+    updateHUD(true);
+  },
+  hotelCheckout: () => {
+    const res = Places.checkoutHotel(game.state);
+    if (res.ok) { toast(res.msg, 'good'); saveGame(true); } else toast(res.msg, 'warn');
+    updateHUD(true);
+  },
+  hotelSleep: () => {
+    const res = Places.sleepHotelNight(game.state, {});
+    if (res.ok) {
+      game.seat = null;
+      const bed = city.propSpotsNear(game.player.x, game.player.z, game.player.y, 6).find((x) => x.type === 'bed');
+      if (bed) sitOnProp(bed, { pose: 'lie', y: 0.62 });
+      sfx.cash(); toast(res.msg, 'good'); saveGame(true);
+    } else { sfx.error(); toast(res.msg, 'warn'); }
+    updateHUD(true);
+  },
+  hospitalTreat: ({ tier }) => serviceResult(Places.treatPatient(game.state, { tier })),
+  museumTicket: ({ tier }) => serviceResult(Places.visitMuseum(game.state, { tier })),
+  gymOffer: ({ offer }) => serviceResult(Places.buyGymOffer(game.state, { offer })),
+  mallMeal: ({ meal }) => serviceResult(Places.buyMeal(game.state, { meal })),
+  movieTicket: ({ movie }) => serviceResult(Places.watchMovie(game.state, { movie })),
+  mallBoutique: () => { closeModal(); openBoutique(); },
+  libraryBorrow: () => serviceResult(Places.borrowBook(game.state)),
+  libraryStudy: () => {
+    const res = Uni.studySession(game.state, { spot: 'Metro Public Library' });
+    if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); } else { sfx.error(); toast(res.msg, 'warn'); }
+    updateHUD(true);
+  },
   toggleBuild: () => { closeModal(); toggleBuildMode(true); },
   emote: ({ emote }) => {
     if (triggerEmote(emote)) closeModal();
@@ -2391,6 +2452,7 @@ function wreckVehicle(v) {
 
 function toggleVehicle() {
   if (game.creatorOpen) return;
+  if (game.seat) { standUpFromProp(); return; }
   if (game.player.vehicle) { exitVehicle(); return; }
   const v = nearestOwnedVehicle(3.2);
   if (v) enterVehicle(v);
@@ -2636,6 +2698,8 @@ function findInteraction() {
   const inCar = !!p.vehicle;
   const pos = inCar ? p.vehicle : p;
   const out = { e: null, f: null };
+  // seated on furniture: the only prompt is to get up
+  if (!inCar && game.seat) return { e: { text: '🚶 Stand up', action: () => standUpFromProp() }, f: null };
   // task step
   if (game.task) {
     const step = game.task.steps[game.task.idx];
@@ -2706,6 +2770,43 @@ function findInteraction() {
         best = { text: `🛗 ${lift.building.name} lift — ${Interiors.floorLabel(lift.building, lvl)}`, action: openElevatorModal };
       }
     }
+
+    // ---- interactive furniture, doors & service counters (any floor) --------
+    let local = null; let localD = Infinity;
+    const pushLocal = (x, z, r, text, action, weight = 1) => {
+      const d = (x - p.x) ** 2 + (z - p.z) ** 2;
+      if (d >= r * r) return;
+      if (d * weight < localD) { localD = d * weight; local = { text, action }; }
+    };
+    for (const spot of city.propSpotsNear(p.x, p.z, p.y, 2.6)) {
+      const def = Props.interactionFor(spot.type);
+      if (!def) continue;
+      pushLocal(spot.x, spot.z, 2.6, `${def.icon} ${def.verb}`, () => usePropSpot(spot), 0.8);
+    }
+    for (const spot of builtPropSpotsNear(p.x, p.z, p.y, 2.6)) {
+      const def = Props.interactionFor(spot.type);
+      if (!def) continue;
+      pushLocal(spot.x, spot.z, 2.6, `${def.icon} ${def.verb} (your build)`, () => usePropSpot(spot), 0.8);
+    }
+    for (const spot of city.serviceSpotsNear(p.x, p.z, p.y, 4.2)) {
+      pushLocal(spot.x, spot.z, 4.2, spot.prompt, () => openPlaceService(spot.placeId), 0.62);
+    }
+    if (!onUpper) {
+      for (const d of city.districtSpots) {
+        pushLocal(d.x, d.z, 5.2, `${d.icon} ${d.name}`, () => openPlaceService(d.id), 0.9);
+      }
+    }
+    const door = city.nearestDoor(p.x, p.z, p.y, 3.2);
+    if (door) {
+      game.nearDoor = door;
+      pushLocal(door.x, door.z, 3.2, `${door.open ? '🚪 Close' : '🚪 Open'} ${door.label}`, () => {
+        const res = Props.toggleDoorState(door);
+        if (res.ok) { sfx.door?.(); toast(res.msg, 'good'); } else { sfx.error(); toast(res.msg, 'warn'); }
+      }, 0.7);
+    } else {
+      game.nearDoor = null;
+    }
+    if (local && (best === null || localD < bd)) best = local;
     out.e = best;
   }
   const v = nearestOwnedVehicle(3.2);
@@ -2715,10 +2816,299 @@ function findInteraction() {
 
 function interact() {
   if (game.creatorOpen) return;
+  if (game.seat && !game.prompt?.e?.action) { standUpFromProp(); return; }
   const it = game.prompt;
   if (it && it.e && it.e.action) it.e.action();
 }
 
+
+
+// ===========================================================================
+// Interactive furniture: sitting, sleeping, TV, bookshelves, gym, service desks
+// ===========================================================================
+function seatOffsetY() {
+  return game.seat ? (game.seat.yOffset || 0) : 0;
+}
+
+function buildingNameOf(id) {
+  const b = id ? city.buildingById(id) : null;
+  return b ? b.name : '';
+}
+
+function sitOnProp(spot, def) {
+  const p = game.player;
+  if (p.vehicle) return;
+  game.seat = { spot, pose: def.pose, yOffset: def.y || 0 };
+  p.x = spot.x; p.z = spot.z;
+  p.y = Number.isFinite(spot.y) ? spot.y : p.y;
+  p.yaw = spot.rot || 0;
+  p.vx = p.vz = 0; p.vy = 0; p.onGround = true;
+  p.char.setPose(def.pose);
+  p.char.group.position.set(p.x, p.y + seatOffsetY(), p.z);
+  p.char.group.rotation.y = p.yaw;
+  cam.yaw = p.yaw;
+  if (game.seat.pose === 'lie') cam.pitch = 0.15;
+}
+
+function standUpFromProp(quiet = false) {
+  if (!game.seat) return false;
+  const p = game.player;
+  const spot = game.seat.spot;
+  p.char.setPose('stand');
+  const fx = Math.sin(spot.rot || 0);
+  const fz = Math.cos(spot.rot || 0);
+  let sx = spot.x + fx * 1.15;
+  let sz = spot.z + fz * 1.15;
+  const res = resolveCircle(sx, sz, 0.4, city.colliderCache);
+  if (res.hit) { sx = spot.x - fx * 1.15; sz = spot.z - fz * 1.15; }
+  p.x = sx; p.z = sz; p.y = Number.isFinite(spot.y) ? spot.y : p.y;
+  p.vx = p.vz = 0;
+  game.seat = null;
+  if (!quiet) sfx.click();
+  return true;
+}
+
+/** Nearest player-built piece that can be used (sofas, beds, desks, lamps...). */
+function builtPropSpotsNear(x, z, y, radius = 2.6) {
+  const out = [];
+  const pieces = game.state?.builds?.pieces || [];
+  for (const piece of pieces) {
+    const type = Props.propTypeForBuild(piece.item);
+    if (!type || !Props.isInteractable(type)) continue;
+    if (Math.abs(piece.y - y) > 1.7) continue;
+    const d = Math.hypot(piece.x - x, piece.z - z);
+    if (d < radius) out.push({ type, x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, built: true });
+  }
+  return out;
+}
+
+function propSpotLabel(spot) {
+  const name = buildingNameOf(spot.buildingId);
+  return name || (spot.built ? 'your build' : '');
+}
+
+function usePropSpot(spot) {
+  const s = game.state;
+  const def = Props.interactionFor(spot.type);
+  if (!def) return;
+  if (game.seat) { standUpFromProp(); return; }
+  if (game.player.vehicle) { toast('Step out of the car first.', 'warn'); return; }
+
+  // Hotel beds are reserved for paying guests
+  if (spot.type === 'bed' && spot.buildingId === 'grand_hotel') {
+    const res = Places.sleepHotelNight(s, {});
+    if (res.ok) {
+      sitOnProp(spot, { pose: 'lie', y: 0.62 });
+      toast(res.msg, 'good');
+      sfx.cash();
+      saveGame(true);
+      updateHUD(true);
+    } else {
+      toast(`${res.msg} (Front desk is in the lobby.)`, 'warn');
+      sfx.error();
+    }
+    return;
+  }
+
+  if (def.service) {
+    openServiceForBuilding(spot.buildingId);
+    return;
+  }
+
+  const res = Props.useProp(s, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
+  if (!res.ok) { toast(res.msg, 'warn'); sfx.error(); return; }
+  let msg = res.msg;
+  if (res.study) {
+    const study = Uni.studySession(s, { spot: propSpotLabel(spot) || 'study desk' });
+    if (study.ok) msg += ` ${study.msg}`;
+  }
+  if (res.pose) sitOnProp(spot, res.def);
+  toast(msg, 'good');
+  if (res.fresh) sfx.cash();
+  updateHUD(true);
+  saveGame(true);
+}
+
+/** Open the right counter for a building (station, boutique, lot or public place). */
+function openServiceForBuilding(buildingId) {
+  if (!buildingId) { toast('There is no service desk here.', 'warn'); return; }
+  if (Places.placeById(buildingId)) { openPlaceService(buildingId); return; }
+  if (buildingId === 'boutique') { openBoutique(); return; }
+  const station = Object.values(STATIONS).find((st) => buildingId === `station-${st.id}`);
+  if (station) { openModal(stationModal(station.id)); return; }
+  if (buildingId.startsWith('lot-')) { openModal(lotModal(buildingId.slice(4))); return; }
+  toast('The desk is unattended right now.', '');
+}
+
+// ===========================================================================
+// Swing doors
+// ===========================================================================
+function toggleNearbyDoor() {
+  const p = game.player;
+  const door = city.nearestDoor(p.x, p.z, p.y, 3.4);
+  if (!door) return false;
+  const res = Props.toggleDoorState(door);
+  if (res.ok) {
+    sfx.door?.();
+    cam.shake = Math.max(cam.shake, 0.04);
+  } else {
+    sfx.error();
+  }
+  toast(res.msg, res.ok ? 'good' : 'warn');
+  return true;
+}
+
+// ===========================================================================
+// Public place service desks (hotel, hospital, museum, mall, gym, library)
+// ===========================================================================
+function openPlaceService(placeId) {
+  const place = Places.placeById(placeId);
+  if (!place) return;
+  game.placeService = placeId;
+  openModal(placeServiceModal(placeId));
+}
+
+function hotelCard() {
+  const s = game.state;
+  const status = Places.hotelStatus(s);
+  const leisure = s.leisure || Props.createLeisureState();
+  const roomCards = Places.HOTEL_ROOMS.map((r) => `
+    <div class="svc-card">
+      <div class="svc-head"><b>${r.icon} ${r.name}</b><span class="svc-price">$${r.price} / night</span></div>
+      <p class="muted">${r.blurb}</p>
+      <div class="row">
+        ${[1, 2, 3].map((n) => `<button data-action="hotelBook" data-room="${r.id}" data-nights="${n}" ${s.cash < r.price * n || status ? 'disabled' : ''}>${n} night${n > 1 ? 's' : ''} · $${r.price * n}</button>`).join('')}
+      </div>
+    </div>`).join('');
+  return `
+    <h2>🏨 The Grand Meridian Hotel — Front Desk</h2>
+    <p class="sub">Sleep restores energy, comfort and health. Rooms are charged per night · cash <b>${money(s.cash)}</b> · fatigue <b>${Math.round(leisure.energy)}%</b></p>
+    ${status ? `<div class="svc-banner">🗝 ${status.label}<div class="row"><button data-action="hotelCheckout">🧾 Check out</button><button data-action="hotelSleep" class="primary">🛏 Sleep a night</button></div></div>` : ''}
+    ${roomCards}
+    <p class="muted">Your key card opens the room floors above — ride the lift and sleep in any hotel bed.</p>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function hospitalCard() {
+  const s = game.state;
+  const leisure = s.leisure || Props.createLeisureState();
+  const tiers = [
+    { id: 'checkup', name: 'Quick checkup', price: 45, blurb: '+25 health, +8 comfort.' },
+    { id: 'emergency', name: 'Emergency treatment', price: 120, blurb: '+60 health, +30 energy.' },
+    { id: 'full', name: 'Full-body treatment', price: 260, blurb: 'Restores health & energy completely.' },
+  ];
+  return `
+    <h2>🏥 Metro General Hospital — Reception</h2>
+    <p class="sub">Walk-in clinic & 24/7 emergency · cash <b>${money(s.cash)}</b> · health <b>${Math.round(leisure.health)}%</b></p>
+    <div class="svc-grid">
+      ${tiers.map((t) => `
+        <div class="svc-card">
+          <div class="svc-head"><b>${t.name}</b><span class="svc-price">$${t.price}</span></div>
+          <p class="muted">${t.blurb}</p>
+          <button data-action="hospitalTreat" data-tier="${t.id}" ${s.cash < t.price ? 'disabled' : ''}>Treat me</button>
+        </div>`).join('')}
+    </div>
+    <p class="muted">Treatment beds inside are interactive too — press <kbd>E</kbd> beside one for a $25 rest.</p>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function museumCard() {
+  const s = game.state;
+  const tickets = [
+    { id: 'general', name: 'General admission', price: 22, blurb: 'Wander the galleries at your own pace.' },
+    { id: 'guided', name: 'Curator guided tour', price: 48, blurb: 'A full tour of the collection.' },
+    { id: 'patron', name: 'Patron evening', price: 150, blurb: 'After-hours tour, rooftop champagne & a $25 gift-shop voucher.' },
+  ];
+  return `
+    <h2>🖼 Metro Museum of Art — Ticketing</h2>
+    <p class="sub">Three galleries, a sculpture court and a rooftop gallery · cash <b>${money(s.cash)}</b></p>
+    <div class="svc-grid">
+      ${tickets.map((t) => `
+        <div class="svc-card">
+          <div class="svc-head"><b>${t.name}</b><span class="svc-price">$${t.price}</span></div>
+          <p class="muted">${t.blurb}</p>
+          <button data-action="museumTicket" data-tier="${t.id}" ${s.cash < t.price ? 'disabled' : ''}>Buy ticket</button>
+        </div>`).join('')}
+    </div>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function mallCard() {
+  const s = game.state;
+  return `
+    <h2>🛍 Metro Central Mall &amp; Cineplex — Concierge</h2>
+    <p class="sub">Boutiques, food court & six-screen cinema · cash <b>${money(s.cash)}</b></p>
+    <div class="svc-grid">
+      <div class="svc-card">
+        <div class="svc-head"><b>👗 Fashion boutiques</b></div>
+        <p class="muted">Maison Verve couture, chains, shades & footwear.</p>
+        <button class="primary" data-action="mallBoutique">Browse the racks</button>
+      </div>
+      <div class="svc-card">
+        <div class="svc-head"><b>🍽 Food court</b><span class="svc-price">$9–$18</span></div>
+        <p class="muted">Hot meals and smoothies that restore energy & comfort.</p>
+        <div class="row">${Places.FOOD_COURT_MEALS.map((m) => `<button data-action="mallMeal" data-meal="${m.id}" ${s.cash < m.price ? 'disabled' : ''}>${m.name} · $${m.price}</button>`).join('')}</div>
+      </div>
+      <div class="svc-card">
+        <div class="svc-head"><b>🎬 Cineplex</b><span class="svc-price">$20–$24</span></div>
+        <p class="muted">Grab a ticket and unwind in the dark.</p>
+        <div class="row">${Places.MOVIES.map((m) => `<button data-action="movieTicket" data-movie="${m.id}" ${s.cash < m.price ? 'disabled' : ''}>${m.icon} ${m.title} · $${m.price}</button>`).join('')}</div>
+      </div>
+    </div>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function gymCard() {
+  const s = game.state;
+  const leisure = s.leisure || Props.createLeisureState();
+  const offers = Object.entries(Places.GYM_OFFERS).map(([id, o]) => `
+    <div class="svc-card">
+      <div class="svc-head"><b>🏋 ${o.name}</b><span class="svc-price">$${o.price}</span></div>
+      <p class="muted">+${o.fitness} fitness, +${o.comfort} comfort.</p>
+      <button data-action="gymOffer" data-offer="${id}" ${s.cash < o.price ? 'disabled' : ''}>Buy</button>
+    </div>`).join('');
+  return `
+    <h2>🏋 Metro Iron Fitness Club — Front Desk</h2>
+    <p class="sub">Fitness makes you sprint faster · fitness <b>${Math.round(leisure.fitness)}%</b> · cash <b>${money(s.cash)}</b></p>
+    <div class="svc-grid">${offers}</div>
+    <p class="muted">Treadmills, weight benches and dumbbell racks inside are all interactive — just walk up and press <kbd>E</kbd>.</p>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function libraryCard() {
+  const s = game.state;
+  const acad = s.academic || Uni.createAcademicState();
+  const course = acad.activeCourseId ? Uni.COURSE_BY_ID[acad.activeCourseId] : null;
+  const credits = course ? (acad.creditsByCourse[course.id] || 0) : 0;
+  return `
+    <h2>📚 Metro Public Library — Front Desk</h2>
+    <p class="sub">${course ? `Studying <b>${course.code} — ${course.title}</b> · ${credits}/${course.creditsRequired} credits` : 'No active course — enroll at Metro Grand University (U)'}</p>
+    <div class="svc-grid">
+      <div class="svc-card">
+        <div class="svc-head"><b>📖 Study session</b></div>
+        <p class="muted">Quiet reading room + research desks. Earns course credits and a study stipend.</p>
+        <button class="primary" data-action="libraryStudy">Study now</button>
+      </div>
+      <div class="svc-card">
+        <div class="svc-head"><b>📕 Borrow a novel</b></div>
+        <p class="muted">Free. Restores comfort and counts as reading.</p>
+        <button data-action="libraryBorrow">Borrow a book</button>
+      </div>
+    </div>
+    <div class="actions"><button data-action="openUni">🎓 Open University catalog</button><button data-action="close">Close</button></div>`;
+}
+
+function placeServiceModal(placeId) {
+  return () => {
+    if (placeId === 'grand_hotel') return hotelCard();
+    if (placeId === 'metro_hospital') return hospitalCard();
+    if (placeId === 'metro_museum') return museumCard();
+    if (placeId === 'metro_mall') return mallCard();
+    if (placeId === 'metro_gym') return gymCard();
+    if (placeId === 'metro_library') return libraryCard();
+    return '<h2>Front desk</h2><div class="actions"><button data-action="close">Close</button></div>';
+  };
+}
 
 // ===========================================================================
 // Walk-in interiors: lifts, floor badges & interior reception desks
@@ -3313,9 +3703,22 @@ function updatePlayer(dt) {
     return;
   }
   sfx.setSkid(false, 0);
-  // on foot
+  // on foot — sitting / lying on furniture holds the player in place
+  const { f: f2, r: r2 } = { f, r };
+  const inputLen = Math.abs(f2) + Math.abs(r2);
+  if (game.seat && inputLen > 0.05) standUpFromProp(true);
+  if (game.seat) {
+    p.vx = p.vz = 0;
+    p.x = game.seat.spot.x; p.z = game.seat.spot.z;
+    p.char.group.position.set(p.x, p.y + seatOffsetY(), p.z);
+    p.char.group.rotation.y = p.yaw;
+    p.char.animate(dt, 0);
+    if (game.state.leisure) Props.tickLeisure(game.state.leisure, dt, { seated: true });
+    sfx.setEngine(false, 0);
+    return;
+  }
   const sprint = k('ShiftLeft', 'ShiftRight') || touchInput.sprint;
-  const speed = sprint ? 7.2 : 3.8;
+  const speed = sprint ? 7.2 * Props.sprintMultiplier(game.state.leisure) : 3.8;
   const fx = Math.sin(cam.yaw); const fz = Math.cos(cam.yaw);
   // camera-relative movement: forward = (sin, cos), right = (-cos, sin)
   let mx = fx * f - fz * r;
@@ -3344,6 +3747,9 @@ function updatePlayer(dt) {
   // player-built walls & furniture on this storey
   const ownWalls = Build.collidersNear(game.state.builds, p.y + 0.05);
   if (ownWalls.length) { res = resolveCircle(px, pz, 0.4, ownWalls); px = res.x; pz = res.z; }
+  // closed swing doors block the doorway until you open them
+  const doorCols = city.doorCollidersAt(p.y);
+  if (doorCols.length) { res = resolveCircle(px, pz, 0.4, doorCols); px = res.x; pz = res.z; }
   p.x = px; p.z = pz;
   if (p.y < 1.4) {
     for (const c of carCirclesAll(null)) {
@@ -3375,9 +3781,12 @@ function updatePlayer(dt) {
   } else if (moving > 0.3 && len > 0.05) {
     p.yaw = lerpAngle(p.yaw, Math.atan2(mx, mz), Math.min(1, dt * 12));
   }
-  p.char.group.position.set(p.x, p.y, p.z);
+  p.char.group.position.set(p.x, p.y + seatOffsetY(), p.z);
   p.char.group.rotation.y = p.yaw;
   p.char.animate(dt, moving);
+  if (game.state.leisure) {
+    Props.tickLeisure(game.state.leisure, dt, { sprinting: sprint && moving > 0.6, moving: moving > 0.25 });
+  }
   sfx.setEngine(false, 0);
 }
 
@@ -3457,7 +3866,7 @@ function updateCamera(dt) {
     const pose = Cam.computeFootFirstPersonPose(cam, {
       x: p.x,
       z: p.z,
-      groundY: p.y,
+      groundY: p.y + seatOffsetY() * 0.6,
       buildH,
       jumpY: p.char.jumpY || 0,
       movingSpeed: moving,
@@ -3491,7 +3900,7 @@ function updateCamera(dt) {
     pitch = cam.pitch;
     camera.fov += (Cam.targetFov(cam, true, v.speed) - camera.fov) * Math.min(1, dt * 3);
   } else {
-    target.set(p.x, p.y + 1.55 + (p.char.jumpY || 0) * 0.4, p.z);
+    target.set(p.x, p.y + 1.55 + (p.char.jumpY || 0) * 0.4 + seatOffsetY() * 0.55, p.z);
     camera.fov += (Cam.targetFov(cam, false, 0) - camera.fov) * Math.min(1, dt * 3);
   }
   camera.updateProjectionMatrix();
@@ -3863,6 +4272,13 @@ mmBase.width = mmBase.height = 200;
   g.fillRect(toMM(-34), toMM(-230), 68 * MM_SCALE, 36 * MM_SCALE);
   g.fillRect(toMM(-74), toMM(-226), 34 * MM_SCALE, 32 * MM_SCALE);
   g.fillRect(toMM(40), toMM(-226), 34 * MM_SCALE, 32 * MM_SCALE);
+  // South Waterfront public district (z 157..240): pads, beach & sea
+  g.fillStyle = '#cfd6dd';
+  g.fillRect(toMM(-162), toMM(157), 324 * MM_SCALE, 74 * MM_SCALE);
+  g.fillStyle = '#e8d3a0';
+  g.fillRect(toMM(-162), toMM(228), 324 * MM_SCALE, 11 * MM_SCALE);
+  g.fillStyle = '#0e7490';
+  g.fillRect(toMM(-162), toMM(239), 324 * MM_SCALE, 8 * MM_SCALE);
   g.fillStyle = '#8f9196';
   for (const bx of BLOCK_CENTERS) for (const bz of BLOCK_CENTERS) {
     const h = BLOCK_HALF + 3;
@@ -3878,6 +4294,9 @@ mmBase.width = mmBase.height = 200;
     g.fillRect(toMM(r - ROAD_HALF), toMM(-157), ROAD_HALF * 2 * MM_SCALE, 314 * MM_SCALE);
     g.fillRect(toMM(-157), toMM(r - ROAD_HALF), 314 * MM_SCALE, ROAD_HALF * 2 * MM_SCALE);
   }
+  // South Waterfront avenues: 5 north–south strips + the waterfront cross avenue
+  for (const r of ROAD_LINES) g.fillRect(toMM(r - ROAD_HALF), toMM(157), ROAD_HALF * 2 * MM_SCALE, 70 * MM_SCALE);
+  g.fillRect(toMM(-162), toMM(190 - ROAD_HALF), 324 * MM_SCALE, ROAD_HALF * 2 * MM_SCALE);
 }
 function drawMinimap() {
   const g = mmCtx;
@@ -3896,6 +4315,7 @@ function drawMinimap() {
   square(DEALERSHIP.x, DEALERSHIP.z, 13, DEALERSHIP.color, 'M');
   square(BOUTIQUE.x, BOUTIQUE.z, 13, BOUTIQUE.color, 'B');
   square(UNIVERSITY.x, UNIVERSITY.z, 15, UNIVERSITY.color, 'U');
+  for (const place of Places.PUBLIC_PLACES) square(place.x, place.z, 15, place.color, place.mapLabel);
   for (const st of Object.values(FUEL_STATIONS)) square(st.x, st.z, 11, st.color, 'F');
   for (const t of game.traffic) dot(t.x, t.z, 1.6, '#e5e7eb');
   for (const cop of game.police) {
@@ -4029,7 +4449,7 @@ function frame() {
     const liveSchedule = Uni.getLiveCampusSchedule(nowInGame);
     if (liveSchedule.length) city.updateLectureBoard(liveSchedule[0]);
   }
-  city.update(game.elapsed);
+  city.update(game.elapsed, dt);
   updatePrompt();
   updateCamera(dt);
   updateHUD();
