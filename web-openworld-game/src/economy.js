@@ -11,6 +11,12 @@ import {
 import { freshCond } from './vehicleCond.js';
 import { createClock, inGameNowMs, dayOf, secondsToNextShift } from './time.js';
 import { starterWardrobe, normalizeWardrobe } from './customization.js';
+import {
+  createAcademicState,
+  normalizeAcademicState,
+  academicJobMultiplier,
+  academicBusinessMultiplier,
+} from './university.js';
 
 // Small deterministic PRNG so citizens look the same for every new game.
 export function mulberry32(seed) {
@@ -82,6 +88,7 @@ export function createInitialState(wallNow = Date.now()) {
     cash: STARTING_CASH,
     appearance: { ...DEFAULT_APPEARANCE },
     wardrobe: starterWardrobe(),
+    academic: createAcademicState(),
     activeJob: null,
     jobXP,
     businesses,
@@ -116,6 +123,7 @@ export function migrateState(raw, wallNow = Date.now()) {
   const s = { ...base, ...raw };
   s.appearance = { ...base.appearance, ...(raw.appearance || {}) };
   s.wardrobe = normalizeWardrobe(raw.wardrobe, s.appearance);
+  s.academic = normalizeAcademicState(raw.academic);
   s.jobXP = { ...base.jobXP, ...(raw.jobXP || {}) };
   s.businesses = { ...base.businesses, ...(raw.businesses || {}) };
   for (const id of Object.keys(s.businesses)) {
@@ -208,16 +216,17 @@ export function clockOut(state) {
   return { ok: !!prev, msg: prev ? `Clocked out of ${OCCUPATIONS[prev].title}.` : 'You are not on shift.' };
 }
 
-// Called when a task is finished. basePay is the task's pay before rank bonus.
+// Called when a task is finished. basePay is the task's pay before rank & academic degree bonus.
 export function completeTask(state, occId, basePay) {
   const xpBefore = state.jobXP[occId] || 0;
-  const pay = Math.round(basePay * payMultiplier(xpBefore));
+  const degreeMult = academicJobMultiplier(state, occId);
+  const pay = Math.round(basePay * payMultiplier(xpBefore) * degreeMult);
   state.jobXP[occId] = xpBefore + 1;
   state.cash += pay;
   state.stats.tasksCompleted += 1;
   state.stats.totalEarned += pay;
   const rankUp = rankIndexFor(state.jobXP[occId]) > rankIndexFor(xpBefore);
-  return { pay, rankUp, rank: rankFor(state.jobXP[occId]).name };
+  return { pay, rankUp, rank: rankFor(state.jobXP[occId]).name, degreeMult };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,12 +237,13 @@ export function upgradeCost(bizId, level) { return Math.round(BUSINESSES[bizId].
 export function builtCount(state) { return Object.values(state.businesses).filter(Boolean).length; }
 export function employedCount(state) { return state.citizens.filter((c) => c.employer).length; }
 
-export function businessDailyNumbers(bizId, biz) {
+export function businessDailyNumbers(bizId, biz, state = null) {
   const def = BUSINESSES[bizId];
   const workers = biz.employees.length;
-  const revenue = Math.round(workers * def.revenuePerWorker * (1 + LEVEL_REVENUE_BONUS * (biz.level - 1)));
+  const degreeMult = state ? academicBusinessMultiplier(state, bizId) : 1;
+  const revenue = Math.round(workers * def.revenuePerWorker * (1 + LEVEL_REVENUE_BONUS * (biz.level - 1)) * degreeMult);
   const wages = workers * def.wagePerWorker;
-  return { workers, revenue, wages, profit: revenue - wages };
+  return { workers, revenue, wages, profit: revenue - wages, degreeMult };
 }
 
 export function buyLot(state, bizId) {
@@ -286,7 +296,7 @@ export function runPayrollCycle(state) {
   const per = {};
   for (const [id, biz] of Object.entries(state.businesses)) {
     if (!biz) continue;
-    const n = businessDailyNumbers(id, biz);
+    const n = businessDailyNumbers(id, biz, state);
     biz.storedProfit += n.profit;
     biz.lifetimeProfit += n.profit;
     per[id] = n;

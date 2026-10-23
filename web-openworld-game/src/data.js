@@ -1,7 +1,7 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 6; // v6: first-person street POV, sleek 3D car cockpit interiors & camera mode persistence
+export const SAVE_VERSION = 7; // v7: bespoke 3D vehicle interiors, Metro Grand University campus & 1,000+ academic courses
 
 export const STARTING_CASH = 500;
 export const PAYROLL_INTERVAL = 30; // real seconds per 12-in-game-minute shift (30s * 24 = 720s = 12m)
@@ -28,7 +28,7 @@ export const SIDEWALK_W = 3;         // sidewalk width
 export const BLOCK_HALF = 27.5;      // half the buildable interior of a block
 export const SIDEWALK_RING = 29;     // half-size of the walkable sidewalk ring around a block
 export const BLOCK_CENTERS = [-112.5, -37.5, 37.5, 112.5];
-export const WORLD_LIMIT = 195;
+export const WORLD_LIMIT = 242;
 
 // Roads along X (constant z) and along Z (constant x)
 export const STREET_NAMES_Z = ['1st St', '2nd St', 'Central St', '4th St', '5th St'];          // roads at z = ROAD_LINES[i]
@@ -154,6 +154,16 @@ export const STATIONS = {
 
 export const DEALERSHIP = { id: 'dealer', name: 'Metro Motors', x: -112.5, z: 37.5, face: -1, color: '#0f766e' };
 export const BOUTIQUE = { id: 'boutique', name: 'Maison Verve Boutique', x: -37.5, z: -112.5, face: 1, color: '#ec4899' };
+export const UNIVERSITY = {
+  id: 'university',
+  name: 'Metro Grand University',
+  x: 0,
+  z: -196,
+  face: 1,
+  color: '#1d4ed8',
+  accent: '#f59e0b',
+  bounds: { minX: -80, maxX: 80, minZ: -234, maxZ: -158 },
+};
 
 // ---------------------------------------------------------------------------
 // Vehicles
@@ -335,6 +345,7 @@ export const CLOTHING_ITEMS = {
     bomber:  { id: 'bomber',  slot: 'top', field: 'topStyle', name: 'Varsity Bomber Jacket',  price: 620,  desc: 'Layered open bomber over white tee with shoulder stripes.' },
     suit:    { id: 'suit',    slot: 'top', field: 'topStyle', name: 'Executive Suit & Tie',   price: 1150, desc: 'Tailored blazer with crisp dress shirt, lapels & silk tie.' },
     senator: { id: 'senator', slot: 'top', field: 'topStyle', name: 'Royal Senator Tunic',    price: 1450, desc: 'Draped Nigerian Senator kaftan with gold chest embroidery.' },
+    gown:    { id: 'gown',    slot: 'top', field: 'topStyle', name: 'Academic Convocation Gown', price: 950, desc: 'Draped university graduation robe with 24k gold stole (unlocked free on graduating!).' },
   },
   bottom: {
     jeans:   { id: 'jeans',   slot: 'bottom', field: 'bottomStyle', name: 'Tapered Denim',       price: 0,   desc: 'Everyday slim-fit street denim.' },
@@ -352,8 +363,9 @@ export const CLOTHING_ITEMS = {
     none:     { id: 'none',     slot: 'hat', field: 'hatStyle', name: 'No Hat',              price: 0,    desc: 'Show off your hairstyle.' },
     snapback: { id: 'snapback', slot: 'hat', field: 'hatStyle', name: 'Street Snapback',     price: 180,  desc: 'Structured flat-brim street cap.' },
     bucket:   { id: 'bucket',   slot: 'hat', field: 'hatStyle', name: 'Designer Bucket Hat', price: 240,  desc: '360° sloped-brim streetwear bucket hat.' },
-    fila:     { id: 'fila',     slot: 'hat', field: 'hatStyle', name: 'Traditional Fila Cap', price: 420,  desc: 'Hand-woven folded Nigerian chief cap.' },
-    crown:    { id: 'crown',    slot: 'hat', field: 'hatStyle', name: '24k Tycoon Crown',    price: 2500, desc: 'Solid gold jewelled crown for city moguls.' },
+    fila:        { id: 'fila',        slot: 'hat', field: 'hatStyle', name: 'Traditional Fila Cap',       price: 420,  desc: 'Hand-woven folded Nigerian chief cap.' },
+    mortarboard: { id: 'mortarboard', slot: 'hat', field: 'hatStyle', name: 'Graduation Mortarboard Cap', price: 350,  desc: 'Square university mortarboard with swinging 24k gold tassel (unlocked free on graduating!).' },
+    crown:       { id: 'crown',       slot: 'hat', field: 'hatStyle', name: '24k Tycoon Crown',           price: 2500, desc: 'Solid gold jewelled crown for city moguls.' },
   },
   glasses: {
     none:         { id: 'none',         slot: 'glasses', field: 'glasses', name: 'No Eyewear',       price: 0,   desc: 'Clear natural gaze.' },

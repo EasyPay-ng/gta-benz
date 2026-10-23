@@ -1,7 +1,7 @@
 // MetroVenture 3D — main entry: renderer, game loop, player, NPCs, jobs, startups, vehicles, UI.
 import * as THREE from 'three';
 import {
-  SAVE_KEY, OCCUPATIONS, BUSINESSES, STATIONS, DEALERSHIP, BOUTIQUE, VEHICLE_MODELS, CAR_COLORS, MAX_BUSINESS_LEVEL,
+  SAVE_KEY, OCCUPATIONS, BUSINESSES, STATIONS, DEALERSHIP, BOUTIQUE, UNIVERSITY, VEHICLE_MODELS, CAR_COLORS, MAX_BUSINESS_LEVEL,
   SKIN_TONES, SHIRT_COLORS, PANTS_COLORS, SHOE_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, TOTAL_CITIZENS, ROAD_LINES,
   ROAD_HALF, WORLD_LIMIT, BLOCK_CENTERS, BLOCK_HALF, DEFAULT_APPEARANCE,
   FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
@@ -16,6 +16,7 @@ import * as VCard from './src/vehCard.js';
 import * as Heat from './src/heat.js';
 import * as Cust from './src/customization.js';
 import * as Cam from './src/camera.js';
+import * as Uni from './src/university.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -223,6 +224,21 @@ const boutiqueMannequins = (city.boutiqueDisplays || []).map((spot, i) => {
   return ch;
 });
 
+// Resident 3D University Faculty & Scholars inside Metro Grand University's walk-in halls
+const campusActors = [
+  { x: 0,   z: -224.0, yaw: 0,           emote: 'wave',  app: { ...DEFAULT_APPEARANCE, skin: '#4a2c11', topStyle: 'gown', hatStyle: 'mortarboard', shirt: '#1e3a8a', hatColor: '#0f172a', glasses: 'wayfarer' } },
+  { x: -18, z: -204.2, yaw: 0,           emote: 'peace', app: { ...DEFAULT_APPEARANCE, skin: '#c68642', topStyle: 'suit', shirt: '#1e293b', pants: '#0f172a' } },
+  { x: -57, z: -219.4, yaw: 0,           emote: null,    app: { ...DEFAULT_APPEARANCE, skin: '#8d5524', topStyle: 'senator', shirt: '#7c2d12', glasses: 'wayfarer' } },
+  { x: 57,  z: -217.5, yaw: Math.PI,     emote: null,    app: { ...DEFAULT_APPEARANCE, skin: '#f1c27d', topStyle: 'suit', shirt: '#f8fafc', pants: '#1e293b' } },
+].map((sp) => {
+  const ch = new Character(sp.app);
+  ch.group.position.set(sp.x, CURB_Y, sp.z);
+  ch.group.rotation.y = sp.yaw;
+  if (sp.emote) ch.setEmote(sp.emote);
+  scene.add(ch.group);
+  return ch;
+});
+
 // Task waypoint marker
 const marker = (() => {
   const g = new THREE.Group();
@@ -265,6 +281,7 @@ const game = {
   telemetry: null, // window.__mv.telemetry = () => snapshot of all owned vehicles' cond
   camera,
   cameraView: null,
+  university: Uni,
   emotes: EMOTES,
   valetCooldown: 0,
   autosaveTimer: 60,
@@ -707,6 +724,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyF': toggleVehicle(); break;
     case 'KeyV': valet(); break;
     case 'KeyT': openGarageModal(); break;
+    case 'KeyU': openUniversity(); break;
     case 'KeyC': game.creatorOpen ? closeCreator() : openCreator(); break;
     case 'KeyX':
     case 'KeyP':
@@ -937,6 +955,7 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
       e.preventDefault(); sfx.ensure();
       if (b.id === 't-emote') { openEmotesModal(); return; }
       if (b.id === 't-camera') { toggleCameraMode(); return; }
+      if (b.id === 't-uni') { openUniversity(); return; }
       if (anyOverlay()) return;
       if (key === 'interact') interact();
       if (key === 'vehicle') toggleVehicle();
@@ -989,6 +1008,19 @@ function updateHUD(force = false) {
   }
   $('hud-startups').textContent = `${Eco.builtCount(s)} / ${Object.keys(BUSINESSES).length}`;
   $('hud-employment').textContent = `${Eco.employedCount(s)} / ${TOTAL_CITIZENS} citizens hired`;
+  const uniEl = $('hud-uni');
+  if (uniEl) {
+    const ac = s.academic || Uni.createAcademicState();
+    const activeCourse = ac.activeCourseId ? Uni.COURSE_BY_ID[ac.activeCourseId] : null;
+    const degCount = ac.completedIds?.length || 0;
+    if (activeCourse) {
+      uniEl.textContent = `${activeCourse.code}${degCount ? ` · 🎓${degCount}` : ''}`;
+    } else if (degCount > 0) {
+      uniEl.textContent = `🎓 ${degCount} degree${degCount === 1 ? '' : 's'} · GPA ${ac.gpa.toFixed(2)}`;
+    } else {
+      uniEl.textContent = '1,105 courses (U)';
+    }
+  }
   $('hud-vehicles').textContent = `${s.vehicles.length} vehicle${s.vehicles.length === 1 ? '' : 's'}`;
   const heatRow = $('hud-heat-row');
   if (heatRow) {
@@ -1059,6 +1091,7 @@ function stationModal(stationId) {
     const s = game.state;
     const xp = s.jobXP[occ.id] || 0;
     const rank = Eco.rankFor(xp); const next = Eco.nextRank(xp);
+    const degMult = Uni.academicJobMultiplier(s, occ.id);
     const active = s.activeJob === occ.id;
     const needsCar = occ.requiresVehicle && !s.vehicles.length;
     return `
@@ -1066,7 +1099,7 @@ function stationModal(stationId) {
       <p class="sub">${occ.title} · ${occ.description}</p>
       <div class="kv">
         <div><b>${money(occ.basePay)}${occ.id === 'security' ? '' : '+'}</b><span>Base pay per job</span></div>
-        <div><b>+${Math.round((Eco.payMultiplier(xp) - 1) * 100)}%</b><span>Rank bonus</span></div>
+        <div><b>+${Math.round((Eco.payMultiplier(xp) - 1) * 100)}%${degMult > 1 ? ` · 🎓 +${Math.round((degMult - 1) * 100)}%` : ''}</b><span>Rank${degMult > 1 ? ' + Degree' : ''} bonus</span></div>
         <div><b>${rank.name}</b><span>Your rank</span></div>
         <div><b>${xp}${next ? ` / ${next.xp}` : ''}</b><span>${next ? `Jobs to ${next.name}` : 'Max rank'}</span></div>
       </div>
@@ -1103,7 +1136,7 @@ function lotModal(bizId) {
         </div>
         ${s.cash < def.cost ? `<p class="bad-text">You need ${money(def.cost - s.cash)} more. Work some shifts!</p>` : ''}`;
     }
-    const n = Eco.businessDailyNumbers(bizId, biz);
+    const n = Eco.businessDailyNumbers(bizId, biz, s);
     const slots = Eco.jobSlots(biz.level);
     const workers = biz.employees.map((id) => s.citizens.find((c) => c.id === id)).filter(Boolean);
     const unemployed = s.citizens.filter((c) => !c.employer).length;
@@ -1386,6 +1419,253 @@ function openBoutique() {
   openModal(boutiqueModal());
 }
 
+// ---------------------------------------------------------------------------
+// Metro Grand University — 1,105 Real-World Academic Courses, Lectures & Exams
+// ---------------------------------------------------------------------------
+const uniUI = {
+  tab: 'catalog',
+  query: '',
+  facultyId: 'all',
+  degreeId: 'all',
+  offset: 0,
+  examActive: false,
+  answers: [null, null, null],
+};
+
+function isPlayerOnCampus() {
+  const p = game.player;
+  return p.x >= -82 && p.x <= 82 && p.z >= -235 && p.z <= -157;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function renderUniCatalogInner() {
+  const s = game.state;
+  const ac = s.academic || Uni.createAcademicState();
+  const { total, items } = Uni.searchCourses({
+    query: uniUI.query,
+    facultyId: uniUI.facultyId,
+    degreeId: uniUI.degreeId,
+    limit: 24,
+    offset: uniUI.offset,
+  });
+  const enrolledSet = new Set(ac.enrolledIds || []);
+  const completedSet = new Set(ac.completedIds || []);
+  const cards = items.map((c) => {
+    const isActive = ac.activeCourseId === c.id;
+    const isGrad = completedSet.has(c.id);
+    const isEnrolled = enrolledSet.has(c.id);
+    const cr = ac.creditsByCourse?.[c.id] || 0;
+    const costLabel = isGrad
+      ? '🎓 Graduated'
+      : isActive
+        ? '✓ Active Major'
+        : isEnrolled || c.tuition === 0
+          ? '<span class="uni-free">FREE OPEN ENROLL</span>'
+          : `Tuition ${money(c.tuition)}`;
+    const btnLabel = isActive
+      ? '🏛 Go to Classroom'
+      : isGrad
+        ? '🔄 Audit / Switch'
+        : isEnrolled
+          ? '🎓 Switch Active Major (Free)'
+          : c.tuition === 0
+            ? '🎓 Enroll Free ($0)'
+            : `🎓 Enroll · ${money(c.tuition)}`;
+    const actionAttr = isActive
+      ? 'data-action="uniTab" data-tab="classroom"'
+      : `data-action="uniEnroll" data-cid="${c.id}"`;
+    const disabled = !isActive && !isEnrolled && !isGrad && s.cash < c.tuition ? 'disabled' : '';
+    return `
+      <div class="uni-course-card ${isActive ? 'active-major' : ''} ${isGrad ? 'graduated' : ''}">
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px">
+            <span class="uni-code">${c.code}</span>
+            <span style="font-size:11px;color:#fde68a">${costLabel}</span>
+          </div>
+          <h4 style="margin:2px 0 4px;font-size:13.5px">${escapeHtml(c.title)}</h4>
+          <p style="margin:0;font-size:11.5px;color:#94a3b8">${escapeHtml(c.facultyName)} · Credits: <b>${cr}/${c.creditsRequired}</b> · <b>+${Math.round(c.jobBoost * 100)}%</b> career pay</p>
+        </div>
+        <button class="${isActive ? 'good' : 'primary'}" ${actionAttr} ${disabled} style="font-size:12px;padding:6px 10px">${btnLabel}</button>
+      </div>`;
+  }).join('');
+
+  const start = total ? uniUI.offset + 1 : 0;
+  const end = Math.min(total, uniUI.offset + items.length);
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:4px 0 8px">
+      <span class="muted">Showing <b>${start}–${end}</b> of <b>${total.toLocaleString()}</b> real-world academic courses</span>
+      <div style="display:flex;gap:6px">
+        <button data-action="uniPage" data-dir="-1" ${uniUI.offset <= 0 ? 'disabled' : ''} style="font-size:12px;padding:4px 10px">◀ Prev 24</button>
+        <button data-action="uniPage" data-dir="1" ${uniUI.offset + 24 >= total ? 'disabled' : ''} style="font-size:12px;padding:4px 10px">Next 24 ▶</button>
+      </div>
+    </div>
+    <div class="shop-grid">${cards || '<p class="muted">No courses match that search — try another keyword or clear filters.</p>'}</div>`;
+}
+
+function openUniversity(mode = 'catalog') {
+  if (game.creatorOpen) closeCreator();
+  if (!game.state.academic) game.state.academic = Uni.createAcademicState();
+  if (mode === 'study_library' || mode === 'study_lab') {
+    if (game.state.academic.activeCourseId) {
+      const res = Uni.studySession(game.state, { mode: mode === 'study_lab' ? 'lab' : 'library' });
+      result(res);
+      saveGame(true);
+    }
+    uniUI.tab = game.state.academic.activeCourseId ? 'classroom' : 'catalog';
+  } else if (mode === 'classroom') {
+    uniUI.tab = game.state.academic.activeCourseId ? 'classroom' : 'catalog';
+  } else {
+    uniUI.tab = mode || 'catalog';
+  }
+  uniUI.examActive = false;
+  openModal(universityModal());
+}
+
+function universityModal() {
+  return () => {
+    const s = game.state;
+    const ac = s.academic || (s.academic = Uni.createAcademicState());
+    const active = ac.activeCourseId ? Uni.COURSE_BY_ID[ac.activeCourseId] : null;
+    const onCampus = isPlayerOnCampus();
+    const hasGradGown = Cust.ownsClothing(s, 'top', 'gown');
+
+    const header = `
+      <h2>🎓 Metro Grand University <span class="pill good">${Uni.UNIVERSITY_COURSES.length.toLocaleString()} Real Courses</span></h2>
+      <div class="uni-id-card">
+        <div class="uni-id-meta">
+          <div>🪪 Student ID: <b>${ac.matricNo}</b> · Name: <b>${escapeHtml(s.appearance.name)}</b> · GPA: <b>${ac.gpa.toFixed(2)}</b></div>
+          <div>📚 Active Major: <b>${active ? `${active.code} — ${escapeHtml(active.title)}` : 'None selected (pick any course below!)'}</b></div>
+          <div>🏅 Earned Degrees: <b>${ac.completedIds.length}</b> · Enrolled Courses: <b>${ac.enrolledIds.length}</b> · ${onCampus ? '<span style="color:#4ade80;font-weight:700">📍 On Campus (+50% Stipend Bonus!)</span>' : 'Walk North of 1st St to enter the 3D Lecture Hall, Library &amp; Labs!'}</div>
+        </div>
+        ${hasGradGown ? '<button class="good" data-action="uniWearGown" style="font-size:12px">🎓 Wear Cap &amp; Gown</button>' : ''}
+      </div>
+      <div class="shop-tabs">
+        <button class="shop-tab ${uniUI.tab === 'catalog' ? 'active' : ''}" data-action="uniTab" data-tab="catalog">📚 Course Explorer (${Uni.UNIVERSITY_COURSES.length.toLocaleString()})</button>
+        <button class="shop-tab ${uniUI.tab === 'classroom' ? 'active' : ''}" data-action="uniTab" data-tab="classroom">🏛 Live Classroom &amp; Exam</button>
+        <button class="shop-tab ${uniUI.tab === 'transcript' ? 'active' : ''}" data-action="uniTab" data-tab="transcript">📜 Transcript &amp; Career Boosts (${ac.completedIds.length})</button>
+      </div>`;
+
+    if (uniUI.tab === 'catalog') {
+      const facOptions = `<option value="all" ${uniUI.facultyId === 'all' ? 'selected' : ''}>All 12 Faculties (${Uni.UNIVERSITY_COURSES.length.toLocaleString()})</option>` +
+        Uni.UNIVERSITY_FACULTIES.map((f) => `<option value="${f.id}" ${uniUI.facultyId === f.id ? 'selected' : ''}>${escapeHtml(f.name)}</option>`).join('');
+      const degOptions = `<option value="all" ${uniUI.degreeId === 'all' ? 'selected' : ''}>All Degree Tracks</option>` +
+        Uni.DEGREE_LEVELS.map((d) => `<option value="${d.id}" ${uniUI.degreeId === d.id ? 'selected' : ''}>${escapeHtml(d.label)} (${d.tuition === 0 ? 'Free' : money(d.tuition)})</option>`).join('');
+      return `${header}
+        <div class="uni-search-row">
+          <input id="uni-search-input" type="search" value="${escapeHtml(uniUI.query)}" placeholder="Search 1,105 courses (e.g. Computer Science, Medicine, Law, AI, Nursing, Finance, Architecture)..." />
+          <select id="uni-fac-select">${facOptions}</select>
+          <select id="uni-deg-select">${degOptions}</select>
+        </div>
+        <div id="uni-catalog-results">${renderUniCatalogInner()}</div>`;
+    }
+
+    if (uniUI.tab === 'classroom') {
+      const live = Uni.getLiveCampusSchedule(getClock());
+      const scheduleHtml = live.map((slot) => `
+        <div class="shop-item">
+          <div>
+            <h4><span>🏛 ${escapeHtml(slot.venue)}</span><span class="uni-code">${slot.window}</span></h4>
+            <p><b>${slot.course.code}: ${escapeHtml(slot.course.title)}</b><br/>Faculty of ${escapeHtml(slot.course.facultyName)}</p>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button data-action="uniLecture" data-cid="${slot.course.id}" style="font-size:12px">🎙 Audit Live Class</button>
+            <button data-action="uniEnroll" data-cid="${slot.course.id}" style="font-size:12px">Switch Major</button>
+          </div>
+        </div>`).join('');
+
+      if (!active) {
+        return `${header}
+          <p class="sub">Pick any major in the <b>Course Explorer</b> (including <b>$0 Free Undergraduate Certificates</b>) or audit one of the live campus lectures happening right now:</p>
+          <div class="shop-grid">${scheduleHtml}</div>`;
+      }
+
+      const cr = ac.creditsByCourse?.[active.id] || 0;
+      const ready = cr >= active.creditsRequired;
+      const isGrad = ac.completedIds.includes(active.id);
+
+      let examBlock = '';
+      if (uniUI.examActive) {
+        const qs = Uni.getExamQuestions(active.id);
+        examBlock = `
+          <div class="mod-section" style="border-color:#fbbf24">
+            <h4><span>📝 Final Degree Examination — ${escapeHtml(active.title)}</span><span>Pass: 2 / 3</span></h4>
+            ${qs.map((q, qi) => `
+              <div class="uni-exam-q">
+                <div style="font-size:13px;font-weight:700">${qi + 1}. ${escapeHtml(q.q)}</div>
+                <div class="uni-exam-opts">
+                  ${q.options.map((opt, oi) => `
+                    <button class="uni-exam-opt ${uniUI.answers[qi] === oi ? 'selected' : ''}" data-action="uniPickAnswer" data-q="${qi}" data-opt="${oi}">
+                      ${String.fromCharCode(65 + oi)}. ${escapeHtml(opt)}
+                    </button>`).join('')}
+                </div>
+              </div>`).join('')}
+            <div class="actions">
+              <button class="good" data-action="uniSubmitExam">🎓 Submit Final Exam</button>
+            </div>
+          </div>`;
+      }
+
+      return `${header}
+        <div class="mod-section">
+          <h4><span>📖 Active Degree Program: ${active.code} — ${escapeHtml(active.title)}</span><span>${isGrad ? '🎓 Graduated!' : `Credits: ${cr} / ${active.creditsRequired}`}</span></h4>
+          <p class="muted" style="margin:4px 0 10px">Faculty of <b>${escapeHtml(active.facultyName)}</b> · Graduation Reward: <b>+${Math.round(active.jobBoost * 100)}% Career Pay</b>, <b>+${Math.round(active.bizBoost * 100)}% Startup Revenue</b>, <b>${money(active.grant)} Grant</b> &amp; <b>Academic Cap + Gown</b>!</p>
+          <div class="actions">
+            <button class="primary" data-action="uniLecture" data-cid="${active.id}">🎙 Attend Campus Lecture (+1 Credit${onCampus ? ' · Campus Stipend!' : ''})</button>
+            <button data-action="uniStudy" data-mode="${onCampus ? 'library' : 'portal'}">📖 Research / Lab Study (+1 Credit)</button>
+            <button class="good" data-action="uniStartExam" ${!ready ? 'disabled' : ''}>${ready ? '📝 Sit 3-Question Final Exam' : `📝 Final Exam (${active.creditsRequired - cr} more credit${active.creditsRequired - cr === 1 ? '' : 's'})`}</button>
+          </div>
+        </div>
+        ${examBlock}
+        <h3 style="margin:12px 0 6px;font-size:14px">🕒 Live Campus Lecture Timetable (${Time.hhmm(getClock())})</h3>
+        <div class="shop-grid">${scheduleHtml}</div>`;
+    }
+
+    // Transcript & Career Boosts tab
+    const occRows = Object.values(OCCUPATIONS).map((occ) => {
+      const m = Uni.academicJobMultiplier(s, occ.id);
+      return `<div><b>+${Math.round((m - 1) * 100)}%</b><span>${escapeHtml(occ.title)}</span></div>`;
+    }).join('');
+    const gradCards = ac.transcript.length
+      ? ac.transcript.map((rec) => `
+        <div class="shop-item exotic">
+          <h4><span>🎓 ${escapeHtml(rec.title)}</span><span class="exotic-badge">${rec.code}</span></h4>
+          <p><b>${escapeHtml(rec.honours)}</b> (${rec.score}/${rec.total}) · Faculty of ${escapeHtml(rec.facultyName)} · Conferred Day ${rec.day}</p>
+        </div>`).join('')
+      : '<p class="muted">No degrees conferred yet. Enroll in any course, earn credits through lectures or research, and pass the 3-question exam!</p>';
+
+    return `${header}
+      <h3 style="margin:6px 0;font-size:14px">💼 Active Permanent Degree Career Multipliers</h3>
+      <div class="kv">${occRows}</div>
+      <h3 style="margin:12px 0 6px;font-size:14px">📜 Official Diplomas &amp; Academic Transcript (${ac.transcript.length})</h3>
+      <div class="shop-grid">${gradCards}</div>`;
+  };
+}
+
+$('modal-body').addEventListener('input', (e) => {
+  if (e.target.id === 'uni-search-input') {
+    uniUI.query = e.target.value;
+    uniUI.offset = 0;
+    const box = $('uni-catalog-results');
+    if (box) box.innerHTML = renderUniCatalogInner();
+  }
+});
+$('modal-body').addEventListener('change', (e) => {
+  if (e.target.id === 'uni-fac-select') {
+    uniUI.facultyId = e.target.value;
+    uniUI.offset = 0;
+    const box = $('uni-catalog-results');
+    if (box) box.innerHTML = renderUniCatalogInner();
+  } else if (e.target.id === 'uni-deg-select') {
+    uniUI.degreeId = e.target.value;
+    uniUI.offset = 0;
+    const box = $('uni-catalog-results');
+    if (box) box.innerHTML = renderUniCatalogInner();
+  }
+});
+
 const BOUTIQUE_TABS = [
   { id: 'bundles', label: '✨ Signature Looks' },
   { id: 'top', label: '🧥 Tops & Jackets' },
@@ -1600,6 +1880,74 @@ const modalActions = {
   openCreatorFromBoutique: () => {
     closeModal();
     openCreator();
+  },
+  uniTab: ({ tab }) => {
+    uniUI.tab = tab || 'catalog';
+    uniUI.examActive = false;
+  },
+  uniFaculty: ({ fac }) => {
+    uniUI.facultyId = fac || 'all';
+    uniUI.offset = 0;
+  },
+  uniPage: ({ dir }) => {
+    uniUI.offset = Math.max(0, uniUI.offset + Number(dir) * 24);
+  },
+  uniEnroll: ({ cid }) => {
+    const res = Uni.enrollCourse(game.state, cid);
+    if (!result(res)) return;
+    uniUI.examActive = false;
+    saveGame(true);
+  },
+  uniLecture: ({ cid }) => {
+    const onCampus = isPlayerOnCampus();
+    const res = Uni.attendLecture(game.state, {
+      courseId: cid || game.state.academic?.activeCourseId,
+      inGameMs: getClock(),
+      onCampus,
+    });
+    if (!result(res)) return;
+    saveGame(true);
+  },
+  uniStudy: ({ mode }) => {
+    const res = Uni.studySession(game.state, { mode: mode || (isPlayerOnCampus() ? 'library' : 'portal') });
+    if (!result(res)) return;
+    saveGame(true);
+  },
+  uniStartExam: () => {
+    const cid = game.state.academic?.activeCourseId;
+    if (!cid) { result({ ok: false, msg: 'Enroll in a course first!' }); return; }
+    uniUI.examActive = true;
+    uniUI.answers = [null, null, null];
+  },
+  uniPickAnswer: ({ q, opt }) => {
+    uniUI.answers[Number(q)] = Number(opt);
+  },
+  uniSubmitExam: () => {
+    const cid = game.state.academic?.activeCourseId;
+    if (!cid) return;
+    if (uniUI.answers.some((a) => a === null || a === undefined)) {
+      result({ ok: false, msg: 'Answer all 3 exam questions before submitting!' });
+      return;
+    }
+    const res = Uni.submitCourseExam(game.state, cid, uniUI.answers, Time.dayOf(getClock()));
+    uniUI.examActive = false;
+    if (!result(res)) return;
+    saveGame(true);
+  },
+  uniWearGown: () => {
+    const s = game.state;
+    if (!Cust.ownsClothing(s, 'top', 'gown')) {
+      result({ ok: false, msg: 'Graduate at least 1 university course (or visit Maison Verve) to unlock the Academic Gown!' });
+      return;
+    }
+    Cust.equipClothing(s, 'top', 'gown');
+    if (Cust.ownsClothing(s, 'hat', 'mortarboard')) Cust.equipClothing(s, 'hat', 'mortarboard');
+    game.player.char.setAppearance(s.appearance);
+    game.player.char.setOccupation(null);
+    if (net) net.setAppearance(s.appearance);
+    sfx.cash();
+    toast('🎓 Wearing your Academic Convocation Gown & Mortarboard Cap!', 'good');
+    saveGame(true);
   },
   buyCar: ({ model }) => {
     const m = VEHICLE_MODELS[model];
@@ -1856,6 +2204,7 @@ function closeCreator() {
   if (net) net.setAppearance(game.state.appearance);
 }
 $('btn-camera')?.addEventListener('click', () => toggleCameraMode());
+$('btn-uni')?.addEventListener('click', () => (game.modal ? closeModal() : openUniversity()));
 $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
 $('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
 $('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : openEmotesModal()));
@@ -2268,6 +2617,9 @@ function findInteraction() {
     }
     consider(DEALERSHIP.interact.x, DEALERSHIP.interact.z, 2.8, 'Metro Motors: exotics, customs & mechanic', () => openModal(dealerModal()));
     consider(BOUTIQUE.interact.x, BOUTIQUE.interact.z, 2.8, 'Maison Verve Boutique: luxury outfits & chains', () => openBoutique());
+    for (const sp of (city.universitySpots || [])) {
+      consider(sp.x, sp.z, 3.6, sp.prompt.replace(/^Press E — /, ''), () => openUniversity(sp.mode));
+    }
     for (const st of Object.values(FUEL_STATIONS)) {
       consider(st.interact.x, st.interact.z, 3.4, `⛽ Refuel at ${st.name}`, () => startRefuel(st));
     }
@@ -2614,12 +2966,19 @@ function updateCamera(dt) {
     camera.fov += (Cam.targetFov(cam, false, 0) - camera.fov) * Math.min(1, dt * 3);
   }
   camera.updateProjectionMatrix();
+  const indoorCeil = !p.vehicle ? city.ceilingY(p.x, p.z) : null;
+  if (indoorCeil != null) {
+    dist = Math.min(dist, 5.2);
+  }
   const cp = Math.cos(pitch);
   const desired = new THREE.Vector3(
     target.x - Math.sin(cam.yaw) * dist * cp,
     target.y + Math.sin(pitch) * dist,
     target.z - Math.cos(cam.yaw) * dist * cp,
   );
+  if (indoorCeil != null) desired.y = Math.min(desired.y, indoorCeil - 0.55);
+  const camCeil = city.ceilingY(desired.x, desired.z);
+  if (camCeil != null) desired.y = Math.min(desired.y, camCeil - 0.55);
   if (desired.y < 0.6) desired.y = 0.6;
   camera.position.lerp(desired, p.vehicle ? Math.min(1, dt * 10) : 1);
   if (cam.shake > 0) {
@@ -2960,13 +3319,21 @@ function netLocalState() {
 // ===========================================================================
 const mm = $('minimap');
 const mmCtx = mm.getContext('2d');
-const MM_SCALE = 200 / 400;
+const MM_HALF = 245;
+const MM_SCALE = 200 / (MM_HALF * 2);
 const mmBase = document.createElement('canvas');
 mmBase.width = mmBase.height = 200;
 {
   const g = mmBase.getContext('2d');
-  const toMM = (v) => (v + 200) * MM_SCALE;
+  const toMM = (v) => (v + MM_HALF) * MM_SCALE;
   g.fillStyle = '#3f6b33'; g.fillRect(0, 0, 200, 200);
+  // Metro Grand University North Campus footprint (-80..80, -234..-158)
+  g.fillStyle = '#cbd5e1';
+  g.fillRect(toMM(-80), toMM(-234), 160 * MM_SCALE, 76 * MM_SCALE);
+  g.fillStyle = '#1e3a8a';
+  g.fillRect(toMM(-34), toMM(-230), 68 * MM_SCALE, 36 * MM_SCALE);
+  g.fillRect(toMM(-74), toMM(-226), 34 * MM_SCALE, 32 * MM_SCALE);
+  g.fillRect(toMM(40), toMM(-226), 34 * MM_SCALE, 32 * MM_SCALE);
   g.fillStyle = '#8f9196';
   for (const bx of BLOCK_CENTERS) for (const bz of BLOCK_CENTERS) {
     const h = BLOCK_HALF + 3;
@@ -2985,7 +3352,7 @@ mmBase.width = mmBase.height = 200;
 }
 function drawMinimap() {
   const g = mmCtx;
-  const toMM = (v) => (v + 200) * MM_SCALE;
+  const toMM = (v) => (v + MM_HALF) * MM_SCALE;
   g.drawImage(mmBase, 0, 0);
   const dot = (x, z, r, color) => { g.fillStyle = color; g.beginPath(); g.arc(toMM(x), toMM(z), r, 0, Math.PI * 2); g.fill(); };
   const square = (x, z, s, color, label) => {
@@ -2999,6 +3366,7 @@ function drawMinimap() {
   for (const st of Object.values(STATIONS)) square(st.x, st.z, 13, st.color, st.id[0].toUpperCase());
   square(DEALERSHIP.x, DEALERSHIP.z, 13, DEALERSHIP.color, 'M');
   square(BOUTIQUE.x, BOUTIQUE.z, 13, BOUTIQUE.color, 'B');
+  square(UNIVERSITY.x, UNIVERSITY.z, 15, UNIVERSITY.color, 'U');
   for (const st of Object.values(FUEL_STATIONS)) square(st.x, st.z, 11, st.color, 'F');
   for (const t of game.traffic) dot(t.x, t.z, 1.6, '#e5e7eb');
   for (const cop of game.police) {
@@ -3124,6 +3492,11 @@ function frame() {
   for (const [i, man] of boutiqueMannequins.entries()) {
     man.group.rotation.y += dt * (0.32 + i * 0.04);
     man.animate(dt, 0);
+  }
+  for (const actor of campusActors) actor.animate(dt, 0);
+  if (city.lectureBoard && Math.floor(game.elapsed * 2) !== Math.floor((game.elapsed - dt) * 2)) {
+    const liveSchedule = Uni.getLiveCampusSchedule(nowInGame);
+    if (liveSchedule.length) city.updateLectureBoard(liveSchedule[0]);
   }
   city.update(game.elapsed);
   updatePrompt();

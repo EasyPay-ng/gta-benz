@@ -34,6 +34,18 @@ const MAT = {
   dashSoft: new THREE.MeshStandardMaterial({ color: 0x16181f, roughness: 0.56, metalness: 0.12 }),
   seatQuilt: new THREE.MeshStandardMaterial({ color: 0x26201d, roughness: 0.54, metalness: 0.08 }),
   tanLeather: new THREE.MeshStandardMaterial({ color: 0x7c4a27, roughness: 0.52, metalness: 0.08 }),
+  creamLeather: new THREE.MeshStandardMaterial({ color: 0xd6c3a5, roughness: 0.52, metalness: 0.05 }),
+  cognacLeather: new THREE.MeshStandardMaterial({ color: 0xb46934, roughness: 0.48, metalness: 0.08 }),
+  oxbloodLeather: new THREE.MeshStandardMaterial({ color: 0x4c1118, roughness: 0.5, metalness: 0.08 }),
+  crimsonBolster: new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.52, metalness: 0.08 }),
+  saddleLeather: new THREE.MeshStandardMaterial({ color: 0x6b3e1e, roughness: 0.62, metalness: 0.06 }),
+  clothGrey: new THREE.MeshStandardMaterial({ color: 0x3b4049, roughness: 0.9, metalness: 0.02 }),
+  walnutWood: new THREE.MeshPhysicalMaterial({ color: 0x5b3216, roughness: 0.16, metalness: 0.08, clearcoat: 0.92 }),
+  vintageWood: new THREE.MeshPhysicalMaterial({ color: 0x783f18, roughness: 0.22, metalness: 0.08, clearcoat: 0.8 }),
+  pineGreen: new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.78 }),
+  taxiYellow: new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.42, metalness: 0.12 }),
+  harnessCyan: new THREE.MeshStandardMaterial({ color: 0x06b6d4, roughness: 0.55, metalness: 0.1 }),
+  mdtScreen: new THREE.MeshBasicMaterial({ color: 0x0ea5e9 }),
   aluTrim: new THREE.MeshStandardMaterial({ color: 0xd4d8df, roughness: 0.24, metalness: 0.86 }),
   pianoBlack: new THREE.MeshPhysicalMaterial({ color: 0x090a0f, roughness: 0.08, metalness: 0.2, clearcoat: 1.0 }),
   mirrorGlass: new THREE.MeshPhysicalMaterial({ color: 0x64748b, roughness: 0.04, metalness: 0.96, clearcoat: 1.0 }),
@@ -370,6 +382,7 @@ function buildAlloyWheel(wheelR, rimMat = MAT.rim) {
 }
 
 const TORUS_WHEEL = new THREE.TorusGeometry(0.145, 0.02, 8, 28);
+const TORUS_FLAT_WHEEL = new THREE.TorusGeometry(0.145, 0.021, 8, 26, Math.PI * 1.56);
 const TORUS_VENT = new THREE.TorusGeometry(0.032, 0.006, 6, 16);
 const HAND_GEO = new THREE.CapsuleGeometry(0.024, 0.042, 4, 10);
 const THUMB_GEO = new THREE.CapsuleGeometry(0.011, 0.024, 4, 8);
@@ -408,16 +421,34 @@ function addStrutBetween(parent, mat, p1, p2, w = 0.055, d = 0.055) {
 }
 
 /**
- * Build a detailed, model-tailored 3D car interior & framed greenhouse for Cockpit View
+ * Per-vehicle bespoke interior blueprint across all 11 vehicle styles.
+ */
+const COCKPIT_THEMES = {
+  hatch:    { wheelType: 'commuter_2spoke', clusterTheme: 'analog_amber',   centerTheme: 'retro_din_fm', ambient: '#f59e0b', hasAmbientStrip: false },
+  sedan:    { wheelType: 'exec_4spoke',     clusterTheme: 'exec_ivory',     centerTheme: 'gps_nav',      ambient: '#fbbf24', hasAmbientStrip: true },
+  taxi:     { wheelType: 'fleet_4spoke',    clusterTheme: 'taxi_fleet',     centerTheme: 'taxi_dispatch', ambient: '#facc15', hasAmbientStrip: false },
+  pickup:   { wheelType: 'truck_4spoke',    clusterTheme: 'truck_rugged',   centerTheme: 'truck_util',   ambient: '#f97316', hasAmbientStrip: false },
+  van:      { wheelType: 'transit_comm',    clusterTheme: 'cargo_emerald',  centerTheme: 'cargo_log',    ambient: '#10b981', hasAmbientStrip: false },
+  muscle:   { wheelType: 'vintage_wood3',   clusterTheme: 'retro_chrome69', centerTheme: 'retro_amfm',   ambient: '#f59e0b', hasAmbientStrip: false },
+  sports:   { wheelType: 'amg_flatbottom',  clusterTheme: 'amg_supersport', centerTheme: 'gps_nav',      ambient: '#38bdf8', hasAmbientStrip: true },
+  roadster: { wheelType: 'speedster_flat',  clusterTheme: 'chrono_yellow',  centerTheme: 'gps_nav',      ambient: '#34d399', hasAmbientStrip: true },
+  gwagen:   { wheelType: 'luxury_offroad',  clusterTheme: 'offroad_dual',   centerTheme: 'gps_nav',      ambient: '#c084fc', hasAmbientStrip: true },
+  hyper:    { wheelType: 'f1_carbon_yoke',  clusterTheme: 'hyper_f1_bar',   centerTheme: 'hyper_telem',  ambient: '#22d3ee', hasAmbientStrip: true },
+  police:   { wheelType: 'pursuit_tactical', clusterTheme: 'police_pursuit', centerTheme: 'police_mdt',   ambient: '#ef4444', hasAmbientStrip: false },
+};
+
+/**
+ * Build a bespoke, model-specific 3D car interior & framed greenhouse for Cockpit View
  * (and always-visible open-air interior on roadsters).
  */
 function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = false }) {
-  const L = m.len;
   const W = m.wid;
+  const style = m.style || 'sedan';
+  const theme = COCKPIT_THEMES[style] || COCKPIT_THEMES.sedan;
   const group = new THREE.Group();
-  const isExotic = m.style === 'hyper' || m.style === 'sports' || m.style === 'roadster';
-  const isLuxury = m.style === 'gwagen' || m.style === 'sedan';
-  const isMuscle = m.style === 'muscle';
+  const isExotic = style === 'hyper' || style === 'sports' || style === 'roadster';
+  const isMuscle = style === 'muscle';
+  const signatureProps = [];
 
   const { cabW, zWindBase, zWindTop, zRearCab, zSeat, yFloor } = bounds || getCabinBounds(m, yBot, yBelt);
 
@@ -427,13 +458,29 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
   const eyeZ = zSeat + 0.05;
   const driverEye = new THREE.Vector3(driverX, eyeY, eyeZ);
 
-  const trimMat = isExotic ? MAT.carbon : isMuscle ? MAT.aluTrim : isLuxury ? MAT.pianoBlack : MAT.trim;
-  const seatMainMat = isLuxury ? MAT.tanLeather : MAT.seatQuilt;
-  const defaultAmbientHex = m.style === 'hyper' || m.style === 'sports' ? '#38bdf8'
-    : m.style === 'gwagen' ? '#c084fc'
-    : m.style === 'roadster' ? '#34d399'
-    : m.style === 'muscle' || m.style === 'taxi' ? '#f59e0b'
-    : '#60a5fa';
+  // Bespoke fascia & seat upholstery materials per vehicle model!
+  const trimMat = style === 'sedan' ? MAT.walnutWood
+    : style === 'roadster' ? paint
+    : style === 'muscle' ? MAT.aluTrim
+    : (style === 'hyper' || style === 'sports') ? MAT.carbon
+    : style === 'gwagen' ? MAT.pianoBlack
+    : MAT.trim;
+
+  const seatMainMat = style === 'hatch' || style === 'van' ? MAT.clothGrey
+    : style === 'sedan' ? MAT.creamLeather
+    : style === 'roadster' ? MAT.cognacLeather
+    : style === 'pickup' ? MAT.saddleLeather
+    : style === 'muscle' ? MAT.oxbloodLeather
+    : style === 'gwagen' ? MAT.tanLeather
+    : MAT.seatQuilt;
+
+  const seatBolsterMat = style === 'sports' ? MAT.crimsonBolster
+    : style === 'hyper' ? MAT.carbon
+    : style === 'taxi' ? MAT.taxiYellow
+    : style === 'sedan' ? MAT.tanLeather
+    : MAT.leather;
+
+  const defaultAmbientHex = theme.ambient;
   const ambientMat = new THREE.MeshBasicMaterial({ color: defaultAmbientHex });
 
   // 1. Deep Cabin Tub (down to yFloor!), Painted Outer Door Skins, Full-Height Door Cards & Sport Pedals
@@ -442,42 +489,57 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
   const cabinWallH = Math.max(0.32, yBelt - yFloor + 0.02);
   const wallMidY = (yFloor + yBelt) * 0.5;
 
-  // Deep dark Alcantara cabin floor + front firewall + rear cabin bulkhead
-  part(group, MAT.alcantara, 0, yFloor, tubMidZ, W * 0.88, 0.028, tubLen, false);
+  const floorMat = style === 'pickup' || style === 'van' || style === 'police' ? MAT.trim : MAT.alcantara;
+  part(group, floorMat, 0, yFloor, tubMidZ, W * 0.88, 0.028, tubLen, false);
   part(group, MAT.dashSoft, 0, wallMidY, zWindBase - 0.02, W * 0.88, cabinWallH, 0.05, false);
   part(group, MAT.alcantara, 0, wallMidY, zRearCab + 0.02, W * 0.88, cabinWallH, 0.06, false);
 
-  // Stitched driver & passenger velour floor mats
+  // Stitched driver & passenger floor mats (ribbed rubber on utility/police, stitched leather on luxury/exotic)
   const matLen = Math.max(0.46, (zWindBase - zSeat) * 0.56);
   const matZ = zWindBase - matLen * 0.55 - 0.08;
   for (const sx of [-1, 1]) {
-    part(group, MAT.leather, sx * Math.abs(driverX), yFloor + 0.017, matZ, 0.4, 0.01, matLen, false);
+    part(group, style === 'sedan' ? MAT.tanLeather : MAT.leather, sx * Math.abs(driverX), yFloor + 0.017, matZ, 0.4, 0.01, matLen, false);
   }
 
-  // 3 Brushed-aluminium sport pedals in the driver's footwell (dead-pedal, brake, organ throttle)
+  // Footwell pedals (rubber-pad pedals on economy/utility, drilled brushed-alloy pedals on sport/luxury/muscle)
+  const pedalMat = (isExotic || isMuscle || style === 'gwagen') ? MAT.aluTrim : MAT.trim;
   const zPedal = zWindBase - 0.14;
-  const pFoot = part(group, MAT.aluTrim, driverX + 0.145, yFloor + 0.09, zPedal + 0.02, 0.052, 0.14, 0.014, false);
+  const pFoot = part(group, pedalMat, driverX + 0.145, yFloor + 0.09, zPedal + 0.02, 0.052, 0.14, 0.014, false);
   pFoot.rotation.x = -0.52;
-  const pBrake = part(group, MAT.aluTrim, driverX + 0.015, yFloor + 0.125, zPedal - 0.02, 0.078, 0.052, 0.016, false);
+  const pBrake = part(group, pedalMat, driverX + 0.015, yFloor + 0.125, zPedal - 0.02, 0.078, 0.052, 0.016, false);
   pBrake.rotation.x = -0.42;
   part(group, MAT.trim, driverX + 0.015, yFloor + 0.19, zPedal + 0.02, 0.018, 0.12, 0.018, false);
-  const pGas = part(group, MAT.aluTrim, driverX - 0.1, yFloor + 0.105, zPedal, 0.044, 0.15, 0.014, false);
+  const pGas = part(group, pedalMat, driverX - 0.1, yFloor + 0.105, zPedal, 0.044, 0.15, 0.014, false);
   pGas.rotation.x = -0.48;
+  // Manual clutch 4th pedal on stick-shift Hatchback & '69 Stallion GT!
+  if (style === 'hatch' || style === 'muscle') {
+    const pClutch = part(group, pedalMat, driverX + 0.092, yFloor + 0.125, zPedal - 0.015, 0.052, 0.052, 0.016, false);
+    pClutch.rotation.x = -0.42;
+    signatureProps.push('clutch_pedal');
+  }
 
-  // Painted exterior door shells + full-height sculpted inner leather door panels
+  // Painted exterior door shells + bespoke inner door cards
   const doorLen = Math.max(1.15, zWindBase - zRearCab + 0.12);
   const innerDoorLen = Math.min(1.65, tubLen * 0.84);
   const doorZ = zSeat + innerDoorLen * 0.28;
   for (const sx of [-1, 1]) {
-    // Solid painted outer door panel (seals exterior silhouette when cockpitHullGeo is active!)
     part(group, paint, sx * (W * 0.5 - 0.034), wallMidY, tubMidZ, 0.068, cabinWallH + 0.03, doorLen, true);
-    // Full-height inner leather door card + quilted mid-insert + padded armrest + speaker + chrome pull + LED
     part(group, MAT.dashSoft, sx * (W * 0.5 - 0.078), wallMidY + 0.01, doorZ, 0.036, cabinWallH + 0.04, innerDoorLen, false);
     part(group, seatMainMat, sx * (W * 0.5 - 0.098), yFloor + cabinWallH * 0.52, doorZ - 0.02, 0.018, cabinWallH * 0.44, innerDoorLen * 0.68, false);
-    part(group, MAT.leather, sx * (W * 0.5 - 0.122), yFloor + cabinWallH * 0.56, doorZ - 0.03, 0.058, 0.046, innerDoorLen * 0.56, false);
-    part(group, MAT.aluTrim, sx * (W * 0.5 - 0.115), yBelt - 0.045, doorZ + innerDoorLen * 0.2, 0.022, 0.024, 0.13, false);
-    part(group, ambientMat, sx * (W * 0.5 - 0.1), yBelt - 0.01, doorZ, 0.012, 0.011, innerDoorLen * 0.78, false);
-    // Circular metallic Burmester-style door speaker grille
+    part(group, seatBolsterMat, sx * (W * 0.5 - 0.122), yFloor + cabinWallH * 0.56, doorZ - 0.03, 0.058, 0.046, innerDoorLen * 0.56, false);
+    // Fabric pull-straps on Hypercar, manual window crank on Rusty Hatchback, chrome pull on others!
+    if (style === 'hyper') {
+      part(group, MAT.redIntake, sx * (W * 0.5 - 0.118), yBelt - 0.05, doorZ + innerDoorLen * 0.18, 0.025, 0.065, 0.028, false);
+    } else if (style === 'hatch') {
+      const crank = part(group, MAT.trim, sx * (W * 0.5 - 0.116), yFloor + cabinWallH * 0.48, doorZ + innerDoorLen * 0.15, 0.02, 0.095, 0.024, false);
+      crank.rotation.x = 0.45;
+      if (sx === 1) signatureProps.push('manual_window_cranks');
+    } else {
+      part(group, MAT.aluTrim, sx * (W * 0.5 - 0.115), yBelt - 0.045, doorZ + innerDoorLen * 0.2, 0.022, 0.024, 0.13, false);
+    }
+    if (theme.hasAmbientStrip) {
+      part(group, ambientMat, sx * (W * 0.5 - 0.1), yBelt - 0.01, doorZ, 0.012, 0.011, innerDoorLen * 0.78, false);
+    }
     const spkRing = new THREE.Mesh(TORUS_VENT, MAT.aluTrim);
     spkRing.position.set(sx * (W * 0.5 - 0.098), yFloor + cabinWallH * 0.27, doorZ + innerDoorLen * 0.27);
     spkRing.rotation.y = Math.PI / 2;
@@ -490,79 +552,192 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
     group.add(spkCore);
   }
 
-  // 2. Full-Height Center Transmission Console Tunnel + Cupholders + Drive-Mode Dial + Shifter
+  // 2. Bespoke Center Console / Transmission Tunnel & Model-Specific Shifters / Cabin Gear
   const consoleLen = Math.max(0.95, (zWindBase - zSeat) * 0.92);
   const consoleZ = zSeat + consoleLen * 0.34;
   const yConsoleTop = yBelt + 0.075;
   const tunnelH = Math.max(0.28, yConsoleTop - yFloor);
-  part(group, MAT.dashSoft, 0, yFloor + tunnelH * 0.5, consoleZ, cabW * 0.21, tunnelH, consoleLen, false);
-  part(group, trimMat, 0, yConsoleTop + 0.008, consoleZ + 0.05, cabW * 0.185, 0.018, consoleLen * 0.76, false);
-  for (const sx of [-1, 1]) {
-    part(group, ambientMat, sx * (cabW * 0.096), yConsoleTop + 0.004, consoleZ + 0.05, 0.008, 0.009, consoleLen * 0.7, false);
-  }
-  part(group, seatMainMat, 0, yConsoleTop + 0.028, zSeat - 0.04, cabW * 0.19, 0.052, 0.34, false); // stitched center armrest
-
-  // Twin chrome-ringed cupholders + rotary drive-mode selector dial
-  for (const cx of [-0.042, 0.042]) {
-    const cup = new THREE.Mesh(TORUS_VENT, MAT.aluTrim);
-    cup.rotation.x = Math.PI / 2;
-    cup.scale.setScalar(1.05);
-    cup.position.set(cx, yConsoleTop + 0.02, zSeat + 0.2);
-    group.add(cup);
-  }
-  const dial = new THREE.Mesh(CYL, MAT.aluTrim);
-  dial.scale.set(0.024, 0.018, 0.024);
-  dial.position.set(0, yConsoleTop + 0.024, zSeat + 0.12);
-  group.add(dial);
-
-  // Gear selector (classic chrome ball Hurst stick on muscle, sleek T-shifter on modern/exotics)
   const shiftZ = zSeat + 0.35;
-  if (isMuscle) {
+
+  if (style === 'van') {
+    // SwiftCargo Van: open walk-through center floor aisle (no full floor tunnel!) + rubber aisle runner
+    part(group, MAT.leather, 0, yFloor + 0.018, consoleZ, cabW * 0.18, 0.012, consoleLen, false);
+    signatureProps.push('walkthrough_aisle');
+  } else {
+    const cWidth = style === 'hyper' ? cabW * 0.14 : style === 'pickup' ? cabW * 0.25 : cabW * 0.21;
+    part(group, MAT.dashSoft, 0, yFloor + tunnelH * 0.5, consoleZ, cWidth, tunnelH, consoleLen, false);
+    part(group, trimMat, 0, yConsoleTop + 0.008, consoleZ + 0.05, cWidth * 0.88, 0.018, consoleLen * 0.76, false);
+    if (theme.hasAmbientStrip) {
+      for (const sx of [-1, 1]) {
+        part(group, ambientMat, sx * (cWidth * 0.46), yConsoleTop + 0.004, consoleZ + 0.05, 0.008, 0.009, consoleLen * 0.7, false);
+      }
+    }
+    part(group, seatMainMat, 0, yConsoleTop + 0.028, zSeat - 0.04, cWidth * 0.9, 0.055, 0.34, false);
+  }
+
+  // Model-specific Shifter & Center Console Equipment
+  if (style === 'hatch') {
+    // Economy 5-speed rubber-boot manual stick + mechanical pull handbrake lever
+    const boot = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.06, 10), MAT.leather);
+    boot.position.set(0, yConsoleTop + 0.035, shiftZ);
+    group.add(boot);
+    const stick = new THREE.Mesh(CYL, MAT.trim);
+    stick.scale.set(0.009, 0.1, 0.009);
+    stick.position.set(0, yConsoleTop + 0.09, shiftZ);
+    group.add(stick);
+    const knob = new THREE.Mesh(JOINT_GEO, MAT.trim);
+    knob.scale.set(0.024, 0.028, 0.024);
+    knob.position.set(0, yConsoleTop + 0.14, shiftZ);
+    group.add(knob);
+    const hBrake = part(group, MAT.trim, 0.048, yConsoleTop + 0.042, zSeat + 0.16, 0.022, 0.024, 0.16, false);
+    hBrake.rotation.x = 0.26;
+    signatureProps.push('manual_5speed_and_handbrake');
+  } else if (style === 'muscle') {
+    // Classic '69 Hurst bent chrome shifter with white cue-ball knob + chrome bezel ring
+    part(group, MAT.chrome, 0, yConsoleTop + 0.018, shiftZ, 0.095, 0.012, 0.11, false);
     const stalk = new THREE.Mesh(CYL, MAT.chrome);
-    stalk.scale.set(0.01, 0.13, 0.01);
-    stalk.rotation.x = -0.18;
+    stalk.scale.set(0.01, 0.145, 0.01);
+    stalk.rotation.x = -0.22;
+    stalk.position.set(0, yConsoleTop + 0.082, shiftZ);
+    group.add(stalk);
+    const ball = new THREE.Mesh(JOINT_GEO, MAT.plate);
+    ball.scale.setScalar(0.028);
+    ball.position.set(0, yConsoleTop + 0.152, shiftZ - 0.026);
+    group.add(ball);
+    signatureProps.push('hurst_cueball_shifter');
+  } else if (style === 'roadster') {
+    // Open-gate machined aluminium turret shifter
+    part(group, MAT.chrome, 0, yConsoleTop + 0.022, shiftZ, 0.092, 0.016, 0.105, false);
+    for (const gx of [-0.022, 0, 0.022]) {
+      part(group, MAT.grille, gx, yConsoleTop + 0.031, shiftZ, 0.007, 0.006, 0.075, false);
+    }
+    const stalk = new THREE.Mesh(CYL, MAT.chrome);
+    stalk.scale.set(0.008, 0.11, 0.008);
     stalk.position.set(0, yConsoleTop + 0.075, shiftZ);
     group.add(stalk);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), MAT.plate);
-    ball.position.set(0, yConsoleTop + 0.14, shiftZ - 0.02);
+    const ball = new THREE.Mesh(JOINT_GEO, MAT.aluTrim);
+    ball.scale.setScalar(0.024);
+    ball.position.set(0, yConsoleTop + 0.132, shiftZ);
     group.add(ball);
-  } else {
+    signatureProps.push('gated_metal_shifter');
+  } else if (style === 'hyper') {
+    // Valkyrie X12: Push-button D/N/R/LAUNCH aero switches + flip-up red jet-fighter ignition guard!
+    for (let b = 0; b < 4; b++) {
+      part(group, b === 0 ? MAT.redIntake : MAT.aluTrim, 0, yConsoleTop + 0.02, zSeat + 0.16 + b * 0.062, 0.048, 0.014, 0.038, false);
+    }
+    const guard = part(group, MAT.redIntake, 0, yConsoleTop + 0.046, shiftZ + 0.12, 0.046, 0.042, 0.052, false);
+    guard.rotation.x = -0.45;
+    signatureProps.push('jet_ignition_guard');
+  } else if (style === 'pickup') {
+    // 4WD Transfer-Case floor lever (2H / 4H / 4L) + wide utility storage bin
+    const tLever = new THREE.Mesh(CYL, MAT.trim);
+    tLever.scale.set(0.011, 0.11, 0.011);
+    tLever.rotation.x = 0.2;
+    tLever.position.set(0.05, yConsoleTop + 0.065, shiftZ - 0.04);
+    group.add(tLever);
+    part(group, MAT.saddleLeather, 0.05, yConsoleTop + 0.12, shiftZ - 0.03, 0.044, 0.032, 0.052, false);
+    signatureProps.push('transfer_case_4wd_lever');
+  } else if (style === 'police') {
+    // Police Interceptor: Siren/Lightbar rocker controller + Swivel-Mounted Open MDT Toughbook Laptop!
+    part(group, MAT.trim, 0, yConsoleTop + 0.038, zSeat + 0.18, 0.14, 0.045, 0.16, false);
+    part(group, MAT.sirenRed, -0.035, yConsoleTop + 0.064, zSeat + 0.21, 0.028, 0.01, 0.028, false);
+    part(group, MAT.sirenBlue, 0.035, yConsoleTop + 0.064, zSeat + 0.21, 0.028, 0.01, 0.028, false);
+    const mdtMount = new THREE.Group();
+    mdtMount.position.set(-0.075, yConsoleTop + 0.12, shiftZ + 0.02);
+    mdtMount.rotation.y = -0.42; // swivelled toward the officer!
+    part(mdtMount, MAT.trim, 0, -0.05, 0, 0.032, 0.11, 0.032, false);
+    part(mdtMount, MAT.carbon, 0, 0, -0.04, 0.22, 0.016, 0.16, false); // rugged keyboard deck
+    const lid = new THREE.Group();
+    lid.position.set(0, 0.008, 0.035);
+    lid.rotation.x = 0.28;
+    part(lid, MAT.trim, 0, 0.075, 0, 0.22, 0.15, 0.014, false);
+    part(lid, MAT.mdtScreen, 0, 0.075, -0.008, 0.195, 0.125, 0.004, false);
+    mdtMount.add(lid);
+    group.add(mdtMount);
+    signatureProps.push('police_mdt_laptop');
+  } else if (style !== 'van') {
+    // Executive / AMG / G-Wagen T-shifter + rotary command dial + cupholders
+    for (const cx of [-0.042, 0.042]) {
+      const cup = new THREE.Mesh(TORUS_VENT, MAT.aluTrim);
+      cup.rotation.x = Math.PI / 2;
+      cup.scale.setScalar(1.05);
+      cup.position.set(cx, yConsoleTop + 0.02, zSeat + 0.2);
+      group.add(cup);
+    }
+    const dial = new THREE.Mesh(CYL, style === 'sedan' ? MAT.goldMetal : MAT.aluTrim);
+    dial.scale.set(0.024, 0.018, 0.024);
+    dial.position.set(0, yConsoleTop + 0.024, zSeat + 0.12);
+    group.add(dial);
     part(group, MAT.aluTrim, 0, yConsoleTop + 0.045, shiftZ, 0.026, 0.065, 0.032, false);
     part(group, MAT.leather, 0, yConsoleTop + 0.08, shiftZ + 0.01, 0.088, 0.026, 0.05, false);
+    const startBtn = new THREE.Mesh(CYL, MAT.redIntake);
+    startBtn.scale.set(0.016, 0.008, 0.016);
+    startBtn.position.set(driverX * 0.32, yConsoleTop + 0.022, shiftZ + 0.12);
+    group.add(startBtn);
   }
-  // Start/Stop red engine button on console
-  const startBtn = new THREE.Mesh(CYL, MAT.redIntake);
-  startBtn.scale.set(0.016, 0.008, 0.016);
-  startBtn.position.set(driverX * 0.32, yConsoleTop + 0.022, shiftZ + 0.12);
-  group.add(startBtn);
 
-  // 3. Deep Sculpted Quilted Bucket Seats (anchored to yFloor with plush thigh & lumbar bolsters!)
+  // Taxi CB Dispatch Radio & Coiled Handset Mic beside console
+  if (style === 'taxi') {
+    part(group, MAT.trim, -0.095, yConsoleTop + 0.042, shiftZ + 0.08, 0.11, 0.042, 0.12, false);
+    part(group, MAT.taxiYellow, -0.095, yConsoleTop + 0.066, shiftZ + 0.08, 0.045, 0.016, 0.065, false);
+    signatureProps.push('taxi_cb_radio');
+  }
+
+  // 3. Bespoke Seats (Cloth Commuter / Executive Leather / Pleated '69 Muscle / 4-Point Harness Carbon Tubs!)
   const ySeatTop = yFloor + Math.max(0.19, (yBelt - yFloor) * 0.42);
   const seatBaseH = Math.max(0.12, ySeatTop - yFloor - 0.04);
   for (const sx of [-1, 1]) {
     const seatX = sx * Math.abs(driverX);
-    // Steel frame riser + plush quilted cushion angled slightly upward under knees
     part(group, MAT.trim, seatX, yFloor + seatBaseH * 0.5, zSeat + 0.08, 0.36, seatBaseH, 0.38, false);
     const cush = part(group, seatMainMat, seatX, ySeatTop, zSeat + 0.11, 0.43, 0.075, 0.45, false);
     cush.rotation.x = -0.08;
-    // Sculpted side thigh bolsters
+    const bolH = isExotic ? 0.105 : style === 'hatch' ? 0.055 : 0.085;
     for (const bx of [-1, 1]) {
-      const bol = part(group, MAT.leather, seatX + bx * 0.195, ySeatTop + 0.038, zSeat + 0.11, 0.058, 0.085, 0.43, false);
+      const bol = part(group, seatBolsterMat, seatX + bx * 0.195, ySeatTop + 0.038, zSeat + 0.11, 0.058, bolH, 0.43, false);
       bol.rotation.x = -0.08;
     }
-    // Reclined backrest + lateral shoulder bolsters + integrated headrest (behind eyeZ so zero camera clipping)
     const backH = Math.max(0.48, (yBelt + 0.34) - ySeatTop);
     const back = part(group, seatMainMat, seatX, ySeatTop + backH * 0.5, zSeat - 0.11, 0.41, backH, 0.09, false);
     back.rotation.x = -0.15;
     for (const bx of [-1, 1]) {
-      const sBol = part(group, MAT.leather, seatX + bx * 0.19, ySeatTop + backH * 0.52, zSeat - 0.09, 0.055, backH * 0.86, 0.1, false);
+      const sBol = part(group, seatBolsterMat, seatX + bx * 0.19, ySeatTop + backH * 0.52, zSeat - 0.09, 0.055, backH * 0.86, 0.1, false);
       sBol.rotation.x = -0.15;
     }
-    const hRest = part(group, MAT.leather, seatX, ySeatTop + backH + 0.08, zSeat - 0.16, 0.22, 0.15, 0.078, false);
+    const hRest = part(group, seatBolsterMat, seatX, ySeatTop + backH + 0.08, zSeat - 0.16, 0.22, 0.15, 0.078, false);
     hRest.rotation.x = -0.1;
+
+    // 4-point cyan racing harnesses + 24k gold cam-lock buckle on Valkyrie X12 Hypercar!
+    if (style === 'hyper') {
+      for (const hx of [-0.075, 0.075]) {
+        const strap = part(group, MAT.harnessCyan, seatX + hx, ySeatTop + backH * 0.52, zSeat - 0.055, 0.038, backH * 0.86, 0.018, false);
+        strap.rotation.x = -0.15;
+      }
+      part(group, MAT.goldMetal, seatX, ySeatTop + backH * 0.22, zSeat - 0.03, 0.052, 0.052, 0.022, false);
+      if (sx === 1) signatureProps.push('racing_4pt_harness');
+    }
   }
 
-  // 4. Multi-layered wrap-around dashboard + lower knee bolster + chrome turbine vents + ambient LED ribbon
+  // Rear Bulkhead / Partition for SwiftCargo Van & Metro Police Interceptor (behind seats, clear of front mirrors!)
+  if (style === 'van') {
+    const wallH = Math.max(0.65, cabinTop - yFloor - 0.08);
+    const zPart = zSeat - 0.28;
+    for (const px of [-cabW * 0.32, cabW * 0.32]) {
+      part(group, MAT.trim, px, yFloor + wallH * 0.5, zPart, cabW * 0.32, wallH, 0.035, false);
+    }
+    part(group, MAT.trim, 0, yFloor + wallH * 0.26, zPart, cabW * 0.34, wallH * 0.52, 0.035, false);
+    part(group, MAT.cabinGlass, 0, yFloor + wallH * 0.74, zPart, cabW * 0.32, wallH * 0.36, 0.015, false);
+    signatureProps.push('cargo_steel_bulkhead');
+  } else if (style === 'police') {
+    const cageH = Math.max(0.55, cabinTop - yFloor - 0.1);
+    const zCage = zSeat - 0.27;
+    part(group, MAT.trim, 0, yFloor + cageH * 0.25, zCage, cabW * 0.88, cageH * 0.5, 0.03, false);
+    for (let b = -3; b <= 3; b++) {
+      part(group, MAT.aluTrim, b * (cabW * 0.11), yFloor + cageH * 0.72, zCage, 0.014, cageH * 0.44, 0.014, false);
+    }
+    signatureProps.push('prisoner_partition_cage');
+  }
+
+  // 4. Multi-layered Dashboard + Model-Specific Vents, Dash Pods & Signature Top Gear
   const zDashFront = zWindBase - 0.03;
   const zDashFace = zSeat + (zWindBase - zSeat) * 0.55;
   const dashDepth = Math.max(0.24, zDashFront - zDashFace);
@@ -571,70 +746,163 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
   const yDashUnder = yFloor + Math.max(0.32, (yBelt - yFloor) * 0.68);
   const fullDashH = Math.max(0.18, yDashTop - yDashUnder);
 
-  // Sculpted wrap-around dash body (extends down above knees, leaving footwell & pedals open underneath!)
   part(group, MAT.dashSoft, 0, yDashUnder + fullDashH * 0.5, dashMidZ, cabW * 0.96, fullDashH, dashDepth, false);
   part(group, trimMat, 0, yDashTop - 0.042, zDashFace - 0.008, cabW * 0.92, 0.062, 0.024, false);
-  part(group, ambientMat, 0, yDashTop - 0.076, zDashFace - 0.016, cabW * 0.9, 0.011, 0.016, false);
-
-  // Sculpted curved driver instrument binnacle hood (elevated cleanly into upper wheel arch!)
-  part(group, MAT.leather, driverX, yDashTop + 0.078, zDashFace + 0.025, 0.37, 0.026, 0.16, false);
-  for (const bx of [-1, 1]) {
-    part(group, MAT.leather, driverX + bx * 0.175, yDashTop + 0.032, zDashFace + 0.025, 0.024, 0.09, 0.15, false);
+  if (theme.hasAmbientStrip) {
+    part(group, ambientMat, 0, yDashTop - 0.076, zDashFace - 0.016, cabW * 0.9, 0.011, 0.016, false);
   }
 
-  // 5 Mercedes-inspired chrome turbine AC vents (3 center + 2 outer)
+  // Driver instrument binnacle hood (twin retro round pods on '69 Muscle, frameless panoramic glass on Sports, sculpted hood on others)
+  if (style === 'muscle') {
+    for (const px of [-0.078, 0.078]) {
+      const bezel = new THREE.Mesh(TORUS_VENT, MAT.chrome);
+      bezel.scale.setScalar(1.85);
+      bezel.position.set(driverX + px, yDashTop + 0.028, zDashFace - 0.016);
+      group.add(bezel);
+    }
+    // 3 Iconic Auxiliary Chrome Gauge Pods angled atop center dash!
+    for (let p = -1; p <= 1; p++) {
+      const pod = new THREE.Mesh(CYL, MAT.chrome);
+      pod.scale.set(0.026, 0.042, 0.026);
+      pod.rotation.x = Math.PI / 2;
+      pod.rotation.z = -0.18;
+      pod.position.set(p * 0.062, yDashTop + 0.032, zDashFace + 0.045);
+      group.add(pod);
+    }
+    signatureProps.push('triple_chrome_dash_pods');
+  } else if (style === 'sports') {
+    // Seamless curved panoramic MBUX-style dual-screen glass backing
+    part(group, MAT.pianoBlack, driverX * 0.42, yDashTop + 0.03, zDashFace - 0.008, cabW * 0.56, 0.142, 0.018, false);
+    signatureProps.push('panoramic_widescreen_slab');
+  } else {
+    part(group, MAT.leather, driverX, yDashTop + 0.078, zDashFace + 0.025, 0.37, 0.026, 0.16, false);
+    for (const bx of [-1, 1]) {
+      part(group, MAT.leather, driverX + bx * 0.175, yDashTop + 0.032, zDashFace + 0.025, 0.024, 0.09, 0.15, false);
+    }
+  }
+
+  // Model-specific AC Vents: Chunky Rectangular Vents on Truck/Van/Hatch/Taxi/Police vs Round Turbine Vents on Luxury/Exotic!
   const ventXs = [-cabW * 0.39, -0.095, 0, 0.095, cabW * 0.39];
   const yVent = yDashTop - 0.042;
+  const squareVents = style === 'hatch' || style === 'pickup' || style === 'van' || style === 'taxi' || style === 'police';
   for (const vx of ventXs) {
-    // Skip the two inner-left vents if they overlap the driver gauge cluster on narrow cabins
     if (Math.abs(vx - driverX) < 0.19 && vx !== cabW * 0.39) continue;
-    const ring = new THREE.Mesh(TORUS_VENT, MAT.aluTrim);
-    ring.position.set(vx, yVent, zDashFace - 0.022);
-    ring.rotation.y = Math.PI;
-    group.add(ring);
-    const core = new THREE.Mesh(CYL, MAT.grille);
-    core.scale.set(0.028, 0.012, 0.028);
-    core.rotation.x = Math.PI / 2;
-    core.position.set(vx, yVent, zDashFace - 0.02);
-    group.add(core);
+    if (squareVents) {
+      part(group, style === 'pickup' ? MAT.amber : MAT.aluTrim, vx, yVent, zDashFace - 0.02, 0.074, 0.042, 0.012, false);
+      part(group, MAT.grille, vx, yVent, zDashFace - 0.023, 0.064, 0.032, 0.01, false);
+    } else {
+      const ring = new THREE.Mesh(TORUS_VENT, MAT.aluTrim);
+      ring.position.set(vx, yVent, zDashFace - 0.022);
+      ring.rotation.y = Math.PI;
+      group.add(ring);
+      const core = new THREE.Mesh(CYL, MAT.grille);
+      core.scale.set(0.028, 0.012, 0.028);
+      core.rotation.x = Math.PI / 2;
+      core.position.set(vx, yVent, zDashFace - 0.02);
+      group.add(core);
+    }
   }
 
-  // Iconic G-Wagen passenger grab handle on the right dash
-  if (m.style === 'gwagen') {
+  // Bespoke Dashboard Top & Passenger-Side Signature Props!
+  if (style === 'gwagen') {
+    // G-Wagen: Passenger off-road grab handle + 3 iconic chrome differential-lock switches!
     part(group, MAT.aluTrim, passX, yDashTop - 0.035, zDashFace - 0.035, 0.28, 0.024, 0.03, false);
     for (const gx of [-0.12, 0.12]) {
       part(group, MAT.aluTrim, passX + gx, yDashTop - 0.035, zDashFace - 0.018, 0.028, 0.028, 0.035, false);
     }
+    for (let d = -1; d <= 1; d++) {
+      part(group, MAT.chrome, d * 0.034, yDashTop - 0.088, zDashFace - 0.024, 0.022, 0.018, 0.014, false);
+    }
+    signatureProps.push('gwagen_difflock_and_grabbar');
+  } else if (style === 'sedan') {
+    // Lagos Cruiser Sedan: Gold-bezel analog luxury clock centerpiece + walnut trim!
+    const clk = new THREE.Mesh(TORUS_VENT, MAT.goldMetal);
+    clk.scale.setScalar(0.82);
+    clk.position.set(0, yDashTop - 0.01, zDashFace - 0.022);
+    group.add(clk);
+    signatureProps.push('walnut_luxury_clock');
+  } else if (style === 'roadster') {
+    // Aero Spider Roadster: Dash-top Chronosport Lap Stopwatch Pod!
+    const pod = new THREE.Mesh(CYL, paint);
+    pod.scale.set(0.036, 0.055, 0.036);
+    pod.rotation.x = Math.PI / 2;
+    pod.position.set(0, yDashTop + 0.032, zDashFace + 0.04);
+    group.add(pod);
+    const bezel = new THREE.Mesh(TORUS_VENT, MAT.chrome);
+    bezel.position.set(0, yDashTop + 0.032, zDashFace + 0.012);
+    group.add(bezel);
+    signatureProps.push('chronosport_stopwatch');
+  } else if (style === 'taxi') {
+    // Metro Cab Taxi: Dash-Top Digital Fare Meter ("FARE $ · HIRED") + Yellow Passenger Medallion!
+    part(group, MAT.trim, -0.04, yDashTop + 0.034, zDashFace + 0.04, 0.17, 0.056, 0.068, false);
+    part(group, MAT.taxiYellow, -0.04, yDashTop + 0.064, zDashFace + 0.04, 0.174, 0.008, 0.07, false);
+    part(group, MAT.sirenRed, -0.07, yDashTop + 0.035, zDashFace + 0.004, 0.075, 0.026, 0.005, false);
+    part(group, MAT.taxiYellow, passX, yDashTop - 0.04, zDashFace - 0.022, 0.18, 0.048, 0.008, false);
+    signatureProps.push('taxi_fare_meter');
+  } else if (style === 'van') {
+    // SwiftCargo Van: Dash-mounted Manifest Clipboard + Dash-pod Commercial Shifter + Barcode Scanner!
+    const clip = part(group, MAT.saddleLeather, passX * 0.55, yDashTop + 0.018, zDashFace + 0.06, 0.19, 0.012, 0.24, false);
+    clip.rotation.y = 0.22;
+    const sheet = part(group, MAT.plate, passX * 0.55, yDashTop + 0.026, zDashFace + 0.06, 0.16, 0.006, 0.2, false);
+    sheet.rotation.y = 0.22;
+    // Dash-mounted ergonomic commercial shifter pod
+    part(group, MAT.trim, driverX - 0.21, yDashTop - 0.085, zDashFace - 0.045, 0.075, 0.095, 0.085, false);
+    part(group, MAT.aluTrim, driverX - 0.21, yDashTop - 0.03, zDashFace - 0.065, 0.032, 0.065, 0.032, false);
+    signatureProps.push('manifest_clipboard_and_dash_shifter');
+  } else if (style === 'police') {
+    // Police Interceptor: Dash-top Doppler Radar Speed Gun unit!
+    part(group, MAT.trim, driverX * 0.45, yDashTop + 0.028, zDashFace + 0.055, 0.14, 0.044, 0.085, false);
+    const cone = new THREE.Mesh(CYL, MAT.aluTrim);
+    cone.scale.set(0.024, 0.07, 0.024);
+    cone.rotation.x = Math.PI / 2;
+    cone.position.set(driverX * 0.45 + 0.09, yDashTop + 0.03, zDashFace + 0.085);
+    group.add(cone);
+    signatureProps.push('doppler_radar_unit');
   }
 
-  // 5. Digital OLED Driver Instrument Cluster & Angled Center Widescreen Infotainment
+  // 5. Driver Instrument Cluster & Model-Specific Center Stack (Widescreen GPS / Retro DIN FM / Vintage Chrome Radio)
   const clusterMat = new THREE.MeshBasicMaterial({ color: 0x0ea5e9 });
   const infotainMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
-  // Driver gauge cluster (elevated cleanly into upper wheel arch, facing -Z toward driver)
   const clusterGroup = new THREE.Group();
   clusterGroup.position.set(driverX, yDashTop + 0.028, zDashFace - 0.012);
-  clusterGroup.rotation.y = Math.PI; // +Z normal -> -Z toward driver
-  clusterGroup.rotation.x = 0.14;    // upward tilt toward driver's eyes
+  clusterGroup.rotation.y = Math.PI;
+  clusterGroup.rotation.x = 0.14;
   part(clusterGroup, MAT.pianoBlack, 0, 0, -0.006, 0.335, 0.12, 0.012, false);
   const clusterPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.315, 0.104), clusterMat);
   clusterGroup.add(clusterPlane);
   group.add(clusterGroup);
 
-  // Center widescreen infotainment tablet (angled toward left-hand driver & tilted upward)
   const infoGroup = new THREE.Group();
   const infoX = Math.min(0.0, driverX - 0.33);
-  infoGroup.position.set(infoX, yDashTop + 0.028, zDashFace - 0.022);
-  infoGroup.rotation.y = Math.PI - 0.16; // angled toward left-hand driver (+X)
-  infoGroup.rotation.x = 0.12;
-  part(infoGroup, MAT.aluTrim, 0, 0, -0.008, 0.335, 0.158, 0.014, false);
-  part(infoGroup, MAT.pianoBlack, 0, 0, -0.003, 0.322, 0.146, 0.01, false);
-  const infoPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.304, 0.132), infotainMat);
+  const isCompactDeck = style === 'hatch' || style === 'muscle';
+  infoGroup.position.set(
+    isCompactDeck ? 0 : infoX,
+    isCompactDeck ? yDashTop - 0.042 : yDashTop + 0.028,
+    zDashFace - 0.022,
+  );
+  infoGroup.rotation.y = isCompactDeck ? Math.PI : Math.PI - 0.16;
+  infoGroup.rotation.x = isCompactDeck ? 0.04 : 0.12;
+  const deckW = isCompactDeck ? 0.25 : 0.335;
+  const deckH = isCompactDeck ? 0.086 : 0.158;
+  part(infoGroup, style === 'muscle' ? MAT.chrome : MAT.aluTrim, 0, 0, -0.008, deckW, deckH, 0.014, false);
+  part(infoGroup, MAT.pianoBlack, 0, 0, -0.003, deckW - 0.012, deckH - 0.012, 0.01, false);
+  const infoPlane = new THREE.Mesh(new THREE.PlaneGeometry(deckW - 0.026, deckH - 0.024), infotainMat);
   infoPlane.position.z = 0.004;
   infoGroup.add(infoPlane);
+  if (isCompactDeck) {
+    // Physical rotary tuning/volume knobs + 3 HVAC climate dials below the Single-DIN deck!
+    for (const kx of [-deckW * 0.42, deckW * 0.42]) {
+      const knob = new THREE.Mesh(CYL, MAT.chrome);
+      knob.scale.set(0.012, 0.016, 0.012);
+      knob.rotation.x = Math.PI / 2;
+      knob.position.set(kx, 0, 0.008);
+      infoGroup.add(knob);
+    }
+  }
   group.add(infoGroup);
 
-  // 6. Sculpted Steering Column, Rotating 3-Spoke Steering Wheel, Driver Arms & Seated Legs
+  // 6. Sculpted Steering Column + Bespoke Model-Specific Steering Wheel / F1 Carbon Yoke!
   const zSteer = zDashFace - 0.168;
   const ySteer = yDashTop - 0.026;
   const colStalk = new THREE.Mesh(CYL, MAT.trim);
@@ -643,47 +911,101 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
   colStalk.position.set(driverX, ySteer - 0.012, (zDashFace + zSteer) * 0.5);
   group.add(colStalk);
 
-  // Outer tilt mount (tilts top of wheel slightly away so face points up at driver's eyes)
+  // Column gear-shifter stalk on Pickup Truck!
+  if (style === 'pickup') {
+    const cShift = part(group, MAT.trim, driverX - 0.075, ySteer + 0.015, zSteer + 0.055, 0.12, 0.014, 0.014, false);
+    cShift.rotation.z = -0.25;
+  }
+
   const steerTilt = new THREE.Group();
   steerTilt.position.set(driverX, ySteer, zSteer);
-  steerTilt.rotation.x = 0.26;
+  steerTilt.rotation.x = style === 'van' || style === 'pickup' ? 0.42 : 0.26;
   group.add(steerTilt);
 
-  // Inner rotating wheel group (rotates around local Z with `steer`)
   const steerWheel = new THREE.Group();
   steerTilt.add(steerWheel);
 
-  const rimMesh = new THREE.Mesh(TORUS_WHEEL, isExotic ? MAT.alcantara : MAT.leather);
-  steerWheel.add(rimMesh);
-
-  // 12-o'clock sport centering stripe
-  if (isExotic || isMuscle || m.style === 'gwagen') {
-    const markerMat = m.style === 'gwagen' ? MAT.goldMetal : MAT.redIntake;
-    part(steerWheel, markerMat, 0, 0.145, 0, 0.024, 0.044, 0.044, false);
-  }
-  // Compact center airbag boss + chrome emblem ring + 3-pointed star spokes (leaves upper arch wide open!)
-  const hub = new THREE.Mesh(CYL, MAT.leather);
-  hub.scale.set(0.044, 0.032, 0.044);
-  hub.rotation.x = Math.PI / 2;
-  steerWheel.add(hub);
-  const emblemRing = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.0032, 6, 16), MAT.chrome);
-  emblemRing.position.z = -0.018;
-  steerWheel.add(emblemRing);
-  for (let k = 0; k < 3; k++) {
-    const a = (k / 3) * Math.PI * 2 + Math.PI / 2;
-    const ray = part(steerWheel, MAT.chrome, Math.cos(a) * 0.01, Math.sin(a) * 0.01, -0.018, 0.0038, 0.02, 0.004, false);
-    ray.rotation.z = a - Math.PI / 2;
-  }
-  // 3 sculpted spokes at 9 o'clock (+X), 3 o'clock (-X), and 6 o'clock (-Y)
-  part(steerWheel, MAT.aluTrim, 0.092, -0.014, -0.004, 0.092, 0.022, 0.016, false);
-  part(steerWheel, MAT.aluTrim, -0.092, -0.014, -0.004, 0.092, 0.022, 0.016, false);
-  part(steerWheel, MAT.aluTrim, -0.015, -0.092, -0.004, 0.017, 0.088, 0.016, false);
-  part(steerWheel, MAT.aluTrim, 0.015, -0.092, -0.004, 0.017, 0.088, 0.016, false);
-
-  // Shift paddles on performance & luxury models
-  if (isExotic || m.style === 'gwagen') {
+  // Build bespoke steering wheel geometry per vehicle model!
+  if (style === 'hyper') {
+    // Valkyrie X12: Rectangular Open-Top Formula / Le Mans Carbon Yoke + 6-LED RPM Shift Strip!
+    for (const sx of [-1, 1]) {
+      part(steerWheel, MAT.alcantara, sx * 0.142, -0.006, 0, 0.034, 0.155, 0.034, false);
+      part(steerWheel, MAT.carbon, sx * 0.088, -0.012, -0.004, 0.095, 0.03, 0.018, false);
+      part(steerWheel, MAT.carbon, sx * 0.105, 0.028, 0.022, 0.028, 0.072, 0.008, false); // carbon paddles
+    }
+    part(steerWheel, MAT.carbon, 0, 0.042, 0, 0.255, 0.022, 0.022, false);
+    part(steerWheel, MAT.carbon, 0, -0.072, 0, 0.24, 0.02, 0.02, false);
+    // 6-LED F1 shift-light strip across yoke bridge
+    for (let l = 0; l < 6; l++) {
+      const ledMat = l < 2 ? MAT.pineGreen : l < 4 ? MAT.amber : MAT.sirenRed;
+      part(steerWheel, ledMat, -0.065 + l * 0.026, 0.044, -0.013, 0.016, 0.008, 0.005, false);
+    }
+    part(steerWheel, MAT.carbon, 0, -0.012, -0.004, 0.092, 0.078, 0.028, false);
+    signatureProps.push('f1_carbon_yoke');
+  } else if (style === 'sports' || style === 'roadster') {
+    // AMG / Roadster Flat-Bottom D-Shaped Sport Wheel!
+    const rimMesh = new THREE.Mesh(TORUS_FLAT_WHEEL, style === 'roadster' ? MAT.cognacLeather : MAT.alcantara);
+    rimMesh.rotation.z = -Math.PI * 0.28; // centers the open chord cleanly at 6 o'clock (-Y)!
+    steerWheel.add(rimMesh);
+    part(steerWheel, style === 'roadster' ? paint : MAT.carbon, 0, -0.112, 0, 0.195, 0.032, 0.034, false);
+    part(steerWheel, MAT.redIntake, 0, 0.145, 0, 0.024, 0.044, 0.044, false);
+    const hub = new THREE.Mesh(CYL, MAT.leather);
+    hub.scale.set(0.044, 0.032, 0.044);
+    hub.rotation.x = Math.PI / 2;
+    steerWheel.add(hub);
+    const emblemRing = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.0032, 6, 16), MAT.chrome);
+    emblemRing.position.z = -0.018;
+    steerWheel.add(emblemRing);
+    part(steerWheel, MAT.aluTrim, 0.092, -0.014, -0.004, 0.092, 0.022, 0.016, false);
+    part(steerWheel, MAT.aluTrim, -0.092, -0.014, -0.004, 0.092, 0.022, 0.016, false);
+    part(steerWheel, MAT.aluTrim, 0, -0.068, -0.004, 0.034, 0.072, 0.016, false);
     for (const sx of [-1, 1]) {
       part(steerWheel, MAT.aluTrim, sx * 0.105, 0.028, 0.022, 0.028, 0.068, 0.008, false);
+    }
+    signatureProps.push('flat_bottom_sport_wheel');
+  } else if (style === 'muscle') {
+    // '69 Stallion GT: Vintage Wood-Rimmed Wheel + 3 Brushed Chrome Drilled Spokes!
+    const rimMesh = new THREE.Mesh(TORUS_WHEEL, MAT.vintageWood);
+    steerWheel.add(rimMesh);
+    const hub = new THREE.Mesh(CYL, MAT.chrome);
+    hub.scale.set(0.038, 0.034, 0.038);
+    hub.rotation.x = Math.PI / 2;
+    steerWheel.add(hub);
+    part(steerWheel, MAT.chrome, 0.092, -0.008, -0.004, 0.098, 0.024, 0.012, false);
+    part(steerWheel, MAT.chrome, -0.092, -0.008, -0.004, 0.098, 0.024, 0.012, false);
+    part(steerWheel, MAT.chrome, 0, -0.092, -0.004, 0.024, 0.098, 0.012, false);
+    signatureProps.push('vintage_wood_chrome_wheel');
+  } else if (style === 'hatch') {
+    // Rusty Hatchback: Basic 2-Spoke Molded Plastic Commuter Wheel (no bottom spoke, no paddles!)
+    const rimMesh = new THREE.Mesh(TORUS_WHEEL, MAT.trim);
+    steerWheel.add(rimMesh);
+    part(steerWheel, MAT.trim, 0, -0.012, -0.004, 0.26, 0.044, 0.024, false);
+    signatureProps.push('commuter_2spoke_wheel');
+  } else {
+    // 4-Spoke Executive / Fleet / Truck / Van / G-Wagen / Police Wheel
+    const rimMat = style === 'sedan' ? MAT.walnutWood : MAT.leather;
+    const rimMesh = new THREE.Mesh(TORUS_WHEEL, rimMat);
+    steerWheel.add(rimMesh);
+    if (style === 'gwagen') {
+      part(steerWheel, MAT.goldMetal, 0, 0.145, 0, 0.024, 0.044, 0.044, false);
+    }
+    const hub = new THREE.Mesh(CYL, MAT.leather);
+    hub.scale.set(0.046, 0.032, 0.046);
+    hub.rotation.x = Math.PI / 2;
+    steerWheel.add(hub);
+    const emblemMat = style === 'taxi' ? MAT.taxiYellow : style === 'sedan' ? MAT.goldMetal : MAT.chrome;
+    const emblemRing = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.0032, 6, 16), emblemMat);
+    emblemRing.position.z = -0.018;
+    steerWheel.add(emblemRing);
+    const spokeMat = style === 'pickup' || style === 'van' || style === 'police' ? MAT.trim : MAT.aluTrim;
+    part(steerWheel, spokeMat, 0.092, 0.012, -0.004, 0.092, 0.02, 0.016, false);
+    part(steerWheel, spokeMat, -0.092, 0.012, -0.004, 0.092, 0.02, 0.016, false);
+    part(steerWheel, spokeMat, 0.068, -0.072, -0.004, 0.022, 0.095, 0.016, false).rotation.z = 0.55;
+    part(steerWheel, spokeMat, -0.068, -0.072, -0.004, 0.022, 0.095, 0.016, false).rotation.z = -0.55;
+    if (style === 'gwagen') {
+      for (const sx of [-1, 1]) {
+        part(steerWheel, MAT.aluTrim, sx * 0.105, 0.028, 0.022, 0.028, 0.068, 0.008, false);
+      }
     }
   }
 
@@ -833,6 +1155,15 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
     }
     part(group, MAT.head, 0, yHeader - 0.03, zWindTop - 0.06, 0.08, 0.01, 0.05, false);
 
+    // Pickup & Van: Heavy-duty A-pillar grab handles + overhead cab storage shelf!
+    if (style === 'pickup' || style === 'van') {
+      for (const sx of [-1, 1]) {
+        part(group, MAT.trim, sx * (cabW * 0.44), yBelt + 0.26, (zWindBase + zWindTop) * 0.5, 0.024, 0.16, 0.028, false);
+      }
+      part(group, MAT.trim, 0, yHeader - 0.052, zWindTop - 0.01, cabW * 0.78, 0.016, 0.14, false);
+      if (style === 'pickup') signatureProps.push('apillar_grab_handles');
+    }
+
     // Subtle clear-tinted front windshield pane
     const wsDx = zWindBase - zWindTop;
     const wsDy = yHeader - (yBelt + 0.04);
@@ -883,6 +1214,16 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
   rearMirrorGlass.position.set(0, 0, -0.0035);
   rearMirrorGlass.rotation.y = Math.PI; // faces -Z toward driver
   mirrorHousing.add(rearMirrorGlass);
+  // Rusty Hatchback signature charm: hanging green pine-tree air freshener below rearview mirror!
+  if (style === 'hatch') {
+    part(mirrorHousing, MAT.plate, 0.015, -0.048, -0.002, 0.003, 0.032, 0.003, false);
+    const pine = new THREE.Mesh(new THREE.ConeGeometry(0.024, 0.058, 4), MAT.pineGreen);
+    pine.rotation.y = Math.PI / 4;
+    pine.scale.set(1, 1, 0.16);
+    pine.position.set(0.015, -0.082, -0.002);
+    mirrorHousing.add(pine);
+    signatureProps.push('pine_tree_freshener');
+  }
   group.add(mirrorHousing);
 
   // Lazy high-contrast digital OLED gauge & infotainment canvas textures
@@ -930,143 +1271,260 @@ function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = fa
     const fuel = Math.round(info.fuel ?? 100);
     const hp = Math.round(info.hp ?? 100);
 
-    // --- 1. Driver OLED Instrument Cluster ---
+    // --- 1. Bespoke Per-Vehicle Driver Instrument Cluster ---
     const { g1, t1 } = sc;
-    g1.fillStyle = '#050811';
-    g1.fillRect(0, 0, 256, 96);
-    g1.strokeStyle = accent;
-    g1.lineWidth = 2;
-    g1.strokeRect(3, 3, 250, 90);
+    const cTheme = theme.clusterTheme;
+    const isAnalog = cTheme === 'analog_amber' || cTheme === 'exec_ivory' || cTheme === 'retro_chrome69';
+    const isCentralRing = cTheme === 'amg_supersport' || cTheme === 'chrono_yellow';
 
-    // Animated RPM bar across top
-    const segs = 18;
-    for (let i = 0; i < segs; i++) {
-      const lit = (i + 1) / segs <= rpmFrac;
-      g1.fillStyle = !lit ? '#1e293b' : i >= 14 ? '#ef4444' : i >= 11 ? '#f59e0b' : accent;
-      g1.fillRect(14 + i * 12.8, 10, 10, 9);
+    if (isAnalog) {
+      // Twin sweeping analog circular dials (Amber Hatchback / Ivory-Gold Executive Sedan / '69 Green-Chrome Muscle)
+      g1.fillStyle = cTheme === 'exec_ivory' ? '#131620' : '#09090b';
+      g1.fillRect(0, 0, 256, 96);
+      const ringCol = cTheme === 'analog_amber' ? '#f59e0b' : cTheme === 'exec_ivory' ? '#fbbf24' : '#cbd5e1';
+      const faceCol = cTheme === 'exec_ivory' ? '#1e2433' : '#111318';
+      const needleCol = cTheme === 'retro_chrome69' ? '#4ade80' : '#ef4444';
+      const drawDial = (cx, cy, r, frac, label, valTxt) => {
+        g1.fillStyle = faceCol;
+        g1.beginPath(); g1.arc(cx, cy, r, 0, Math.PI * 2); g1.fill();
+        g1.strokeStyle = ringCol; g1.lineWidth = 3;
+        g1.beginPath(); g1.arc(cx, cy, r, 0, Math.PI * 2); g1.stroke();
+        const a0 = Math.PI * 0.78;
+        const a1 = a0 + Math.PI * 1.44 * Math.min(1, Math.max(0, frac));
+        g1.strokeStyle = needleCol; g1.lineWidth = 2.6;
+        g1.beginPath();
+        g1.moveTo(cx, cy);
+        g1.lineTo(cx + Math.cos(a1) * (r - 6), cy + Math.sin(a1) * (r - 6));
+        g1.stroke();
+        g1.fillStyle = '#f8fafc';
+        g1.font = 'bold 13px system-ui, sans-serif';
+        g1.textAlign = 'center'; g1.textBaseline = 'middle';
+        g1.fillText(valTxt, cx, cy + 12);
+        g1.fillStyle = ringCol;
+        g1.font = 'bold 9px system-ui, sans-serif';
+        g1.fillText(label, cx, cy - 11);
+      };
+      drawDial(66, 49, 39, speedRatio, 'KM/H', String(speedKmh));
+      drawDial(190, 49, 39, rpmFrac, 'RPM', gearStr);
+      g1.fillStyle = fuel < 25 ? '#ef4444' : ringCol;
+      g1.font = 'bold 10px system-ui, sans-serif';
+      g1.textAlign = 'center';
+      g1.fillText(`F:${fuel}%`, 128, 36);
+      g1.fillStyle = '#94a3b8';
+      g1.fillText(`HP:${hp}%`, 128, 62);
+    } else if (isCentralRing) {
+      // AMG Supersport / Roadster Chronosport: Central Racing Tachometer Ring!
+      const ringAccent = cTheme === 'chrono_yellow' ? '#facc15' : accent;
+      g1.fillStyle = '#050811';
+      g1.fillRect(0, 0, 256, 96);
+      g1.strokeStyle = '#1e293b'; g1.lineWidth = 7;
+      g1.beginPath(); g1.arc(128, 50, 39, Math.PI * 0.75, Math.PI * 2.25); g1.stroke();
+      g1.strokeStyle = rpmFrac > 0.82 ? '#ef4444' : ringAccent; g1.lineWidth = 7;
+      g1.beginPath(); g1.arc(128, 50, 39, Math.PI * 0.75, Math.PI * (0.75 + 1.5 * rpmFrac)); g1.stroke();
+      g1.fillStyle = '#f8fafc';
+      g1.font = 'bold 28px system-ui, sans-serif';
+      g1.textAlign = 'center'; g1.textBaseline = 'middle';
+      g1.fillText(String(speedKmh), 128, 46);
+      g1.fillStyle = ringAccent;
+      g1.font = 'bold 11px system-ui, sans-serif';
+      g1.fillText(`${gearStr} · KM/H`, 128, 69);
+      g1.textAlign = 'left';
+      g1.fillStyle = '#38bdf8'; g1.fillText(`FUEL ${fuel}%`, 10, 34);
+      g1.fillStyle = '#f43f5e'; g1.fillText('V12 BOOST', 10, 62);
+      g1.textAlign = 'right';
+      g1.fillStyle = '#4ade80'; g1.fillText(`HP ${hp}%`, 246, 34);
+      g1.fillStyle = ringAccent; g1.fillText(cTheme === 'chrono_yellow' ? 'CHRONO' : 'RACE+', 246, 62);
+    } else {
+      // Digital Telemetry / F1 Bar / Off-Road / Fleet / Police Pursuit Cluster
+      g1.fillStyle = cTheme === 'police_pursuit' ? '#070b19' : '#050811';
+      g1.fillRect(0, 0, 256, 96);
+      g1.strokeStyle = cTheme === 'police_pursuit' ? '#3b82f6' : accent;
+      g1.lineWidth = 2;
+      g1.strokeRect(3, 3, 250, 90);
+
+      const segs = cTheme === 'hyper_f1_bar' ? 22 : 18;
+      const segW = cTheme === 'hyper_f1_bar' ? 10.4 : 12.8;
+      for (let i = 0; i < segs; i++) {
+        const lit = (i + 1) / segs <= rpmFrac;
+        g1.fillStyle = !lit ? '#1e293b' : i >= segs * 0.78 ? '#ef4444' : i >= segs * 0.58 ? '#f59e0b' : accent;
+        g1.fillRect(14 + i * segW, 10, segW - 2.4, 9);
+      }
+
+      g1.fillStyle = '#f8fafc';
+      g1.font = 'bold 40px system-ui, sans-serif';
+      g1.textAlign = 'center';
+      g1.textBaseline = 'middle';
+      g1.fillText(String(speedKmh).padStart(3, '0'), 128, 52);
+
+      const subLabel = cTheme === 'police_pursuit' ? 'CERTIFIED PURSUIT'
+        : cTheme === 'offroad_dual' || cTheme === 'truck_rugged' ? '4X4 LOCK · KM/H'
+        : cTheme === 'taxi_fleet' ? 'CAB METER · KM/H'
+        : cTheme === 'hyper_f1_bar' ? 'ERS ACTIVE · KM/H'
+        : 'KM/H';
+      g1.fillStyle = '#94a3b8';
+      g1.font = 'bold 10px system-ui, sans-serif';
+      g1.fillText(subLabel, 128, 80);
+
+      g1.fillStyle = '#0f172a';
+      g1.fillRect(14, 34, 48, 44);
+      g1.strokeStyle = accent;
+      g1.strokeRect(14, 34, 48, 44);
+      g1.fillStyle = accent;
+      g1.font = 'bold 24px system-ui, sans-serif';
+      g1.fillText(gearStr, 38, 57);
+
+      g1.textAlign = 'right';
+      g1.font = 'bold 13px system-ui, sans-serif';
+      g1.fillStyle = fuel < 25 ? '#ef4444' : '#38bdf8';
+      g1.fillText(`FUEL ${fuel}%`, 240, 46);
+      g1.fillStyle = hp < 35 ? '#ef4444' : '#4ade80';
+      g1.fillText(`BODY ${hp}%`, 240, 68);
     }
-
-    // Hero digital speed + gear badge
-    g1.fillStyle = '#f8fafc';
-    g1.font = 'bold 42px system-ui, sans-serif';
-    g1.textAlign = 'center';
-    g1.textBaseline = 'middle';
-    g1.fillText(String(speedKmh).padStart(3, '0'), 128, 52);
-
-    g1.fillStyle = '#94a3b8';
-    g1.font = 'bold 11px system-ui, sans-serif';
-    g1.fillText('KM/H', 128, 80);
-
-    // Left: Gear pill
-    g1.fillStyle = '#0f172a';
-    g1.fillRect(14, 34, 48, 44);
-    g1.strokeStyle = accent;
-    g1.strokeRect(14, 34, 48, 44);
-    g1.fillStyle = accent;
-    g1.font = 'bold 24px system-ui, sans-serif';
-    g1.fillText(gearStr, 38, 57);
-
-    // Right: Fuel & HP readouts
-    g1.textAlign = 'right';
-    g1.font = 'bold 13px system-ui, sans-serif';
-    g1.fillStyle = fuel < 25 ? '#ef4444' : '#38bdf8';
-    g1.fillText(`FUEL ${fuel}%`, 240, 46);
-    g1.fillStyle = hp < 35 ? '#ef4444' : '#4ade80';
-    g1.fillText(`BODY ${hp}%`, 240, 68);
     t1.needsUpdate = true;
 
-    // --- 2. Center Widescreen Infotainment & Live Street GPS ---
+    // --- 2. Bespoke Center Stack Display (Retro DIN FM / '69 Chrome AM-FM / Police MDT / Live GPS Radar) ---
     const { g2, t2 } = sc;
-    g2.fillStyle = '#070b16';
-    g2.fillRect(0, 0, 320, 144);
+    const ctrTheme = theme.centerTheme;
+    if (ctrTheme === 'retro_din_fm') {
+      // Rusty Hatchback: Single-DIN Green Matrix FM Radio + Manual HVAC Legend!
+      g2.fillStyle = '#090d0a';
+      g2.fillRect(0, 0, 320, 144);
+      g2.strokeStyle = '#22c55e';
+      g2.lineWidth = 3;
+      g2.strokeRect(8, 10, 304, 124);
+      g2.fillStyle = '#4ade80';
+      g2.font = 'bold 28px monospace';
+      g2.textAlign = 'center'; g2.textBaseline = 'middle';
+      g2.fillText('FM 98.4 MHz', 160, 52);
+      g2.font = 'bold 15px monospace';
+      g2.fillStyle = '#86efac';
+      g2.fillText(`METRO BEATS · ${info.clockHHMM || '08:00'}`, 160, 92);
+      g2.font = '12px monospace';
+      g2.fillStyle = '#16a34a';
+      g2.fillText('[1] [2] [3] [4] [BASS+]', 160, 118);
+    } else if (ctrTheme === 'retro_amfm') {
+      // '69 Stallion GT: Vintage Chrome Push-Button AM/FM Analog Dial Scale!
+      g2.fillStyle = '#14110f';
+      g2.fillRect(0, 0, 320, 144);
+      g2.strokeStyle = '#d4d4d8'; g2.lineWidth = 4;
+      g2.strokeRect(6, 8, 308, 128);
+      g2.fillStyle = '#fef3c7';
+      g2.font = 'bold 18px serif';
+      g2.textAlign = 'center'; g2.textBaseline = 'middle';
+      g2.fillText('54   70   90   110   140   160  AM', 160, 46);
+      g2.strokeStyle = '#ef4444'; g2.lineWidth = 4;
+      g2.beginPath(); g2.moveTo(148, 22); g2.lineTo(148, 72); g2.stroke();
+      for (let b = 0; b < 5; b++) {
+        g2.fillStyle = '#cbd5e1';
+        g2.fillRect(34 + b * 54, 92, 38, 26);
+      }
+    } else {
+      g2.fillStyle = '#070b16';
+      g2.fillRect(0, 0, 320, 144);
 
-    // Top status bar
-    g2.fillStyle = '#0f172a';
-    g2.fillRect(0, 0, 320, 26);
-    g2.fillStyle = accent;
-    g2.font = 'bold 12px system-ui, sans-serif';
-    g2.textAlign = 'left';
-    g2.textBaseline = 'middle';
-    g2.fillText(m.name.toUpperCase().slice(0, 22), 10, 13);
-    g2.fillStyle = '#e2e8f0';
-    g2.textAlign = 'right';
-    g2.fillText(info.clockHHMM || '08:00', 310, 13);
+      g2.fillStyle = ctrTheme === 'police_mdt' ? '#1e3a8a' : '#0f172a';
+      g2.fillRect(0, 0, 320, 26);
+      g2.fillStyle = ctrTheme === 'taxi_dispatch' ? '#facc15' : accent;
+      g2.font = 'bold 12px system-ui, sans-serif';
+      g2.textAlign = 'left';
+      g2.textBaseline = 'middle';
+      const headerTxt = ctrTheme === 'police_mdt' ? 'METRO PD · NCIC TACTICAL'
+        : ctrTheme === 'taxi_dispatch' ? 'METRO CAB · DISPATCH LIVE'
+        : ctrTheme === 'cargo_log' ? 'SWIFTCARGO · FLEET ROUTE'
+        : m.name.toUpperCase().slice(0, 22);
+      g2.fillText(headerTxt, 10, 13);
+      g2.fillStyle = '#e2e8f0';
+      g2.textAlign = 'right';
+      g2.fillText(info.clockHHMM || '08:00', 310, 13);
 
-    // Live top-down city street radar (left 200px)
-    const mapCx = 104;
-    const mapCy = 82;
-    const scale = 0.34;
-    g2.save();
-    g2.beginPath();
-    g2.rect(8, 30, 192, 104);
-    g2.clip();
-    g2.fillStyle = '#0b1324';
-    g2.fillRect(8, 30, 192, 104);
-    g2.translate(mapCx, mapCy);
-    // Rotate world so car's heading points UP on the nav screen!
-    g2.rotate((info.yaw || 0) - Math.PI);
-    const px = info.x || 0;
-    const pz = info.z || 0;
-    g2.strokeStyle = '#334155';
-    g2.lineWidth = 4;
-    for (const r of ROAD_LINES) {
+      const mapCx = 104;
+      const mapCy = 82;
+      const scale = 0.34;
+      g2.save();
       g2.beginPath();
-      g2.moveTo((r - px) * scale, (-170 - pz) * scale);
-      g2.lineTo((r - px) * scale, (170 - pz) * scale);
-      g2.stroke();
+      g2.rect(8, 30, 192, 104);
+      g2.clip();
+      g2.fillStyle = '#0b1324';
+      g2.fillRect(8, 30, 192, 104);
+      g2.translate(mapCx, mapCy);
+      g2.rotate((info.yaw || 0) - Math.PI);
+      const px = info.x || 0;
+      const pz = info.z || 0;
+      g2.strokeStyle = '#334155';
+      g2.lineWidth = 4;
+      for (const r of ROAD_LINES) {
+        g2.beginPath();
+        g2.moveTo((r - px) * scale, (-170 - pz) * scale);
+        g2.lineTo((r - px) * scale, (170 - pz) * scale);
+        g2.stroke();
+        g2.beginPath();
+        g2.moveTo((-170 - px) * scale, (r - pz) * scale);
+        g2.lineTo((170 - px) * scale, (r - pz) * scale);
+        g2.stroke();
+      }
+      // Show Metro Grand University campus landmark on in-car GPS!
+      const ux = (0 - px) * scale;
+      const uz = (-196 - pz) * scale;
+      g2.fillStyle = '#3b82f6';
+      g2.fillRect(ux - 14, uz - 5, 28, 10);
+      if (info.waypoint) {
+        const wx = (info.waypoint.x - px) * scale;
+        const wz = (info.waypoint.z - pz) * scale;
+        g2.strokeStyle = '#f43f5e';
+        g2.lineWidth = 2;
+        g2.beginPath();
+        g2.moveTo(0, 0);
+        g2.lineTo(wx, wz);
+        g2.stroke();
+        g2.fillStyle = '#fbbf24';
+        g2.beginPath();
+        g2.arc(wx, wz, 5, 0, Math.PI * 2);
+        g2.fill();
+      }
+      g2.restore();
+
+      g2.fillStyle = accent;
       g2.beginPath();
-      g2.moveTo((-170 - px) * scale, (r - pz) * scale);
-      g2.lineTo((170 - px) * scale, (r - pz) * scale);
-      g2.stroke();
-    }
-    if (info.waypoint) {
-      const wx = (info.waypoint.x - px) * scale;
-      const wz = (info.waypoint.z - pz) * scale;
-      g2.strokeStyle = '#f43f5e';
-      g2.lineWidth = 2;
-      g2.beginPath();
-      g2.moveTo(0, 0);
-      g2.lineTo(wx, wz);
-      g2.stroke();
-      g2.fillStyle = '#fbbf24';
-      g2.beginPath();
-      g2.arc(wx, wz, 5, 0, Math.PI * 2);
+      g2.moveTo(mapCx, mapCy - 6);
+      g2.lineTo(mapCx + 4.5, mapCy + 5);
+      g2.lineTo(mapCx - 4.5, mapCy + 5);
+      g2.closePath();
       g2.fill();
+      g2.strokeStyle = '#1e293b';
+      g2.lineWidth = 1.5;
+      g2.strokeRect(8, 30, 192, 104);
+
+      g2.fillStyle = '#0f172a';
+      g2.fillRect(208, 30, 104, 104);
+      g2.fillStyle = accent;
+      g2.textAlign = 'left';
+      g2.font = 'bold 11px system-ui, sans-serif';
+      const cardTitle = ctrTheme === 'police_mdt' ? 'APB UNIT 04'
+        : ctrTheme === 'taxi_dispatch' ? 'RATE 1 · HIRED'
+        : ctrTheme === 'hyper_telem' ? 'AERO · V12'
+        : ctrTheme === 'truck_util' ? '4WD TORQUE'
+        : ctrTheme === 'cargo_log' ? 'MANIFEST OK'
+        : isExotic ? 'TRACK MODE' : 'COMFORT+';
+      g2.fillText(cardTitle, 214, 46);
+      g2.fillStyle = '#f8fafc';
+      g2.font = 'bold 15px system-ui, sans-serif';
+      g2.fillText(`${speedKmh} km/h`, 214, 70);
+      g2.fillStyle = '#94a3b8';
+      g2.font = '11px system-ui, sans-serif';
+      g2.fillText(ctrTheme === 'police_mdt' ? 'RADAR ACTIVE' : 'METRO FM · LIVE', 214, 94);
+      g2.fillStyle = '#4ade80';
+      g2.fillText(ctrTheme === 'taxi_dispatch' ? '+30% CAB BONUS' : 'A/C 20.5°C', 214, 116);
     }
-    g2.restore();
-
-    // Car arrow at radar center
-    g2.fillStyle = accent;
-    g2.beginPath();
-    g2.moveTo(mapCx, mapCy - 6);
-    g2.lineTo(mapCx + 4.5, mapCy + 5);
-    g2.lineTo(mapCx - 4.5, mapCy + 5);
-    g2.closePath();
-    g2.fill();
-    g2.strokeStyle = '#1e293b';
-    g2.lineWidth = 1.5;
-    g2.strokeRect(8, 30, 192, 104);
-
-    // Right media / drive-mode card
-    g2.fillStyle = '#0f172a';
-    g2.fillRect(208, 30, 104, 104);
-    g2.fillStyle = accent;
-    g2.textAlign = 'left';
-    g2.font = 'bold 11px system-ui, sans-serif';
-    g2.fillText(isExotic ? 'TRACK MODE' : m.style === 'taxi' ? 'FARE METER' : 'COMFORT+', 216, 46);
-    g2.fillStyle = '#f8fafc';
-    g2.font = 'bold 15px system-ui, sans-serif';
-    g2.fillText(`${speedKmh} km/h`, 216, 70);
-    g2.fillStyle = '#94a3b8';
-    g2.font = '11px system-ui, sans-serif';
-    g2.fillText('METRO FM · LIVE', 216, 94);
-    g2.fillStyle = '#4ade80';
-    g2.fillText('A/C 20.5°C', 216, 116);
     t2.needsUpdate = true;
   }
 
   return {
     group,
+    styleId: style,
+    wheelType: theme.wheelType,
+    clusterTheme: theme.clusterTheme,
+    centerTheme: theme.centerTheme,
+    signatureProps,
     driverEye,
     steerWheel,
     driverHands,
