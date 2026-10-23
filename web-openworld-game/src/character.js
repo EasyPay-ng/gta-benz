@@ -96,6 +96,10 @@ const G = {
   parcelTape: new THREE.BoxGeometry(0.41, 0.05, 0.31),
 };
 
+// Seated hips drop by this much so the body rests on the cushion instead of
+// hovering above it (hip joint sits at local y = 0.89 in the rig).
+const SIT_HIP_DROP = -0.87;
+
 const SHARED_MAT = {
   dark: new THREE.MeshStandardMaterial({ color: 0x141418, roughness: 0.55, metalness: 0.1 }),
   white: new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45, metalness: 0.05 }),
@@ -128,6 +132,31 @@ function part(geo, mat, x = 0, y = 0, z = 0) {
   return m;
 }
 
+// Scripted prop-use animations: which prop you hold in your right hand while doing them.
+export const ACTION_ITEMS = {
+  drink: 'glass',
+  eat: 'plate',
+  cook: 'pan',
+  read: 'book',
+  pool: 'cue',
+  tv: 'remote',
+  movie: 'remote',
+  curls: 'dumbbell',
+  run: null,
+  benchpress: 'dumbbell',
+  water: 'can',
+  experiment: 'flask',
+  piano: null,
+  sleep: null,
+  sunbathe: null,
+  rest: null,
+  sit: null,
+  type: null,
+  talk: null,
+  admire: null,
+  switch: null,
+};
+
 export class Character {
   constructor(appearance) {
     this.group = new THREE.Group();
@@ -154,7 +183,15 @@ export class Character {
     this.occupation = null;
     this.carrying = false;
     this.firstPerson = false;
+    this.action = null;   // { id, t, duration, loop } scripted prop animation
+    this.seat = null;     // { pose, surface, forward, recline } geometry of the prop being used
     this._build();
+    this._held = new THREE.Group();
+    this._held.position.set(0, -0.31, 0.05);
+    this.foreArmR.add(this._held);
+    this._heldCache = new Map();
+    this._heldKind = null;
+    this._buildHeldItems();
     this.setAppearance(appearance);
   }
 
@@ -618,6 +655,83 @@ export class Character {
     this.parcel.visible = on;
   }
 
+  /** Play a scripted prop-use animation ('drink', 'piano', 'pool', 'tv' …). */
+  playAction(id, { duration = 3, loop = false } = {}) {
+    if (!id) return false;
+    const item = ACTION_ITEMS[id] || null;
+    this.action = { id, t: 0, duration, loop };
+    this._showHeld(item);
+    return true;
+  }
+
+  stopAction() {
+    this.action = null;
+    this._showHeld(null);
+  }
+
+  clearAction() { this.stopAction(); }
+
+  /** True while a scripted prop animation is playing. */
+  isActing() {
+    return !!this.action;
+  }
+
+  _buildHeldItems() {
+    const m = this.mats;
+    const glassClear = new THREE.MeshPhysicalMaterial({
+      color: 0xd8eef7, transparent: true, opacity: 0.42, roughness: 0.06, metalness: 0.05,
+    });
+    const mk = (kind) => {
+      const g = new THREE.Group();
+      const mesh = (geo, mat, x, y, z) => {
+        const o = new THREE.Mesh(geo, mat);
+        o.position.set(x, y, z);
+        o.castShadow = true;
+        g.add(o);
+        return o;
+      };
+      if (kind === 'glass') {
+        mesh(new THREE.CylinderGeometry(0.042, 0.034, 0.13, 10), glassClear, 0, -0.02, 0);
+        mesh(new THREE.CylinderGeometry(0.036, 0.03, 0.085, 10), new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.3 }), 0, -0.045, 0);
+      } else if (kind === 'book') {
+        const cover = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.7 });
+        mesh(new THREE.BoxGeometry(0.2, 0.27, 0.05), cover, 0, -0.1, 0);
+        mesh(new THREE.BoxGeometry(0.17, 0.24, 0.055), new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.9 }), 0.012, -0.1, 0);
+      } else if (kind === 'cue') {
+        const cue = mesh(new THREE.CylinderGeometry(0.014, 0.026, 1.55, 8), new THREE.MeshStandardMaterial({ color: 0xd4a373, roughness: 0.55 }), 0, -0.86, 0);
+        cue.rotation.z = 0;
+      } else if (kind === 'remote') {
+        mesh(new THREE.BoxGeometry(0.055, 0.16, 0.03), m.hat, 0, -0.05, 0);
+      } else if (kind === 'dumbbell') {
+        mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.22, 8), SHARED_MAT.chrome || m.metal, 0, -0.06, 0).rotation.z = Math.PI / 2;
+        for (const dx of [-0.12, 0.12]) mesh(new THREE.SphereGeometry(0.062, 10, 8), m.hat, dx, -0.06, 0);
+      } else if (kind === 'pan') {
+        mesh(new THREE.CylinderGeometry(0.15, 0.13, 0.045, 14), m.metal, 0, -0.18, 0.1);
+        mesh(new THREE.BoxGeometry(0.03, 0.03, 0.24), m.hat, 0, -0.18, -0.06);
+      } else if (kind === 'can') {
+        mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.2, 12), m.accent, 0, -0.14, 0);
+        const spout = mesh(new THREE.CylinderGeometry(0.018, 0.026, 0.24, 8), m.accent, 0, -0.09, 0.12);
+        spout.rotation.x = 0.9;
+      } else if (kind === 'flask') {
+        mesh(new THREE.CylinderGeometry(0.05, 0.065, 0.16, 12), glassClear, 0, -0.12, 0);
+        mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 10), new THREE.MeshStandardMaterial({ color: 0x22d3ee, roughness: 0.3 }), 0, 0.0, 0);
+      } else if (kind === 'plate') {
+        mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.03, 16), SHARED_MAT.white || m.accent, 0, -0.13, 0.02);
+      }
+      g.visible = false;
+      this._held.add(g);
+      return g;
+    };
+    for (const kind of ['glass', 'book', 'cue', 'remote', 'dumbbell', 'pan', 'can', 'flask', 'plate']) {
+      this._heldCache.set(kind, mk(kind));
+    }
+  }
+
+  _showHeld(kind) {
+    this._heldKind = kind;
+    for (const [k, g] of this._heldCache) g.visible = k === kind;
+  }
+
   setPose(pose, duration = 0) {
     this.pose = pose;
     this.poseTimer = duration;
@@ -786,12 +900,20 @@ export class Character {
     if (this.pose === 'sit') {
       this.jumpY = 0; this.jumpVy = 0;
       this._resetJoints();
+      // hips drop onto the seat surface (the group origin sits on the cushion)
       this.legL.rotation.x = this.legR.rotation.x = -1.35;
       this.shinL.rotation.x = this.shinR.rotation.x = 1.18;
-      this.armL.rotation.x = this.armR.rotation.x = -1.05;
-      this.foreArmL.rotation.x = this.foreArmR.rotation.x = -0.45;
-      body.position.y = 0;
+      this.legL.rotation.z = -0.05;
+      this.legR.rotation.z = 0.05;
+      this.armL.rotation.set(-0.92, 0, 0.24);
+      this.armR.rotation.set(-0.92, 0, -0.24);
+      this.foreArmL.rotation.x = -0.62;
+      this.foreArmR.rotation.x = -0.62;
+      this.legL.rotation.x -= 0.05;
+      body.position.y = SIT_HIP_DROP;
+      body.position.z = 0;
       body.rotation.x = 0;
+      this._actionTick(dt);
       return;
     }
 
@@ -799,16 +921,20 @@ export class Character {
     if (this.pose === 'lie') {
       this.jumpY = 0; this.jumpVy = 0;
       this._resetJoints();
-      body.rotation.set(-1.42, 0, 0);
-      body.position.y = 0.55;
-      this.legL.rotation.x = 0.08;
-      this.legR.rotation.x = -0.06;
-      this.shinL.rotation.x = 0.05;
-      this.shinR.rotation.x = 0.05;
-      this.armL.rotation.set(0.25, 0, 0.42);
-      this.armR.rotation.set(0.25, 0, -0.42);
-      this.foreArmL.rotation.x = -0.25;
-      this.foreArmR.rotation.x = -0.25;
+      const recline = this.seat?.recline || 0;
+      const forward = this.seat?.forward ?? 0.9;
+      body.rotation.set(-Math.PI / 2 + recline, 0, 0);
+      body.position.set(0, 0.21, forward);
+      this.legL.rotation.set(0.05, 0, -0.05);
+      this.legR.rotation.set(0.05, 0, 0.05);
+      this.shinL.rotation.x = 0.1;
+      this.shinR.rotation.x = 0.1;
+      this.armL.rotation.set(0.16, 0, 0.54);
+      this.armR.rotation.set(0.16, 0, -0.54);
+      this.foreArmL.rotation.x = -0.14;
+      this.foreArmR.rotation.x = -0.14;
+      this.headGroup.rotation.x = -0.2;
+      this._actionTick(dt);
       return;
     }
 
@@ -835,8 +961,9 @@ export class Character {
 
     body.rotation.x *= 0.8;
 
-    // Movement cancels active emotes automatically
+    // Movement cancels active emotes & scripted prop animations
     if (speed > 0.25 && this.emote) this.clearEmote();
+    if (speed > 0.25 && this.action) this.stopAction();
 
     // Airborne jump pose
     if (this.jumpY > 0.02) {
@@ -933,6 +1060,268 @@ export class Character {
       }
       this.torsoGroup.scale.y = 1 + Math.sin(this.phase * 1.2) * 0.01;
     }
+    this._actionTick(dt);
+  }
+
+  /**
+   * Scripted prop-use animations. Runs after the base pose so it can override
+   * any joint: drinking at the bar, playing the piano, taking a pool shot,
+   * watching TV, lifting weights, cooking, reading, watering plants…
+   */
+  _actionTick(dt) {
+    const a = this.action;
+    if (!a) return false;
+    a.t += dt;
+    if (!a.loop && a.t >= a.duration) {
+      this.stopAction();
+      return false;
+    }
+    const t = a.t;
+    const T = this.torsoGroup;
+    const H = this.headGroup;
+    switch (a.id) {
+      case 'sit': {
+        T.rotation.z = Math.sin(t * 0.9) * 0.018;
+        T.rotation.y = Math.sin(t * 0.45) * 0.05;
+        H.rotation.y = Math.sin(t * 0.32) * 0.22;
+        H.rotation.x = Math.cos(t * 0.55) * 0.05;
+        this.legL.rotation.x = -1.35 + Math.sin(t * 0.6) * 0.05;
+        break;
+      }
+      case 'sleep': {
+        T.scale.y = 1 + Math.sin(t * 1.35) * 0.014;
+        H.rotation.z = 0.14 + Math.sin(t * 0.5) * 0.03;
+        H.rotation.y = 0.12;
+        this.legL.rotation.x = 0.03;
+        this.legR.rotation.x = 0.07;
+        break;
+      }
+      case 'rest': {
+        T.scale.y = 1 + Math.sin(t * 1.7) * 0.012;
+        this.armL.rotation.set(-0.5, 0, 0.62);
+        this.armR.rotation.set(-0.5, 0, -0.62);
+        this.foreArmL.rotation.x = -1.5;
+        this.foreArmR.rotation.x = -1.5;
+        H.rotation.x = -0.1;
+        break;
+      }
+      case 'sunbathe': {
+        // hands behind the head, one knee up, soaking up the sun
+        this.armL.rotation.set(-2.35, 0, 0.72);
+        this.armR.rotation.set(-2.35, 0, -0.72);
+        this.foreArmL.rotation.x = -1.75;
+        this.foreArmR.rotation.x = -1.75;
+        this.legR.rotation.x = -0.55;
+        this.shinR.rotation.x = 0.85;
+        this.legL.rotation.x = 0.12;
+        H.rotation.x = -0.32;
+        break;
+      }
+      case 'tv': {
+        // slouched on the sofa, remote in hand, reacting to the screen
+        T.rotation.x = -0.04 + Math.sin(t * 0.7) * 0.015;
+        H.rotation.y = Math.sin(t * 0.21) * 0.06;
+        H.rotation.x = -0.05 + Math.sin(t * 0.9) * 0.03;
+        this.armR.rotation.set(-0.75, 0, -0.5);
+        this.foreArmR.rotation.set(-0.95 + Math.sin(t * 6.5) * 0.05, 0, 0.1);
+        this.armL.rotation.set(-0.55, 0, 0.38);
+        this.foreArmL.rotation.x = -0.95;
+        const laugh = Math.max(0, Math.sin(t * 0.75 - 1.2));
+        if (laugh > 0.86) {
+          T.rotation.x -= 0.06;
+          H.rotation.x += 0.08;
+          this.armL.rotation.x -= 0.2;
+        }
+        break;
+      }
+      case 'movie': {
+        H.rotation.x = -0.2 + Math.sin(t * 0.4) * 0.03;
+        this.armR.rotation.set(-1.35, 0, -0.32);
+        this.foreArmR.rotation.x = -1.5 + Math.sin(t * 2.2) * 0.12;
+        this.armL.rotation.set(-1.15, 0, 0.36);
+        this.foreArmL.rotation.x = -1.4;
+        break;
+      }
+      case 'drink': {
+        // raise the glass, two sips, head tips back, glass returns to the bar
+        const cycle = (t % 2.0) / 2.0;
+        const raise = cycle < 0.22 ? cycle / 0.22 : cycle < 0.62 ? 1 : cycle < 0.9 ? 1 - (cycle - 0.62) / 0.28 : 0;
+        const sip = Math.max(0, Math.sin((cycle - 0.24) / 0.4 * Math.PI));
+        this.armR.rotation.set(-1.05 - raise * 0.95, 0, -0.42 + raise * 0.12);
+        this.foreArmR.rotation.set(-0.7 - raise * 0.95, 0, 0.15);
+        H.rotation.x = -0.08 - sip * 0.3;
+        T.rotation.x = -sip * 0.05;
+        this.armL.rotation.set(-0.18, 0, 0.3);
+        this.foreArmL.rotation.x = -0.35;
+        if (raise > 0.02) break;
+        break;
+      }
+      case 'eat': {
+        const cycle = (t % 1.7) / 1.7;
+        const bite = cycle < 0.5 ? Math.sin(cycle * Math.PI) : 0;
+        this.armR.rotation.set(-1.1 - bite * 0.75, 0, -0.45);
+        this.foreArmR.rotation.set(-1.0 - bite * 0.7, 0, 0.1);
+        this.armL.rotation.set(-0.8, 0, 0.5);
+        this.foreArmL.rotation.x = -1.4;
+        H.rotation.x = 0.1 - bite * 0.22;
+        T.rotation.y = Math.sin(t * 0.6) * 0.04;
+        break;
+      }
+      case 'piano': {
+        // both hands bounce across the keys, head nods with the beat
+        const beat = t * 6.6;
+        const l = Math.sin(beat) * 0.5 + 0.5;
+        const r = Math.sin(beat + 1.9) * 0.5 + 0.5;
+        this.armL.rotation.set(-1.02 - l * 0.08, 0, 0.4);
+        this.armR.rotation.set(-1.02 - r * 0.08, 0, -0.4);
+        this.foreArmL.rotation.set(-1.12 - l * 0.16, 0, 0);
+        this.foreArmR.rotation.set(-1.12 - r * 0.16, 0, 0);
+        T.rotation.x = 0.1;
+        T.rotation.y = Math.sin(beat * 0.25) * 0.07;
+        H.rotation.x = 0.26 + Math.sin(beat * 0.5) * 0.05;
+        H.rotation.y = Math.sin(beat * 0.25) * 0.1;
+        this.legL.rotation.x = -0.1 + Math.sin(beat * 0.5) * 0.05;
+        break;
+      }
+      case 'pool': {
+        // lean over the table, cue back, strike, straighten up, chalk the tip
+        const cycle = (t % 4.4) / 4.4;
+        const aim = cycle < 0.55 ? 1 : cycle < 0.7 ? 1 - (cycle - 0.55) / 0.15 : 0.15;
+        const strike = cycle > 0.28 && cycle < 0.34 ? Math.sin(((cycle - 0.28) / 0.06) * Math.PI) : 0;
+        T.rotation.x = 0.3 * aim;
+        T.rotation.y = -0.16 * aim;
+        this.armR.rotation.set(-1.25 - aim * 0.35, 0, -0.2 - aim * 0.15);
+        this.foreArmR.rotation.set(-0.5 + aim * 0.1 - strike * 0.45, 0, 0);
+        this.armL.rotation.set(-1.05 - aim * 0.35, 0, 0.34);
+        this.foreArmL.rotation.x = -0.9;
+        H.rotation.x = 0.16 * aim;
+        H.rotation.y = -0.1 * aim;
+        this.legL.rotation.x = 0.12 * aim;
+        this.legR.rotation.x = -0.14 * aim;
+        break;
+      }
+      case 'read': {
+        // book held in both hands, eyes scanning, page turn every ~3 s
+        const page = (t % 3.2) / 3.2;
+        const turn = page > 0.86 ? Math.sin(((page - 0.86) / 0.14) * Math.PI) : 0;
+        this.armL.rotation.set(-0.95 - turn * 0.12, 0, 0.34);
+        this.armR.rotation.set(-0.95, 0, -0.34);
+        this.foreArmL.rotation.set(-1.35 - turn * 0.25, 0, 0);
+        this.foreArmR.rotation.set(-1.35, 0, 0);
+        H.rotation.x = 0.3 + Math.sin(t * 0.8) * 0.04;
+        T.rotation.x = 0.05;
+        break;
+      }
+      case 'type': {
+        const tap = Math.sin(t * 13);
+        this.armL.rotation.set(-0.88, 0, 0.26);
+        this.armR.rotation.set(-0.88, 0, -0.26);
+        this.foreArmL.rotation.set(-1.02 + tap * 0.05, 0, 0);
+        this.foreArmR.rotation.set(-1.02 - tap * 0.05, 0, 0);
+        H.rotation.x = 0.18;
+        T.rotation.x = 0.06;
+        break;
+      }
+      case 'cook': {
+        // stirring a pan on the hob, occasional seasoning shake
+        const stir = t * 4.2;
+        this.armR.rotation.set(-1.02, 0, -0.28 + Math.sin(stir) * 0.12);
+        this.foreArmR.rotation.set(-1.15, 0, Math.sin(stir) * 0.22);
+        this.armL.rotation.set(-0.92, 0, 0.3);
+        this.foreArmL.rotation.set(-1.2 + Math.cos(stir * 1.3) * 0.08, 0, 0);
+        T.rotation.x = 0.08;
+        H.rotation.x = 0.3;
+        break;
+      }
+      case 'run': {
+        // treadmill: fast stride, pumping arms, bouncing head
+        const runPhase = t * 11;
+        const s = Math.sin(runPhase);
+        this.legL.rotation.x = s * 0.7;
+        this.legR.rotation.x = -s * 0.7;
+        this.shinL.rotation.x = 0.25 + Math.max(0, -Math.cos(runPhase)) * 0.95;
+        this.shinR.rotation.x = 0.25 + Math.max(0, Math.cos(runPhase)) * 0.95;
+        this.armL.rotation.set(-s * 0.75 - 0.2, 0, 0.1);
+        this.armR.rotation.set(s * 0.75 - 0.2, 0, -0.1);
+        this.foreArmL.rotation.x = -1.15;
+        this.foreArmR.rotation.x = -1.15;
+        this.body.position.y = Math.abs(Math.cos(runPhase)) * 0.06;
+        T.rotation.x = 0.16;
+        H.rotation.x = -0.1;
+        break;
+      }
+      case 'benchpress': {
+        const push = (Math.sin(t * 3.4) + 1) / 2;
+        this.armL.rotation.set(-2.5 + push * 0.85, 0, 0.4);
+        this.armR.rotation.set(-2.5 + push * 0.85, 0, -0.4);
+        this.foreArmL.rotation.x = -0.5;
+        this.foreArmR.rotation.x = -0.5;
+        T.rotation.x = 0.12;
+        H.rotation.x = -0.18;
+        break;
+      }
+      case 'curls': {
+        const c = (Math.sin(t * 3.6) + 1) / 2;
+        this.armR.rotation.set(-0.55 - c * 1.15, 0, -0.2);
+        this.foreArmR.rotation.set(-0.6 - c * 1.35, 0, 0);
+        this.armL.rotation.set(-0.3, 0, 0.16);
+        this.foreArmL.rotation.x = -0.3;
+        T.rotation.y = Math.sin(t * 1.8) * 0.05;
+        H.rotation.x = 0.08;
+        break;
+      }
+      case 'water': {
+        const pour = Math.max(0, Math.sin(t * 1.7));
+        this.armR.rotation.set(-0.95 - pour * 0.25, 0, -0.25);
+        this.foreArmR.rotation.set(-1.0 - pour * 0.35, 0, 0);
+        this.armL.rotation.set(-0.6, 0, 0.34);
+        this.foreArmL.rotation.x = -0.9;
+        T.rotation.x = 0.12 + pour * 0.08;
+        H.rotation.x = 0.3;
+        break;
+      }
+      case 'admire': {
+        const sway = Math.sin(t * 0.6);
+        this.armL.rotation.set(0.32, 0, 0.16);
+        this.armR.rotation.set(0.32, 0, -0.16);
+        this.foreArmL.rotation.set(0.2, 0, -0.9);
+        this.foreArmR.rotation.set(0.2, 0, 0.9);
+        H.rotation.y = sway * 0.3;
+        H.rotation.x = -0.12 + Math.sin(t * 0.5) * 0.05;
+        T.rotation.y = sway * 0.08;
+        break;
+      }
+      case 'switch': {
+        const reach = Math.max(0, Math.sin(t * 2.4));
+        this.armR.rotation.set(-1.1 - reach * 0.75, 0, -0.3);
+        this.foreArmR.rotation.set(-0.9 - reach * 0.4, 0, 0);
+        H.rotation.x = -0.12 * reach;
+        break;
+      }
+      case 'talk': {
+        const g = Math.sin(t * 3.1);
+        this.armR.rotation.set(-0.9 - Math.max(0, g) * 0.35, 0, -0.36);
+        this.foreArmR.rotation.set(-0.95 - Math.max(0, g) * 0.4, 0, 0.1);
+        this.armL.rotation.set(-0.5, 0, 0.34);
+        this.foreArmL.rotation.x = -0.6;
+        H.rotation.y = Math.sin(t * 1.4) * 0.14;
+        H.rotation.x = Math.sin(t * 2.6) * 0.06;
+        break;
+      }
+      case 'experiment': {
+        const shake = Math.sin(t * 8.5);
+        this.armR.rotation.set(-1.15, 0, -0.28 + shake * 0.06);
+        this.foreArmR.rotation.set(-1.3 + shake * 0.12, 0, 0);
+        this.armL.rotation.set(-1.0, 0, 0.3);
+        this.foreArmL.rotation.x = -1.2;
+        T.rotation.x = 0.08;
+        H.rotation.x = 0.26;
+        break;
+      }
+      default:
+        break;
+    }
+    return true;
   }
 
   dispose() {

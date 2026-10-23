@@ -316,6 +316,190 @@ export class City {
     return c;
   }
 
+  // =========================================================================
+  // Live TV & cinema screens (canvas textures that actually show programmes)
+  // =========================================================================
+  _tvSetup() {
+    if (this._tv) return this._tv;
+    const make = (w, h) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false });
+      return { canvas, ctx, texture, mat };
+    };
+    this._tv = {
+      tv: make(320, 180),
+      cinema: make(512, 216),
+      off: new THREE.MeshBasicMaterial({ color: 0x0a1018 }),
+      active: new Set(),
+      acc: 0,
+      channel: 0,
+      channelT: 0,
+    };
+    this._drawScreen(this._tv.tv, 'news', 0);
+    this._drawScreen(this._tv.cinema, 'movie', 0);
+    return this._tv;
+  }
+
+  /** Turn a registered TV / cinema screen mesh on (showing a channel) or off. */
+  setTVOn(mesh, on) {
+    if (!mesh) return;
+    const tv = this._tvSetup();
+    if (on) {
+      mesh.material = mesh.userData.cinema ? tv.cinema.mat : tv.tv.mat;
+      tv.active.add(mesh);
+      tv.acc = 99; // repaint on the next frame
+    } else {
+      mesh.material = tv.off;
+      tv.active.delete(mesh);
+    }
+  }
+
+  isTVOn(mesh) {
+    return !!this._tv && this._tv.active.has(mesh);
+  }
+
+  _drawScreen(target, mode, t) {
+    const { ctx, canvas } = target;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.save();
+    if (mode === 'movie') {
+      // widescreen film: drifting desert horizon, sun and a hero silhouette
+      const sky = ctx.createLinearGradient(0, 0, 0, h);
+      sky.addColorStop(0, '#0b1026');
+      sky.addColorStop(0.55, '#7c2d12');
+      sky.addColorStop(1, '#f59e0b');
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, w, h);
+      const sun = h * 0.62 + Math.sin(t * 0.2) * 4;
+      ctx.fillStyle = '#fde68a';
+      ctx.beginPath();
+      ctx.arc(w * 0.68, sun, h * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1f2937';
+      ctx.fillRect(0, h * 0.72, w, h * 0.28);
+      // dunes
+      ctx.fillStyle = '#b45309';
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      for (let x = 0; x <= w; x += 8) {
+        ctx.lineTo(x, h * 0.8 - Math.sin(x * 0.02 + t * 0.4) * h * 0.05);
+      }
+      ctx.lineTo(w, h);
+      ctx.closePath();
+      ctx.fill();
+      // lone rider silhouette
+      const rx = w * 0.35 + Math.sin(t * 0.35) * 10;
+      ctx.fillStyle = '#0b1026';
+      ctx.fillRect(rx - 8, h * 0.6, 16, h * 0.12);
+      ctx.beginPath();
+      ctx.arc(rx, h * 0.58, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillRect(0, 0, w, h * 0.09);
+      ctx.fillRect(0, h * 0.91, w, h * 0.09);
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.fillText('THE LONG ROAD', w * 0.06, h * 0.97);
+      ctx.restore();
+      return;
+    }
+    if (mode === 'sports') {
+      ctx.fillStyle = '#166534';
+      ctx.fillRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h); ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, h * 0.24, 0, Math.PI * 2); ctx.stroke();
+      // moving ball
+      const bx = w / 2 + Math.cos(t * 1.3) * w * 0.3;
+      const by = h / 2 + Math.sin(t * 1.7) * h * 0.28;
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath(); ctx.arc(bx, by, 5, 0, Math.PI * 2); ctx.fill();
+      // players
+      for (let i = 0; i < 6; i++) {
+        const px = w * 0.16 + i * w * 0.13 + Math.sin(t * 2 + i) * 6;
+        const py = h * 0.55 + Math.cos(t * 1.6 + i * 1.3) * h * 0.16;
+        ctx.fillStyle = i % 2 ? '#dc2626' : '#1d4ed8';
+        ctx.fillRect(px - 2, py - 8, 4, 12);
+      }
+      ctx.fillStyle = 'rgba(15,23,42,0.88)';
+      ctx.fillRect(0, 0, w, h * 0.14);
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = 'bold 14px system-ui, sans-serif';
+      ctx.fillText('METRO SPORTS  ·  HARBOR 2 - 1 LAGOON', w * 0.05, h * 0.1);
+      ctx.restore();
+      return;
+    }
+    if (mode === 'cartoon') {
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(0, h * 0.72, w, h * 0.28);
+      ctx.fillStyle = '#fde047';
+      ctx.beginPath();
+      ctx.arc(w * 0.15, h * 0.18, h * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      // bouncing character
+      const hop = Math.abs(Math.sin(t * 3.2)) * h * 0.22;
+      const cx = w * 0.35 + Math.sin(t * 0.8) * w * 0.1;
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(cx, h * 0.6 - hop, h * 0.11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(cx - 3, h * 0.58 - hop, 2, 2);
+      ctx.fillRect(cx + 2, h * 0.58 - hop, 2, 2);
+      ctx.fillRect(cx - 5, h * 0.63 - hop, 10, 2);
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillText('BENNY & THE METRO CREW', w * 0.05, h * 0.95);
+      ctx.restore();
+      return;
+    }
+    // news studio
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, '#0b1e3a');
+    bg.addColorStop(1, '#1e3a8a');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#0ea5e9';
+    ctx.fillRect(0, h * 0.16, w, 3);
+    // desk
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(w * 0.18, h * 0.72, w * 0.64, h * 0.28);
+    // anchor
+    const nod = Math.sin(t * 1.4) * 2;
+    ctx.fillStyle = '#f5d0a9';
+    ctx.beginPath();
+    ctx.arc(w * 0.5, h * 0.44 + nod, h * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(w * 0.45, h * 0.53 + nod, w * 0.1, h * 0.14);
+    ctx.fillStyle = '#22d3ee';
+    ctx.fillRect(w * 0.47, h * 0.55 + nod, w * 0.06, h * 0.008);
+    // headline + ticker
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.fillText('METRO NEWS', w * 0.05, h * 0.12);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, h * 0.86, w, h * 0.14);
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = 'bold 11px system-ui, sans-serif';
+    const ticker = 'SOUTH WATERFRONT OPENS  ·  METRO 2 - 1 LAGOON  ·  NEW EXOTICS AT METRO MOTORS  ·  GRAND MERIDIAN HOTEL NOW TAKING BOOKINGS  ·  ';
+    const off = (t * 42) % (w * 0.6);
+    ctx.fillText(ticker, w * 0.02 - off, h * 0.95);
+    ctx.fillText(ticker, w * 0.02 - off + w * 0.6, h * 0.95);
+    ctx.restore();
+  }
+
   _propMaterials() {
     if (this._pm) return this._pm;
     const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.66, metalness: 0.12, ...extra });
@@ -335,8 +519,73 @@ export class City {
       warm: new THREE.MeshBasicMaterial({ color: 0xfdba74 }),
       glass: this.mats.glass,
       carpet: std(0x6b7280, { roughness: 0.95 }),
+      plaster: std(0xe7e2d9, { roughness: 0.92, metalness: 0.02 }),
+      plasterWarm: std(0xded3c4, { roughness: 0.93, metalness: 0.02 }),
+      skirting: std(0x3f3f46, { roughness: 0.6, metalness: 0.1 }),
+      windowGlass: new THREE.MeshStandardMaterial({
+        color: 0xa8cbe0, emissive: 0x4f7fa3, emissiveIntensity: 0.42,
+        roughness: 0.12, metalness: 0.18, transparent: true, opacity: 0.92,
+      }),
+      frame: std(0x27272a, { roughness: 0.45, metalness: 0.4 }),
+      ceiling: std(0xf4f4f2, { roughness: 0.95 }),
     };
     return this._pm;
+  }
+
+  /**
+   * Real interior wall lining for one room: painted plaster walls, skirting
+   * boards, and proper framed windows instead of the exterior facade texture
+   * showing through from inside.
+   */
+  _interiorWalls(group, { w, d, h, sill = 0.95, head = 2.45, doorW = 0, doorH = 3.5, mat = null, warm = false }) {
+    const m = this._propMaterials();
+    const wall = mat || (warm ? m.plasterWarm : m.plaster);
+    const t = 0.09;
+    const RW = w;
+    const RD = d;
+    const mid = (sill + head) / 2;
+    const bandH = head - sill;
+    const addWindow = (cx, cz, len, vertical) => {
+      const bw = vertical ? t : len;
+      const bd = vertical ? len : t;
+      // glass + sill + head + mullions
+      this.box(group, cx, mid, cz, vertical ? Math.max(0.03, t * 0.55) : len, bandH, vertical ? len : Math.max(0.03, t * 0.55), m.windowGlass, { cast: false, receive: false });
+      this.box(group, cx, sill - 0.06, cz, vertical ? 0.24 : len + 0.1, 0.12, vertical ? len + 0.1 : 0.24, m.frame, { cast: false });
+      const posts = Math.max(1, Math.round(len / 2.1));
+      for (let i = 0; i <= posts; i++) {
+        const f = -len / 2 + (len / posts) * i;
+        this.box(group, vertical ? cx : cx + f, mid, vertical ? cz + f : cz, vertical ? 0.14 : 0.09, bandH + 0.1, vertical ? 0.09 : 0.14, m.frame, { cast: false });
+      }
+      this.box(group, cx, head + 0.05, cz, vertical ? 0.2 : len + 0.1, 0.1, vertical ? len + 0.1 : 0.2, m.frame, { cast: false });
+      // plaster above & below the window band
+      this.box(group, cx, sill / 2, cz, bw, sill, bd, wall, { cast: false });
+      this.box(group, cx, (h + head) / 2, cz, bw, Math.max(0.12, h - head), bd, wall, { cast: false });
+    };
+    const addWall = (cx, cz, len, vertical, doorGap = false) => {
+      if (!doorGap) {
+        this.box(group, cx, h / 2, cz, vertical ? t : len, h, vertical ? len : t, wall, { cast: false });
+        this.box(group, cx, 0.07, cz, vertical ? t + 0.04 : len + 0.02, 0.14, vertical ? len + 0.02 : t + 0.04, m.skirting, { cast: false });
+        addWindow(cx, cz, len, vertical);
+        return;
+      }
+      // front wall with a doorway: two segments either side of the opening
+      const seg = Math.max(0.2, (len - doorW) / 2);
+      for (const sgn of [-1, 1]) {
+        const off = sgn * (doorW / 2 + seg / 2);
+        this.box(group, cx + off, h / 2, cz, vertical ? t : seg, h, vertical ? seg : t, wall, { cast: false });
+        this.box(group, cx + off, 0.07, cz, vertical ? t + 0.04 : seg, 0.14, vertical ? seg : t + 0.04, m.skirting, { cast: false });
+        addWindow(cx + off, cz, seg, vertical);
+      }
+      // lintel over the doorway
+      this.box(group, cx, doorH + (h - doorH) / 2, cz, vertical ? t : doorW + 0.2, h - doorH, vertical ? doorW + 0.2 : t, wall, { cast: false });
+      this.box(group, cx, doorH + 0.06, cz, vertical ? 0.2 : doorW + 0.1, 0.12, vertical ? doorW + 0.1 : 0.2, m.frame, { cast: false });
+    };
+    addWall(0, -RD / 2 + t / 2, RW - t * 2, false);
+    addWall(0, RD / 2 - t / 2, RW - t * 2, false, doorW > 0);
+    addWall(-RW / 2 + t / 2, 0, RD - t * 2, true);
+    addWall(RW / 2 - t / 2, 0, RD - t * 2, true);
+    // wall/ceiling trim line
+    this.box(group, 0, h - 0.07, 0, RW, 0.14, RD, m.ceiling, { cast: false, receive: false });
   }
 
   _cyl(parent, x, y, z, r, h, mat, seg = 10) {
@@ -416,11 +665,14 @@ export class City {
           this._chairAt(g, m, dx, 1.35, Math.PI);
         }
         break;
-      case 'tvwall':
+      case 'tvwall': {
         this.box(g, 0, 1.35, 0, 3.4, 1.9, 0.14, m.black);
-        this.box(g, 0, 1.4, 0.09, 3.14, 1.62, 0.04, m.screen, { cast: false });
+        const tv = this.box(g, 0, 1.4, 0.09, 3.14, 1.62, 0.04, this._tvSetup().off, { cast: false });
+        tv.userData.screen = true;
+        g.userData.screen = tv;
         this.box(g, 0, 0.36, 0.02, 2.4, 0.12, 0.3, m.dark);
         break;
+      }
       case 'bookshelf':
         this.box(g, 0, 1.15, 0, 2.4, 2.3, 0.5, m.woodDark);
         for (let i = 0; i < 4; i++) {
@@ -527,12 +779,16 @@ export class City {
           for (let i = 0; i < 6; i++) this.box(g, -0.9 + i * 0.36, 0.66 + r * 0.45, 0.05, 0.16, 0.14, 0.16, m.black);
         }
         break;
-      case 'cinema_screen':
+      case 'cinema_screen': {
         this.box(g, 0, 2.4, 0, 7.8, 4.0, 0.12, m.black);
-        this.box(g, 0, 2.4, 0.09, 7.4, 3.7, 0.04, m.screen, { cast: false });
+        const screen = this.box(g, 0, 2.4, 0.09, 7.4, 3.7, 0.04, this._tvSetup().off, { cast: false });
+        screen.userData.screen = true;
+        screen.userData.cinema = true;
+        g.userData.screen = screen;
         this.box(g, 0, 0.28, 0.6, 6.0, 0.56, 1.2, m.dark);
         for (let i = 0; i < 4; i++) this.box(g, 0, 0.6, 2.0 + i * 1.5, 6.4, 0.5, 0.5, m.blue);
         break;
+      }
       case 'artframe':
         this.box(g, 0, 1.5, 0, 2.3, 2.7, 0.12, m.gold);
         this.box(g, 0, 1.5, 0.08, 2.05, 2.45, 0.06, [m.red, m.blue, m.green, m.cream][Math.abs(Math.round(prop.x + prop.z)) % 4], { cast: false });
@@ -592,18 +848,15 @@ export class City {
       this.box(group, -w * 0.24, fh - 0.22, 0, 3.0, 0.08, 2.0, m.glow, { cast: false, receive: false });
       this.box(group, 0, fh - 0.32, 0, w - 2.2, 0.06, d - 2.2, m.dark, { cast: false });
 
-      // window bands on the quiet walls + the street wall on upper floors
-      const bandY = 1.65;
-      const bandH = 1.7;
-      const addBand = (x, z, bw, bd) => {
-        this.box(group, x, bandY, z, bw, bandH, bd, m.glass, { cast: false });
-        this.box(group, x, bandY - bandH / 2 - 0.08, z, bw, 0.16, bd + 0.06, m.dark, { cast: false });
-        this.box(group, x, bandY + bandH / 2 + 0.08, z, bw, 0.16, bd + 0.06, m.dark, { cast: false });
-      };
-      addBand(0, -d / 2 + 0.44, w - 1.6, 0.08);
-      addBand(w / 2 - 0.44, 0, 0.08, d - 1.6);
-      addBand(-w / 2 + 0.44, 0, 0.08, d - 1.6);
-      if (level > 0) addBand(0, d / 2 - 0.44, w - 1.6, 0.08);
+      // Real interior walls: painted plaster, skirting, framed windows on every
+      // wall (doorway gap on the street wall of the lobby) instead of showing
+      // the exterior facade texture from inside.
+      this._interiorWalls(group, {
+        w: w - 0.7, d: d - 0.7, h: fh,
+        sill: 0.95, head: Math.min(2.5, fh - 0.7),
+        doorW: level === 0 ? 4.4 : 0, doorH: 3.5,
+        warm: building.themeId === 'residential' || building.themeId === 'hotel',
+      });
     }
 
     // deterministic furniture for this floor
@@ -614,7 +867,7 @@ export class City {
     });
     const spots = [];
     for (const prop of plan.props) {
-      this._addProp(group, prop);
+      const propGroup = this._addProp(group, prop);
       if (!Props.isInteractable(prop.type)) continue;
       const cos = Math.cos(building.yaw || 0); const sin = Math.sin(building.yaw || 0);
       const wx = building.x + prop.x * cos + prop.z * sin;
@@ -624,6 +877,7 @@ export class City {
         y: +(building.baseY + level * fh).toFixed(2),
         rot: +((prop.rot || 0) + (building.yaw || 0)).toFixed(3),
         buildingId: building.id, level,
+        screen: propGroup?.userData?.screen || null,
       });
     }
 
@@ -659,6 +913,7 @@ export class City {
     });
     this._activeFloor = null;
     this._activePropSpots = [];
+    if (this._tv) this._tv.active.clear();
   }
 
   activeInteriorColliders() {
@@ -902,12 +1157,12 @@ export class City {
   // =========================================================================
   // Interactable furniture spots
   // =========================================================================
-  _registerPropSpot({ buildingId = null, level = 0, type, x, z, y = CURB_Y, rot = 0, name = '' }) {
+  _registerPropSpot({ buildingId = null, level = 0, type, x, z, y = CURB_Y, rot = 0, name = '', screen = null }) {
     if (!Props.isInteractable(type)) return null;
     const def = Props.interactionFor(type);
     const spot = {
       type, x: +x.toFixed(2), z: +z.toFixed(2), y: +y.toFixed(2), rot: +rot.toFixed(3),
-      buildingId, level, name: name || def.verb, icon: def.icon,
+      buildingId, level, name: name || def.verb, icon: def.icon, screen,
     };
     this.propSpots.push(spot);
     return spot;
@@ -927,17 +1182,19 @@ export class City {
     return list;
   }
 
-  _registerWorldProps(building, props, level = 0) {
+  _registerWorldProps(building, props, level = 0, groups = null) {
     const cos = Math.cos(building.yaw || 0);
     const sin = Math.sin(building.yaw || 0);
     const out = [];
-    for (const prop of props) {
+    for (let i = 0; i < props.length; i++) {
+      const prop = props[i];
       const wx = building.x + prop.x * cos + prop.z * sin;
       const wz = building.z - prop.x * sin + prop.z * cos;
       const spot = this._registerPropSpot({
         buildingId: building.id, level, type: prop.type,
         x: wx, z: wz, y: building.baseY + level * Interiors.FLOOR_HEIGHT,
         rot: (prop.rot || 0) + (building.yaw || 0),
+        screen: groups?.[i]?.userData?.screen || null,
       });
       if (spot) out.push(spot);
     }
@@ -1064,10 +1321,18 @@ export class City {
       bg: '#0b1220', fg: '#f8fafc', border: color,
     });
 
+    // standard painted walls, skirting and framed windows inside the hall
+    this._interiorWalls(g, {
+      w: w - 1.0, d: d - 1.0, h: h - 0.45,
+      sill: 1.15, head: Math.min(h - 2.2, 5.4),
+      doorW: 7.2, doorH: 4.4,
+      warm: place.type === 'hotel' || place.type === 'library',
+    });
+
     // interior furniture & service desk
     const props = this._civicProps(place, w, d);
-    for (const prop of props) this._addProp(g, prop);
-    this._registerWorldProps(building, props, 0);
+    const propGroups = props.map((prop) => this._addProp(g, prop));
+    this._registerWorldProps(building, props, 0, propGroups);
     for (const prop of props) {
       const spec = Interiors.PROP_SPECS[prop.type];
       if (!spec || !spec.collide) continue;
@@ -1599,6 +1864,66 @@ export class City {
     // price totem
     this.box(g, -11.5, 1.1, 2, 0.3, 2.2, 0.3, dark);
     this.sign(g, ['$1.05 / L', 'DIESEL + $0.20'], -11.5, 3.2, 2, 4.6, 1.6, { bg: '#111827', fg: '#4ade80' });
+    // --- Fuel & Go convenience store: a real walk-in building on every forecourt
+    {
+      const sx = 8.5;
+      const sz = -12.0;
+      const cos = frame.face;
+      const yaw = frame.face === 1 ? 0 : Math.PI;
+      const bx = frame.x + frame.face * sx;
+      const bz = frame.z + frame.face * sz;
+      const store = {
+        id: `fuel-${st.id}`, kind: 'shop', name: `${st.name} Express`,
+        x: bx, z: bz, width: 11, depth: 7.2, height: 3.6, baseY: CURB_Y,
+        floors: 0, yaw, themeId: 'corporate', seed: 90 + Math.round(sx),
+      };
+      const sg = new THREE.Group();
+      sg.position.set(bx, CURB_Y, bz);
+      sg.rotation.y = yaw;
+      this.root.add(sg);
+      this.enterables.push(store);
+      // shell
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.85 });
+      this.box(sg, 0, 1.8, -3.6, 11, 3.6, 0.3, wallMat);
+      this.frameWorldCollider(store, 0, -3.6, 11, 0.3);
+      for (const sgn of [-1, 1]) {
+        this.box(sg, sgn * 5.5, 1.8, 0, 0.3, 3.6, 7.2, wallMat);
+        this.frameWorldCollider(store, sgn * 5.5, 0, 0.3, 7.2);
+      }
+      // front wall with a door gap + glass shopfront
+      const seg = (11 - 3.2) / 2;
+      for (const sgn of [-1, 1]) {
+        const ox = sgn * (3.2 / 2 + seg / 2);
+        this.box(sg, ox, 1.8, 3.6, seg, 3.6, 0.3, wallMat);
+        this.box(sg, ox, 2.2, 3.78, seg - 0.6, 1.9, 0.06, this.mats.glass, { cast: false });
+        this.frameWorldCollider(store, ox, 3.6, seg, 0.3);
+      }
+      this.box(sg, 0, 3.3, 3.6, 11.6, 0.6, 7.6, this.mats.darkMetal);
+      this.sign(sg, [`${st.name.toUpperCase()} EXPRESS`, 'SNACKS · DRINKS · COFFEE'], 0, 3.05, 3.8, 8.2, 1.0, {
+        bg: st.color, fg: '#ffffff',
+      });
+      this._interiorWalls(sg, { w: 10.4, d: 6.8, h: 3.2, sill: 0.95, head: 2.6, doorW: 3.4, doorH: 2.9 });
+      this._addSwingDoor({
+        x: bx + Math.sin(yaw) * 3.6, z: bz + Math.cos(yaw) * 3.6,
+        y: CURB_Y, yaw, width: 3.2, height: 2.9,
+        label: `${st.name} Express doors`, buildingId: store.id,
+      });
+      const shopProps = [
+        { type: 'counter', x: 0, z: -1.4, rot: 0 },
+        { type: 'bookshelf', x: -4.2, z: -2.4, rot: 0 },
+        { type: 'kitchen', x: 3.6, z: -2.4, rot: 0 },
+        { type: 'lamp', x: -4.6, z: 1.6, rot: 0 },
+      ];
+      const shopGroups = shopProps.map((prop) => this._addProp(sg, prop));
+      this._registerWorldProps(store, shopProps, 0, shopGroups);
+      this._registerServiceSpot({
+        placeId: store.id, serviceId: 'snack', name: `${st.name} Express`,
+        prompt: `${st.name} Express — snacks, coffee & hot food`,
+        x: bx + Math.sin(yaw) * 2.4, z: bz + Math.cos(yaw) * 2.4, y: CURB_Y,
+      });
+      void cos;
+    }
+
     // glowing interaction pad
     const pad = this._marker(color);
     const p = this.toWorld(frame, 0, 9);
@@ -1733,6 +2058,16 @@ export class City {
     this.box(g, 10.05, 3.5, -9, 0.45, 7, 14, wallMat);
     this.frameCollider(frame, 10.05, -9, 0.6, 14.1);
 
+    // standard interior walls, skirting & framed windows
+    {
+      const room = new THREE.Group();
+      room.position.set(0, 0, -9);
+      g.add(room);
+      this._interiorWalls(room, {
+        w: 19.4, d: 13.4, h: 6.7, sill: 0.95, head: 3.6, doorW: 4.4, doorH: 3.4,
+      });
+    }
+
     // front: glass shopfront either side of a wide open doorway
     const doorW = 4.2; const doorH = 3.4; const t = 0.42;
     const segW = 10 - doorW / 2;
@@ -1843,6 +2178,49 @@ export class City {
     this.frameCollider(frame, 0, -16.8, 30, 1);
     this.frameCollider(frame, -14.8, -8, 0.8, 18);
     this.frameCollider(frame, 14.8, -8, 0.8, 18);
+    // --- walk-in showroom: real walls, framed windows, doorway & lining ------
+    const yaw = frame.face === 1 ? 0 : Math.PI;
+    const cx = frame.x;
+    const cz = frame.z + frame.face * -8;
+    const showroom = new THREE.Group();
+    showroom.position.set(0, 0, -8);
+    g.add(showroom);
+    this._interiorWalls(showroom, {
+      w: 29.2, d: 17.2, h: 6.0, sill: 1.05, head: 4.5, doorW: 5.6, doorH: 3.3,
+    });
+    const showroomBuilding = {
+      id: 'dealership', kind: 'shop', name: 'Metro Motors',
+      x: cx, z: cz, width: 30, depth: 18, height: 6.45, baseY: CURB_Y,
+      floors: 0, yaw, themeId: 'corporate', seed: 41,
+    };
+    this.enterables.push(showroomBuilding);
+    this._addSwingDoor({
+      x: cx + Math.sin(yaw) * 8.6, z: cz + Math.cos(yaw) * 8.6,
+      y: CURB_Y, yaw, width: 5.6, height: 3.3,
+      label: 'Metro Motors doors', buildingId: 'dealership',
+    });
+    // solid front wall either side of the entrance (the lining has no colliders)
+    {
+      const seg = (29.2 - 5.6) / 2;
+      for (const sgn of [-1, 1]) {
+        this.frameCollider(frame, sgn * (5.6 / 2 + seg / 2), 0.6, seg, 0.2);
+      }
+    }
+    const dealerProps = [
+      { type: 'reception', x: 0, z: -6.2, rot: 0 },
+      { type: 'sofa', x: 8.4, z: -5.4, rot: 0 },
+      { type: 'planter', x: -9.2, z: -5.2, rot: 0 },
+      { type: 'planter', x: 9.2, z: -5.2, rot: 0 },
+      { type: 'tvwall', x: -6.0, z: -7.6, rot: 0 },
+    ];
+    const dealerGroups = dealerProps.map((prop) => this._addProp(showroom, prop));
+    this._registerWorldProps(showroomBuilding, dealerProps, 0, dealerGroups);
+    this._registerServiceSpot({
+      placeId: 'dealership', serviceId: 'dealer', name: 'Metro Motors',
+      prompt: 'Metro Motors — exotics, customs & mechanic',
+      x: cx + Math.sin(yaw) * 3.2, z: cz + Math.cos(yaw) * 3.2, y: CURB_Y,
+    });
+
     // display platforms (cars placed by game.js)
     this.dealerDisplays = [];
     const ringMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
@@ -1905,6 +2283,16 @@ export class City {
       this.box(g, sx, 4.6, -9, 0.5, 9.2, 13, obsidian);                    // side walls
       this.frameCollider(frame, sx, -9, 0.6, 13.1);
     }
+    // warm plaster interior with gilt-framed windows
+    {
+      const room = new THREE.Group();
+      room.position.set(0, 0, -9);
+      g.add(room);
+      this._interiorWalls(room, {
+        w: 25.4, d: 12.4, h: 8.85, sill: 1.1, head: 5.6, doorW: 4.0, doorH: 4.6, warm: true,
+      });
+    }
+
     // front piers either side of the open 3.8 m entrance
     for (const sgn of [-1, 1]) {
       const cx = sgn * (1.9 + 11.1 / 2);
@@ -2213,6 +2601,18 @@ export class City {
         this.sign(g, ['METRO FRESH', `Diner · Lv ${level}`], 0, h - 0.9, front + 0.2, 10, 1.5, { bg: def.color });
       } else if (bizId === 'logistics') {
         this.sign(g, ['SWIFTCARGO', `Logistics Hub · Lv ${level}`], 0, h - 0.9, front + 0.2, 11, 1.5, { bg: def.color, fg: '#111827' });
+      }
+
+      // plaster lining, skirting & framed windows so the shop reads as a real room
+      {
+        const room = new THREE.Group();
+        room.position.set(0, 0, cz);
+        g.add(room);
+        this._interiorWalls(room, {
+          w: width - 0.7, d: depth - 0.7, h: Math.max(3.2, h - 0.55),
+          sill: 0.95, head: Math.min(2.45, Math.max(2.1, h - 1.1)),
+          doorW: doorW, doorH: doorH, warm: bizId === 'diner',
+        });
       }
 
       // ----- themed walk-in interior -------------------------------------
@@ -2941,6 +3341,20 @@ export class City {
 
   update(t, dt = 0) {
     if (dt > 0) this.updateDoors(dt);
+    if (this._tv && this._tv.active.size) {
+      const tv = this._tv;
+      tv.acc += dt;
+      tv.channelT += dt;
+      if (tv.channelT > 16) { tv.channelT = 0; tv.channel = (tv.channel + 1) % 4; }
+      if (tv.acc >= 0.1) {
+        tv.acc = 0;
+        const mode = ['news', 'sports', 'cartoon', 'movie'][tv.channel];
+        this._drawScreen(tv.tv, mode, t);
+        this._drawScreen(tv.cinema, 'movie', t);
+        tv.tv.texture.needsUpdate = true;
+        tv.cinema.texture.needsUpdate = true;
+      }
+    }
     for (const m of this.stationMarkers) {
       m.material.opacity = 0.55 + Math.sin(t * 3) * 0.3;
       m.rotation.z = t * 0.6;
