@@ -127,137 +127,137 @@ export function wellbeingLabel(leisure) {
 // pose: 'sit' | 'lie' | 'stand'  · y = hip offset added to the floor position
 export const PROP_INTERACTIONS = {
   sofa: {
-    verb: 'Sit on the sofa', icon: '🛋', pose: 'sit', y: -0.4, cooldown: 8,
+    verb: 'Sit on the sofa', icon: '🛋', pose: 'sit', cooldown: 8, action: 'sit',
     effects: { comfort: 18, energy: 8 }, stat: 'sits',
     msg: '🛋 You sink into the sofa and put your feet up.',
   },
   armchair: {
-    verb: 'Sit in the armchair', icon: '💺', pose: 'sit', y: -0.42, cooldown: 8,
+    verb: 'Sit in the armchair', icon: '💺', pose: 'sit', cooldown: 8, action: 'sit',
     effects: { comfort: 14, energy: 6 }, stat: 'sits',
     msg: '💺 You relax in the armchair.',
   },
   chair: {
-    verb: 'Take a seat', icon: '🪑', pose: 'sit', y: -0.44, cooldown: 10,
+    verb: 'Take a seat', icon: '🪑', pose: 'sit', cooldown: 10, action: 'sit',
     effects: { comfort: 8, energy: 4 }, stat: 'sits',
     msg: '🪑 You take a seat and stretch your legs.',
   },
   bench: {
-    verb: 'Sit on the bench', icon: '🪑', pose: 'sit', y: -0.32, cooldown: 10,
+    verb: 'Sit on the bench', icon: '🪑', pose: 'sit', cooldown: 10, action: 'sit',
     effects: { comfort: 10, energy: 5 }, stat: 'sits',
     msg: '🌳 You sit on the bench and watch Metro City go by.',
   },
   bed: {
-    verb: 'Sleep in the bed', icon: '🛏', pose: 'lie', y: 0.42, cooldown: 60,
+    verb: 'Sleep in the bed', icon: '🛏', pose: 'lie', cooldown: 60, action: 'sleep',
     effects: { energy: 52, comfort: 30, health: 8 }, stat: 'naps',
     msg: '🛏 You sleep for a while and wake up refreshed.',
   },
   lounger: {
-    verb: 'Lounge in the sun', icon: '🏖', pose: 'lie', y: 0.2, cooldown: 25,
+    verb: 'Lounge in the sun', icon: '🏖', pose: 'lie', cooldown: 25, action: 'sunbathe',
     effects: { energy: 16, comfort: 20 }, stat: 'swims',
     msg: '🏖 You stretch out on the lounger and soak up the sun.',
   },
   medbed: {
-    verb: 'Rest on the treatment bed', icon: '🩺', pose: 'lie', y: 0.2, cooldown: 45,
+    verb: 'Rest on the treatment bed', icon: '🩺', pose: 'lie', cooldown: 45, action: 'rest',
     price: 25, effects: { health: 40, energy: 20, comfort: 10 }, stat: 'visits',
     msg: '🩺 A nurse checks you over — you feel much better.',
   },
   tvwall: {
-    verb: 'Watch TV', icon: '📺', pose: 'sit', y: -0.35, cooldown: 30,
+    verb: 'Watch TV', icon: '📺', pose: 'sit', cooldown: 30, action: 'tv',
     effects: { comfort: 22, energy: 6 }, stat: 'tv',
     msg: '📺 You kick back and watch a Metro Sports highlights reel.',
   },
   bookshelf: {
-    verb: 'Browse & read', icon: '📚', pose: 'stand', cooldown: 14,
+    verb: 'Browse & read', icon: '📚', pose: 'stand', cooldown: 14, action: 'read',
     effects: { comfort: 8 }, stat: 'reads', study: true,
     msg: '📚 You lose yourself in a good book.',
   },
   desk: {
-    verb: 'Work at the desk', icon: '🖥', pose: 'sit', y: -0.44, cooldown: 30,
+    verb: 'Work at the desk', icon: '🖥', pose: 'sit', cooldown: 30, action: 'type',
     effects: { comfort: -4 }, stat: 'reads', study: true,
     msg: '🖥 You put in a focused work session at the desk.',
   },
   labbench: {
-    verb: 'Run an experiment', icon: '🧪', pose: 'stand', cooldown: 30,
+    verb: 'Run an experiment', icon: '🧪', pose: 'stand', cooldown: 30, action: 'experiment',
     effects: { comfort: 2 }, stat: 'reads', study: true,
     msg: '🧪 You run a lab experiment and log the results.',
   },
   kitchen: {
-    verb: 'Cook a meal', icon: '🍳', pose: 'stand', cooldown: 45,
+    verb: 'Cook a meal', icon: '🍳', pose: 'stand', cooldown: 45, action: 'cook',
     price: 12, effects: { energy: 28, comfort: 12 }, stat: 'meals',
     msg: '🍳 You cook a hot meal and eat it while it is still steaming.',
   },
   bar: {
-    verb: 'Order a drink', icon: '🍹', pose: 'stand', cooldown: 25,
+    verb: 'Order a drink', icon: '🍹', pose: 'stand', cooldown: 25, action: 'drink',
     price: 15, effects: { comfort: 16, energy: -6 }, stat: 'meals',
     msg: '🍹 You order a cold drink at the bar.',
   },
   pooltable: {
-    verb: 'Play a frame of pool', icon: '🎱', pose: 'stand', cooldown: 40,
+    verb: 'Play a frame of pool', icon: '🎱', pose: 'stand', cooldown: 40, action: 'pool',
     price: 10, effects: { comfort: 20, fitness: 2 }, stat: 'sits',
     msg: '🎱 You run the table and sink the black.',
   },
   serverrack: {
-    verb: 'Run an IT shift', icon: '🖧', pose: 'stand', cooldown: 75,
+    verb: 'Run an IT shift', icon: '🖧', pose: 'stand', cooldown: 75, action: 'type',
     effects: { comfort: -6 }, cash: 45, xp: 4, stat: 'reads',
     msg: '🖧 You patch the racks and pick up a freelance IT job — +$45.',
   },
   piano: {
-    verb: 'Play the piano', icon: '🎹', pose: 'stand', cooldown: 35,
+    verb: 'Play the piano', icon: '🎹', pose: 'stand', cooldown: 35, action: 'piano',
     effects: { comfort: 18 }, stat: 'visits',
     msg: '🎹 You play a few bars and heads turn.',
   },
   treadmill: {
-    verb: 'Run on the treadmill', icon: '🏃', pose: 'stand', cooldown: 45,
+    verb: 'Run on the treadmill', icon: '🏃', pose: 'stand', cooldown: 45, action: 'run',
     effects: { fitness: 3, energy: -9, comfort: 4 }, stat: 'workouts',
     msg: '🏃 You run 5 km on the treadmill — legs burning, feeling strong.',
   },
   gymbench: {
-    verb: 'Lift weights', icon: '🏋', pose: 'stand', cooldown: 45,
+    verb: 'Lift weights', icon: '🏋', pose: 'stand', cooldown: 45, action: 'benchpress',
     effects: { fitness: 4, energy: -11, comfort: 3 }, stat: 'workouts',
     msg: '🏋 You rack up a heavy set — +4 fitness.',
   },
   dumbbellrack: {
-    verb: 'Train with dumbbells', icon: '💪', pose: 'stand', cooldown: 35,
+    verb: 'Train with dumbbells', icon: '💪', pose: 'stand', cooldown: 35, action: 'curls',
     effects: { fitness: 2, energy: -6, comfort: 2 }, stat: 'workouts',
     msg: '💪 You knock out a dumbbell circuit.',
   },
   cinema_screen: {
-    verb: 'Watch a movie', icon: '🎬', pose: 'stand', cooldown: 3,
+    verb: 'Watch a movie', icon: '🎬', pose: 'stand', cooldown: 5, action: 'movie',
     effects: {}, stat: 'movies', service: true,
     msg: '🎬 You walk up to the box office.',
   },
   artframe: {
-    verb: 'Admire the artwork', icon: '🖼', pose: 'stand', cooldown: 50,
+    verb: 'Admire the artwork', icon: '🖼', pose: 'stand', cooldown: 50, action: 'admire',
     effects: { comfort: 5 }, stat: 'visits',
     msg: '🖼 You study the brushwork up close.',
   },
   counter: {
-    verb: 'Browse the shop', icon: '🛍', pose: 'stand', cooldown: 3,
+    verb: 'Browse the shop', icon: '🛍', pose: 'stand', cooldown: 5, action: 'talk',
     effects: {}, stat: 'visits', service: true,
     msg: '🛍 You browse the counter.',
   },
   sculpture: {
-    verb: 'Admire the art', icon: '🗿', pose: 'stand', cooldown: 45,
+    verb: 'Admire the art', icon: '🗿', pose: 'stand', cooldown: 45, action: 'admire',
     effects: { comfort: 6 }, stat: 'visits',
     msg: '🗿 You stop and admire the piece.',
   },
   planter: {
-    verb: 'Water the plant', icon: '🪴', pose: 'stand', cooldown: 60,
+    verb: 'Water the plant', icon: '🪴', pose: 'stand', cooldown: 60, action: 'water',
     effects: { comfort: 4 }, stat: 'visits',
     msg: '🪴 You water the plant — the leaves look happier already.',
   },
   lamp: {
-    verb: 'Toggle the lamp', icon: '💡', pose: 'stand', cooldown: 4,
+    verb: 'Toggle the lamp', icon: '💡', pose: 'stand', cooldown: 4, action: 'switch',
     effects: {}, stat: 'visits',
     msg: '💡 You flick the lamp switch.',
   },
   table: {
-    verb: 'Dine at the table', icon: '🍽', pose: 'stand', cooldown: 90,
+    verb: 'Dine at the table', icon: '🍽', pose: 'stand', cooldown: 90, action: 'eat',
     effects: { comfort: 14, energy: 9 }, stat: 'meals',
     msg: '🍽 You set the table and enjoy a proper meal at home.',
   },
   reception: {
-    verb: 'Talk to reception', icon: '🛎', pose: 'stand', cooldown: 2,
+    verb: 'Talk to reception', icon: '🛎', pose: 'stand', cooldown: 2, action: 'talk',
     effects: {}, stat: 'visits', service: true,
     msg: '🛎 The receptionist looks up and smiles.',
   },
@@ -280,6 +280,55 @@ export const BUILD_PROP_MAP = {
 
 export function propTypeForBuild(itemId) {
   return BUILD_PROP_MAP[itemId] || null;
+}
+
+// ---------------------------------------------------------------------------
+// Real seat geometry: where the body actually rests on each piece of furniture.
+// `surface` is the height of the cushion/mattress above the prop's base,
+// `forward` slides a lying body along the prop's long axis (feet end),
+// `recline` tilts a lounger back by that many radians.
+// ---------------------------------------------------------------------------
+export const PROP_SEATS = {
+  sofa: { surface: 0.57, pose: 'sit', forward: 0 },
+  armchair: { surface: 0.48, pose: 'sit', forward: 0 },
+  chair: { surface: 0.48, pose: 'sit', forward: 0 },
+  bench: { surface: 0.50, pose: 'sit', forward: 0 },
+  // the desk mesh has its own chair 0.95 m in front, facing the screen
+  desk: { surface: 0.48, pose: 'sit', forward: 0.95, yawOffset: Math.PI, offset: true },
+  bed: { surface: 0.63, pose: 'lie', forward: 0.90, recline: 0 },
+  medbed: { surface: 0.67, pose: 'lie', forward: 0.90, recline: 0 },
+  lounger: { surface: 0.51, pose: 'lie', forward: 0.52, recline: 0.42 },
+};
+
+export function seatFor(propType) {
+  return PROP_SEATS[propType] || null;
+}
+
+export function actionFor(propType) {
+  return PROP_INTERACTIONS[propType]?.action || null;
+}
+
+// ---------------------------------------------------------------------------
+// Fuel & Go convenience-store stock (every fuel station has a walk-in shop)
+// ---------------------------------------------------------------------------
+export const SNACKS = {
+  coffee: { name: 'Hot coffee', icon: '☕', price: 5, effects: { energy: 14, comfort: 4 }, stat: 'meals' },
+  snack: { name: 'Snack pack', icon: '🍫', price: 8, effects: { energy: 18, comfort: 8 }, stat: 'meals' },
+  meal: { name: 'Hot meal', icon: '🍱', price: 22, effects: { energy: 34, comfort: 16 }, stat: 'meals' },
+};
+
+export function buySnack(state, id) {
+  const def = SNACKS[id];
+  if (!def) return { ok: false, msg: 'That item is not in stock.' };
+  if ((state.cash || 0) < def.price) return { ok: false, msg: `${def.name} costs $${def.price} — not enough cash.` };
+  state.cash -= def.price;
+  if (!state.leisure) state.leisure = createLeisureState();
+  applyWellbeing(state.leisure, def.effects);
+  state.leisure.stats[def.stat] = (state.leisure.stats[def.stat] || 0) + 1;
+  return {
+    ok: true,
+    msg: `${def.icon} You grab a ${def.name.toLowerCase()} at the counter — +${def.effects.energy} energy. (-$${def.price})`,
+  };
 }
 
 export function interactionFor(propType) {

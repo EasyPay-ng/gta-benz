@@ -600,6 +600,8 @@ function applyState() {
   const p = game.player;
   if (p.vehicle) detachFromVehicle();
   game.seat = null;
+  p.char.seat = null;
+  p.char.stopAction();
   p.char.setPose('stand');
   if (!s.leisure) s.leisure = Props.createLeisureState();
   p.char.setAppearance(s.appearance);
@@ -647,7 +649,7 @@ function snapshotState() {
   } else {
     s.player.x = p.x; s.player.z = p.z; s.player.inVehicle = null;
   }
-  s.player.y = p.y;
+  s.player.y = game.seat ? game.seat.spot.y : p.y;
   s.player.yaw = p.yaw;
   s.player.cameraMode = cam.mode;
   if (s.clock) Time.setClock(s.clock, getClock(), Date.now());
@@ -700,8 +702,8 @@ function triggerJump() {
 }
 
 function triggerEmote(id) {
+  if (game.seat) return false;
   if (game.player.vehicle) { toast('Step out of the car to perform emotes.', 'bad'); return false; }
-  if (game.seat) standUpFromProp(true);
   if (game.creatorOpen) return false;
   const def = EMOTE_BY_ID[id];
   if (!def) return false;
@@ -1877,7 +1879,10 @@ const modalActions = {
     if (res.ok) {
       game.seat = null;
       const bed = city.propSpotsNear(game.player.x, game.player.z, game.player.y, 6).find((x) => x.type === 'bed');
-      if (bed) sitOnProp(bed, { pose: 'lie', y: 0.62 });
+      if (bed) {
+        sitOnProp(bed, Props.interactionFor('bed'), { action: 'sleep' });
+        game.player.char.playAction('sleep', { loop: true });
+      }
       sfx.cash(); toast(res.msg, 'good'); saveGame(true);
     } else { sfx.error(); toast(res.msg, 'warn'); }
     updateHUD(true);
@@ -1889,6 +1894,7 @@ const modalActions = {
   movieTicket: ({ movie }) => serviceResult(Places.watchMovie(game.state, { movie })),
   mallBoutique: () => { closeModal(); openBoutique(); },
   libraryBorrow: () => serviceResult(Places.borrowBook(game.state)),
+  fuelBuy: ({ item }) => serviceResult(Props.buySnack(game.state, item)),
   libraryStudy: () => {
     const res = Uni.studySession(game.state, { spot: 'Metro Public Library' });
     if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); } else { sfx.error(); toast(res.msg, 'warn'); }
@@ -2789,7 +2795,7 @@ function findInteraction() {
       pushLocal(spot.x, spot.z, 2.6, `${def.icon} ${def.verb} (your build)`, () => usePropSpot(spot), 0.8);
     }
     for (const spot of city.serviceSpotsNear(p.x, p.z, p.y, 4.2)) {
-      pushLocal(spot.x, spot.z, 4.2, spot.prompt, () => openPlaceService(spot.placeId), 0.62);
+      pushLocal(spot.x, spot.z, 4.2, spot.prompt, () => openServiceForBuilding(spot.placeId), 0.62);
     }
     if (!onUpper) {
       for (const d of city.districtSpots) {
@@ -2827,7 +2833,14 @@ function interact() {
 // Interactive furniture: sitting, sleeping, TV, bookshelves, gym, service desks
 // ===========================================================================
 function seatOffsetY() {
-  return game.seat ? (game.seat.yOffset || 0) : 0;
+  // The player's y is already the seat surface, so the group needs no lift.
+  return 0;
+}
+
+/** Camera / eye height above the seat while sitting or lying down. */
+function seatedEyeHeight() {
+  if (!game.seat) return 1.55;
+  return game.seat.pose === 'lie' ? 0.42 : game.seat.pose === 'sit' ? 0.95 : 1.55;
 }
 
 function buildingNameOf(id) {
@@ -2835,33 +2848,62 @@ function buildingNameOf(id) {
   return b ? b.name : '';
 }
 
-function sitOnProp(spot, def) {
+/**
+ * Sit / lie / use a prop. `spot.y` is the floor, and the prop's real seat
+ * geometry (cushion or mattress height) raises the body so it rests on the
+ * furniture instead of floating above it.
+ */
+function sitOnProp(spot, def, opts = {}) {
   const p = game.player;
   if (p.vehicle) return;
-  game.seat = { spot, pose: def.pose, yOffset: def.y || 0 };
-  p.x = spot.x; p.z = spot.z;
-  p.y = Number.isFinite(spot.y) ? spot.y : p.y;
-  p.yaw = spot.rot || 0;
+  const seat = Props.seatFor(spot.type) || {
+    surface: 0, pose: opts.pose || def?.pose || 'sit', forward: 0, recline: 0,
+  };
+  const yaw = Number.isFinite(opts.faceYaw) ? opts.faceYaw : (spot.rot || 0) + (seat.yawOffset || 0);
+  game.seat = {
+    spot, pose: seat.pose, seat, yaw,
+    watch: opts.watch || null, action: opts.action || null,
+  };
+  // some props (the desk) seat you on a chair offset from the prop centre
+  const ox = seat.offset ? Math.sin(spot.rot || 0) * seat.forward : 0;
+  const oz = seat.offset ? Math.cos(spot.rot || 0) * seat.forward : 0;
+  p.x = spot.x + ox; p.z = spot.z + oz;
+  p.y = (Number.isFinite(spot.y) ? spot.y : p.y) + (seat.surface || 0);
+  p.yaw = yaw;
   p.vx = p.vz = 0; p.vy = 0; p.onGround = true;
-  p.char.setPose(def.pose);
-  p.char.group.position.set(p.x, p.y + seatOffsetY(), p.z);
+  p.char.seat = seat;
+  p.char.setPose(seat.pose);
+  p.char.group.position.set(p.x, p.y, p.z);
   p.char.group.rotation.y = p.yaw;
   cam.yaw = p.yaw;
-  if (game.seat.pose === 'lie') cam.pitch = 0.15;
+  if (seat.pose === 'lie') cam.pitch = 0.24;
+  if (game.seat.watch) city.setTVOn(game.seat.watch, true);
+  return game.seat;
 }
 
 function standUpFromProp(quiet = false) {
   if (!game.seat) return false;
   const p = game.player;
-  const spot = game.seat.spot;
+  const { spot } = game.seat;
+  if (game.seat.watch) city.setTVOn(game.seat.watch, false);
+  p.char.stopAction();
+  p.char.seat = null;
   p.char.setPose('stand');
-  const fx = Math.sin(spot.rot || 0);
-  const fz = Math.cos(spot.rot || 0);
-  let sx = spot.x + fx * 1.15;
-  let sz = spot.z + fz * 1.15;
-  const res = resolveCircle(sx, sz, 0.4, city.colliderCache);
-  if (res.hit) { sx = spot.x - fx * 1.15; sz = spot.z - fz * 1.15; }
-  p.x = sx; p.z = sz; p.y = Number.isFinite(spot.y) ? spot.y : p.y;
+  const yaw = game.seat.yaw ?? (spot.rot || 0);
+  const fx = Math.sin(yaw);
+  const fz = Math.cos(yaw);
+  let sx; let sz;
+  if (game.seat.seat?.offset) {
+    // already seated on a chair offset from the prop centre — just stand there
+    sx = p.x; sz = p.z;
+  } else {
+    sx = spot.x + fx * 1.15;
+    sz = spot.z + fz * 1.15;
+    const res = resolveCircle(sx, sz, 0.4, city.colliderCache);
+    if (res.hit) { sx = spot.x - fx * 1.15; sz = spot.z - fz * 1.15; }
+  }
+  p.x = sx; p.z = sz;
+  p.y = Number.isFinite(spot.y) ? spot.y : p.y;
   p.vx = p.vz = 0;
   game.seat = null;
   if (!quiet) sfx.click();
@@ -2898,7 +2940,8 @@ function usePropSpot(spot) {
   if (spot.type === 'bed' && spot.buildingId === 'grand_hotel') {
     const res = Places.sleepHotelNight(s, {});
     if (res.ok) {
-      sitOnProp(spot, { pose: 'lie', y: 0.62 });
+      sitOnProp(spot, def, { action: 'sleep' });
+      game.player.char.playAction('sleep', { loop: true });
       toast(res.msg, 'good');
       sfx.cash();
       saveGame(true);
@@ -2915,6 +2958,11 @@ function usePropSpot(spot) {
     return;
   }
 
+  // TV & cinema: take a seat facing the screen, switch it on and watch it
+  if (spot.type === 'tvwall' || spot.type === 'cinema_screen') {
+    return watchScreen(spot, def);
+  }
+
   const res = Props.useProp(s, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
   if (!res.ok) { toast(res.msg, 'warn'); sfx.error(); return; }
   let msg = res.msg;
@@ -2922,17 +2970,83 @@ function usePropSpot(spot) {
     const study = Uni.studySession(s, { spot: propSpotLabel(spot) || 'study desk' });
     if (study.ok) msg += ` ${study.msg}`;
   }
-  if (res.pose) sitOnProp(spot, res.def);
+
+  // Face the prop you are using, then play its scripted animation
+  const action = res.def?.action || null;
+  if (res.pose) {
+    sitOnProp(spot, res.def, { action });
+    const loop = ['tv', 'movie', 'sleep', 'rest', 'sit', 'run', 'benchpress', 'curls'].includes(action);
+    if (action) game.player.char.playAction(action, { duration: loop ? 8 : 3.4, loop });
+  } else {
+    const p = game.player;
+    p.yaw = Math.atan2(spot.x - p.x, spot.z - p.z);
+    if (action) {
+      const loop = ['piano', 'pool', 'run', 'curls', 'benchpress', 'movie'].includes(action);
+      p.char.playAction(action, { duration: loop ? 7 : 2.8, loop });
+    }
+  }
   toast(msg, 'good');
   if (res.fresh) sfx.cash();
   updateHUD(true);
   saveGame(true);
 }
 
+/**
+ * Watch a TV wall or a cinema screen: sit on the nearest sofa/chair/bench that
+ * faces it (or stand in front if there is none), switch the screen on so it
+ * actually shows a channel, and play the watching animation.
+ */
+function watchScreen(spot, def) {
+  const p = game.player;
+  const screen = spot.screen || null;
+  if (!screen) {
+    // decorative screen with no live display — fall back to a normal use
+    const res = Props.useProp(game.state, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
+    toast(res.msg, 'good');
+    return;
+  }
+  const cinema = spot.type === 'cinema_screen';
+  const seats = city.propSpotsNear(spot.x, spot.z, spot.y, cinema ? 12 : 7)
+    .filter((s2) => s2 !== spot && Props.isSeating(s2.type));
+  let seat = null;
+  let bestD = Infinity;
+  for (const s2 of seats) {
+    const d = (s2.x - spot.x) ** 2 + (s2.z - spot.z) ** 2;
+    if (d < bestD) { bestD = d; seat = s2; }
+  }
+  // Face the screen from the seat (screen front is +Z in prop space)
+  if (seat) {
+    const yaw = Math.atan2(spot.x - seat.x, spot.z - seat.z);
+    sitOnProp(seat, Props.interactionFor(seat.type), {
+      faceYaw: yaw, watch: screen, action: cinema ? 'movie' : 'tv',
+    });
+    game.player.char.playAction(cinema ? 'movie' : 'tv', { loop: true, duration: 30 });
+  } else {
+    const fx = Math.sin(spot.rot || 0);
+    const fz = Math.cos(spot.rot || 0);
+    const anchor = {
+      type: 'tvwall', x: spot.x + fx * 2.1, z: spot.z + fz * 2.1,
+      y: spot.y, rot: Math.atan2(-fx, -fz), buildingId: spot.buildingId,
+    };
+    sitOnProp(anchor, { pose: 'stand', action: '' }, { watch: screen, action: 'tv' });
+    game.player.char.seat = null;
+    game.player.char.setPose('stand');
+    game.player.char.playAction(cinema ? 'movie' : 'tv', { loop: true, duration: 30 });
+    game.seat.pose = 'stand';
+    game.seat.spot = { ...anchor, y: spot.y };
+  }
+  city.setTVOn(screen, true);
+  sfx.click();
+  toast(cinema ? '🎬 The film starts — enjoy the show.' : '📺 You switch the TV on and settle in.', 'good');
+  updateHUD(true);
+}
+
 /** Open the right counter for a building (station, boutique, lot or public place). */
 function openServiceForBuilding(buildingId) {
   if (!buildingId) { toast('There is no service desk here.', 'warn'); return; }
   if (Places.placeById(buildingId)) { openPlaceService(buildingId); return; }
+  if (buildingId === 'dealership') { openModal(dealerModal()); return; }
+  if (buildingId.startsWith('fuel-')) { openModal(fuelShopModal(buildingId.slice(5))); return; }
   if (buildingId === 'boutique') { openBoutique(); return; }
   const station = Object.values(STATIONS).find((st) => buildingId === `station-${st.id}`);
   if (station) { openModal(stationModal(station.id)); return; }
@@ -3098,6 +3212,27 @@ function libraryCard() {
     <div class="actions"><button data-action="openUni">🎓 Open University catalog</button><button data-action="close">Close</button></div>`;
 }
 
+function fuelShopModal(stationId) {
+  const st = Object.values(FUEL_STATIONS).find((f) => f.id === stationId) || { name: 'Fuel & Go' };
+  return () => {
+    const s = game.state;
+    const leisure = s.leisure || Props.createLeisureState();
+    return `
+      <h2>🏪 ${st.name} Express — Counter</h2>
+      <p class="sub">Snacks, hot drinks and ready meals · cash <b>${money(s.cash)}</b> · energy <b>${Math.round(leisure.energy)}%</b></p>
+      <div class="svc-grid">
+        ${Object.entries(Props.SNACKS).map(([id, item]) => `
+          <div class="svc-card">
+            <div class="svc-head"><b>${item.icon} ${item.name}</b><span class="svc-price">$${item.price}</span></div>
+            <p class="muted">+${item.effects.energy} energy${item.effects.comfort ? `, +${item.effects.comfort} comfort` : ''}.</p>
+            <button data-action="fuelBuy" data-item="${id}" ${s.cash < item.price ? 'disabled' : ''}>Buy</button>
+          </div>`).join('')}
+      </div>
+      <p class="muted">The shelves, counter and coffee machine inside are interactive too — press <kbd>E</kbd> beside them.</p>
+      <div class="actions"><button data-action="close">Close</button></div>`;
+  };
+}
+
 function placeServiceModal(placeId) {
   return () => {
     if (placeId === 'grand_hotel') return hotelCard();
@@ -3181,6 +3316,7 @@ function openElevatorModal() {
 function rideElevator(level) {
   const b = game.elevatorBuilding;
   if (!b) { closeModal(); return; }
+  if (game.seat) standUpFromProp(true);
   const p = game.player;
   if (p.vehicle) { toast('Step out of the car first.', 'bad'); return; }
   const target = Math.max(0, Math.min(b.floors, level));
@@ -3866,7 +4002,7 @@ function updateCamera(dt) {
     const pose = Cam.computeFootFirstPersonPose(cam, {
       x: p.x,
       z: p.z,
-      groundY: p.y + seatOffsetY() * 0.6,
+      groundY: p.y + (game.seat ? (game.seat.pose === 'lie' ? -1.3 : -0.6) : 0),
       buildH,
       jumpY: p.char.jumpY || 0,
       movingSpeed: moving,
@@ -3900,7 +4036,7 @@ function updateCamera(dt) {
     pitch = cam.pitch;
     camera.fov += (Cam.targetFov(cam, true, v.speed) - camera.fov) * Math.min(1, dt * 3);
   } else {
-    target.set(p.x, p.y + 1.55 + (p.char.jumpY || 0) * 0.4 + seatOffsetY() * 0.55, p.z);
+    target.set(p.x, p.y + seatedEyeHeight() + (p.char.jumpY || 0) * 0.4, p.z);
     camera.fov += (Cam.targetFov(cam, false, 0) - camera.fov) * Math.min(1, dt * 3);
   }
   camera.updateProjectionMatrix();
