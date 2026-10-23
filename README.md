@@ -47,6 +47,7 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 | `B` or `1`–`8`: character actions, greetings & dances | `F`: exit · `T`: Garage & Roadside Assist |
 | `U` (or HUD `🎓`): **Metro Grand University** (1,105 courses) | High-speed hits & explosions raise **Police Heat (`★`–`★★★`)** |
 | `Y` (or HUD `🏗`): **3D Architect Build Mode** — structures, furniture & **Minecraft blocks** · `E` at a **Metro Lift** to ride floors | `E` place · `X` demolish · `Q`/`R` rotate · `C` colour · `Tab` item · `PgUp`/`PgDn` storey |
+| `O` (or HUD `📱`): **MetroPhone** — garage, uni, jobs, messages, wallet, map, build, look, settings | Tap an app icon · `‹` back · `✕ Close` or `Esc` |
 | `F`: get in/out of your car · `V`: valet · `T`: Garage · `C`: look · `H`: help · `M`: mute | `F5` save / `F9` load |
 
 On touch devices you get an on-screen joystick and buttons (including `🎥` camera view toggle).
@@ -66,6 +67,9 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - **Real Storeys, Not Fake Backgrounds:** each tower has a walkable slab for every floor, a perimeter with windows, a furnished lobby, a **Metro Lift** core at the corner, and a rooftop parapet so you can stand on the sky deck and look out over the city in 1st or 3rd person.
   - **A Metro Lift on Every Corner (`E`):** press `E` at the glowing lift panel to open the floor directory — *Lobby, Floor 2 · Open-Plan Office, Floor 3 · Boardroom, Floor 7 · Penthouse, Sky Deck…* — and ride instantly. Reception desks inside shops & job HQs (`E`) open the same menus as their street pads, so you can manage your startup, browse Maison Verve or clock in from inside the building.
   - **Every Floor Is Furnished in 3D:** desks & monitors, boardroom tables, sofas, beds, kitchens, pool tables, server racks, lab benches, hospital beds, pallets and planters are generated deterministically per theme (*Corporate, Residential, Grand Hotel, Tech, Medical*), complete with glass window bands, ceiling light panels, lift doors and warm interior lighting. Indoor camera ceilings are clamped automatically for both camera modes.
+- **MetroPhone — a real in-game smartphone (`O` / `📱`, `src/phone.js` + `src/phoneview.js`).** Press `O` anywhere in the city and a phone slides up over the blurred street: notch, status bar with the live city clock, `4G` and battery, a gradient lock screen with the big clock, the **virtual calendar** (*Friday 23 October · Metro City*), a day-phase pill (*Night mode / Golden hour / Daylight / Dawn*) and a notification banner that follows your situation — an active shift, a booked hotel room, unread messages or open enrolment.
+  - **Ten real apps on the home grid and dock:** **Garage** (per-vehicle body/fuel/tyre/engine bars, roadside repair quotes and emergency fuel you can order from anywhere, plus a jump to the full garage), **Uni** (student card with matric number, enrolled course, credit progress, GPA and lecture counts), **Jobs** (occupation, rank & XP bar, startup slots, open roles with HQ distances and clock-out), **Messages** (five live threads — Dispatch, the Dean, the Grand Meridian, the Bank and City Hall — that ping only when something is actually happening and mark themselves read), **Wallet** (cash, lifetime earnings, jobs done, vehicles, startups, build pieces), **Map** (the nearest landmarks with live distance and compass bearing), **Build** (piece/block counts and a one-tap entry to Build Mode), **Look** (current outfit plus the wardrobe), **Settings** (camera, sound, save/load, reset, help) and **Help**.
+  - **Built like an OS, not a menu:** CSS-drawn device shell with a notch and home indicator, 4×4 app grid, dock, red notification badges, sticky app headers, message bubbles and scrolling app views. Every screen is pure markup generated from the save state (`phoneview.js` is DOM-free, so the whole UI is unit-tested), and gameplay input pauses while the phone is open.
 - **3D Architect — Build & Furnish Mode (`Y` / `🏗`, `src/build.js`).** Raise your own multi-storey structures anywhere in the city, then furnish them:
   - **Structure on a 4 m grid:** marble & hardwood floor slabs, solid walls, window walls, doorway walls, glass curtain walls, **climbable 3D stairs (+1 storey)**, support pillars, glass balcony railings and pitched gable roofs.
   - **Furniture on a 0.5 m grid:** lounge sofas, king beds, executive desks with monitors, dining/conference tables, widescreen TVs, tall bookshelves, warm floor lamps and indoor palms.
@@ -152,9 +156,9 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, Minecraft block catalog & pixel-art painter) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, Minecraft block catalog & pixel-art painter, MetroPhone apps & screen markup) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
 
-- **81 client tests** — `npm test`
+- **96 client tests** — `npm test`
 - **89 server tests** — `npm --prefix server run test:all` (smoke, accounts & NetClient E2E)
 
 ## Deploy to GitHub Pages

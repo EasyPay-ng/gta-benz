@@ -20,6 +20,8 @@ import * as Cam from './src/camera.js';
 import * as Uni from './src/university.js';
 import * as Build from './src/build.js';
 import * as Paint from './src/pixelart.js';
+import * as Phone from './src/phone.js';
+import * as PhoneView from './src/phoneview.js';
 import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
@@ -295,6 +297,9 @@ const game = {
   inside: null,        // { id, level, building } while standing inside a walk-in building
   buildMode: false,
   buildItem: 'wall_solid',
+  phoneOpen: false,
+  phoneApp: 'home',
+  phoneThread: null,
   buildColor: BUILD_COLORS[0],
   buildRot: 0,
   buildLift: 0,
@@ -724,13 +729,14 @@ function triggerEmote(id) {
 const keys = new Set();
 const touchInput = { x: 0, y: 0, sprint: false, handbrake: false };
 const isTyping = () => document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
-const anyOverlay = () => !!game.modal || game.helpOpen || game.loginOpen;
+const anyOverlay = () => !!game.modal || game.helpOpen || game.loginOpen || game.phoneOpen;
 
 window.addEventListener('keydown', (e) => {
   sfx.ensure();
   if (e.code === 'F5') { e.preventDefault(); saveGame(); return; }
   if (e.code === 'F9') { e.preventDefault(); loadGame(); return; }
   if (e.code === 'Escape') {
+    if (game.phoneOpen) { closePhone(); return; }
     if (game.buildMode && !anyOverlay()) { toggleBuildMode(false); return; }
     closeModal(); closeCreator(); hideHelp(); return;
   }
@@ -743,6 +749,8 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyB') closeModal();
     return;
   }
+  if (e.code === 'KeyO') { if (game.phoneOpen) closePhone(); else phoneOpen(); return; }
+  if (game.phoneOpen) return;
   if (game.buildMode && !anyOverlay()) {
     switch (e.code) {
       case 'KeyE': placeBuildPiece(); return;
@@ -1142,6 +1150,97 @@ $('modal-body').addEventListener('click', (e) => {
   renderModal();
   updateHUD(true);
 });
+
+// ---------------------------------------------------------------------------
+// MetroPhone — the in-game smartphone
+// ---------------------------------------------------------------------------
+const phoneEl = $('phone');
+const phoneViewEl = $('phone-view');
+const phoneStatusEl = $('phone-status');
+if (game) game.phoneSeen = new Set();
+
+function phoneOpen(app = 'home', thread = null) {
+  game.phoneOpen = true;
+  game.phoneApp = app;
+  game.phoneThread = thread;
+  if (thread) game.phoneSeen.add(thread);
+  phoneEl.classList.remove('hidden');
+  document.body.classList.add('phone-open');
+  renderPhone();
+  sfx.click();
+}
+
+function closePhone() {
+  if (!game.phoneOpen) return;
+  game.phoneOpen = false;
+  game.phoneThread = null;
+  phoneEl.classList.add('hidden');
+  document.body.classList.remove('phone-open');
+  sfx.click();
+}
+
+function phoneGo(app, thread = null) {
+  game.phoneApp = app;
+  game.phoneThread = thread;
+  if (thread) game.phoneSeen.add(thread);
+  renderPhone();
+  if (phoneViewEl) phoneViewEl.scrollTop = 0;
+  sfx.click();
+}
+
+function renderPhone() {
+  if (!game.phoneOpen) return;
+  const now = getClock();
+  phoneStatusEl.innerHTML = PhoneView.statusHtml(now);
+  const vm = {
+    state: game.state,
+    now,
+    seen: game.phoneSeen,
+    thread: game.phoneThread,
+    player: game.player,
+    cameraFirst: cam?.mode === 'first',
+    muted: !!sfx.muted,
+  };
+  phoneViewEl.innerHTML = game.phoneApp === 'home'
+    ? PhoneView.homeHtml(vm)
+    : PhoneView.screenHtml(vm, game.phoneApp);
+  phoneViewEl.scrollTop = 0;
+}
+
+// ---- phone event wiring ----------------------------------------------------
+phoneEl?.addEventListener('click', (e) => {
+  const appBtn = e.target.closest('[data-phone-app]');
+  if (appBtn) { phoneGo(appBtn.dataset.phoneApp); return; }
+  const thread = e.target.closest('[data-phone-thread]');
+  if (thread) { phoneGo('messages', thread.dataset.phoneThread); return; }
+  const act = e.target.closest('[data-phone-act]');
+  if (!act) return;
+  const { phoneAct, veh } = act.dataset;
+  switch (phoneAct) {
+    case 'repair': modalActions.roadsideRepair({ veh }); renderPhone(); break;
+    case 'refuel': modalActions.roadsideFuel({ veh }); renderPhone(); break;
+    case 'openGarage': closePhone(); openGarageModal(); break;
+    case 'openUni': closePhone(); openUniversity(); break;
+    case 'clockOut': doClockOut(); renderPhone(); break;
+    case 'openBuild': closePhone(); toggleBuildMode(true); break;
+    case 'openLook': closePhone(); openCreator(); break;
+    case 'camera': toggleCameraMode(); renderPhone(); break;
+    case 'mute': toggleMute(); renderPhone(); break;
+    case 'save': saveGame(true); toast('💾 Progress saved.', 'good'); renderPhone(); break;
+    case 'load': closePhone(); loadGame(); break;
+    case 'help': closePhone(); showHelp(); break;
+    case 'reset': closePhone(); $('btn-reset')?.click(); break;
+    default: break;
+  }
+});
+$('phone-close')?.addEventListener('click', closePhone);
+phoneEl?.addEventListener('pointerdown', (e) => { if (e.target === phoneEl) closePhone(); });
+$('btn-phone')?.addEventListener('click', () => {
+  if (game.phoneOpen) { closePhone(); return; }
+  if (game.modal) return;
+  phoneOpen();
+});
+$('t-phone')?.addEventListener('click', () => (game.phoneOpen ? closePhone() : phoneOpen()));
 
 function result(res) {
   if (res.ok) { sfx.cash(); toast(res.msg, 'good'); } else { sfx.error(); toast(res.msg, 'bad'); }
