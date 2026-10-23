@@ -294,7 +294,7 @@ export const PROP_SEATS = {
   chair: { surface: 0.48, pose: 'sit', forward: 0 },
   bench: { surface: 0.50, pose: 'sit', forward: 0 },
   // the desk mesh has its own chair 0.95 m in front, facing the screen
-  desk: { surface: 0.48, pose: 'sit', forward: 0.95, yawOffset: Math.PI, offset: true },
+  desk: { surface: 0.48, pose: 'sit', forward: 0.90, yawOffset: Math.PI, offset: true },
   bed: { surface: 0.63, pose: 'lie', forward: 0.90, recline: 0 },
   medbed: { surface: 0.67, pose: 'lie', forward: 0.90, recline: 0 },
   lounger: { surface: 0.51, pose: 'lie', forward: 0.52, recline: 0.42 },

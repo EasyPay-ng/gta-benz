@@ -268,3 +268,34 @@ test('Buildings: every walk-in city building is lined with plaster walls & frame
   assert.ok(skirting > 4, `skirting boards (${skirting})`);
   assert.ok(glass > 0, `framed window glass (${glass})`);
 });
+
+test('Seats: the desk seats you on its own chair, facing the monitor', async () => {
+  const THREE = await import('three');
+  const Props = await import('../src/props.js');
+  const { City } = await import('../src/world.js');
+
+  const seat = Props.seatFor('desk');
+  assert.ok(seat, 'the desk has real seat geometry');
+  assert.equal(seat.offset, true, 'the seat is offset onto the chair');
+  assert.equal(seat.yawOffset, Math.PI, 'you face back toward the desk');
+  assert.ok(seat.forward > 0.85, 'the chair stands clear of the desk collider');
+
+  // for any desk rotation the seated body looks straight at the monitor
+  for (const rot of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+    const px = Math.sin(rot) * seat.forward;
+    const pz = Math.cos(rot) * seat.forward;
+    const yaw = rot + seat.yawOffset;
+    const fx = Math.sin(yaw); const fz = Math.cos(yaw);
+    const dx = -px; const dz = -pz;
+    const dot = (fx * dx + fz * dz) / Math.hypot(dx, dz);
+    assert.ok(dot > 0.99, `facing the desk at rot ${rot.toFixed(2)}`);
+  }
+
+  // the chair mesh is turned around so its backrest is behind the player,
+  // not slicing through their chest
+  const city = new City(new THREE.Scene());
+  const deskGroup = city._addProp(new THREE.Group(), { type: 'desk', x: 0, z: 0, rot: 0 });
+  const chair = deskGroup.children.find((c) => c.isGroup && Math.abs(c.position.z - seat.forward) < 0.02);
+  assert.ok(chair, 'the desk is built with its chair');
+  assert.equal(Math.round(chair.rotation.y / Math.PI), 1, 'the chair faces the desk');
+});

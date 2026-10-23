@@ -643,14 +643,14 @@ export class City {
         this.box(g, 0, 1.06, -0.24, 0.62, 0.4, 0.05, m.screen, { cast: false });
         this.box(g, 0, 0.88, -0.2, 0.18, 0.26, 0.16, m.black);
         this.box(g, 0, 0.82, 0.18, 0.46, 0.03, 0.16, m.white);
-        this._chairAt(g, m, 0, 0.95, 0);
+        this._chairAt(g, m, 0, 0.90, Math.PI);
         break;
       case 'deskpair':
         for (const dx of [-1.0, 1.0]) {
           this.box(g, dx, 0.75, 0, 1.86, 0.09, 0.9, m.wood);
           this.box(g, dx, 1.06, -0.24, 0.58, 0.38, 0.05, m.screen, { cast: false });
           this.box(g, dx, 0.88, -0.2, 0.16, 0.24, 0.16, m.black);
-          this._chairAt(g, m, dx, 0.95, 0);
+          this._chairAt(g, m, dx, 0.90, Math.PI);
         }
         break;
       case 'chair':
