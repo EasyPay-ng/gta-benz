@@ -17,6 +17,7 @@ import {
   academicJobMultiplier,
   academicBusinessMultiplier,
 } from './university.js';
+import { normalizeBuildState } from './build.js';
 
 // Small deterministic PRNG so citizens look the same for every new game.
 export function mulberry32(seed) {
@@ -89,6 +90,7 @@ export function createInitialState(wallNow = Date.now()) {
     appearance: { ...DEFAULT_APPEARANCE },
     wardrobe: starterWardrobe(),
     academic: createAcademicState(),
+    builds: { pieces: [] },
     activeJob: null,
     jobXP,
     businesses,
@@ -105,7 +107,7 @@ export function createInitialState(wallNow = Date.now()) {
     ],
     nextVehicleId: 2,
     lastVehicleId: 'v1',
-    player: { x: -12.5, z: -15, yaw: Math.PI * 0.8, inVehicle: null, cameraMode: 'third' },
+    player: { x: -12.5, z: -15, y: 0.1, yaw: Math.PI * 0.8, inVehicle: null, cameraMode: 'third' },
     stats: {
       tasksCompleted: 0,
       totalEarned: 0,
@@ -124,6 +126,7 @@ export function migrateState(raw, wallNow = Date.now()) {
   s.appearance = { ...base.appearance, ...(raw.appearance || {}) };
   s.wardrobe = normalizeWardrobe(raw.wardrobe, s.appearance);
   s.academic = normalizeAcademicState(raw.academic);
+  s.builds = normalizeBuildState(raw.builds);
   s.jobXP = { ...base.jobXP, ...(raw.jobXP || {}) };
   s.businesses = { ...base.businesses, ...(raw.businesses || {}) };
   for (const id of Object.keys(s.businesses)) {

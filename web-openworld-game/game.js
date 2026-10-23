@@ -7,7 +7,7 @@ import {
   FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
   ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
   EMOTES, CAR_LIVERIES, RIM_FINISHES, UNDERGLOW_OPTIONS, RESPRAY_COST, CLOTHING_ITEMS, OUTFIT_BUNDLES,
-  CAM_COCKPIT_YAW_MAX,
+  CAM_COCKPIT_YAW_MAX, BUILD_ITEMS, BUILD_COLORS, BUILD_STORY_H, MAX_CUSTOM_BUILDS,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
@@ -17,6 +17,8 @@ import * as Heat from './src/heat.js';
 import * as Cust from './src/customization.js';
 import * as Cam from './src/camera.js';
 import * as Uni from './src/university.js';
+import * as Build from './src/build.js';
+import * as Interiors from './src/interiors.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -261,7 +263,7 @@ const marker = (() => {
 // ===========================================================================
 const game = {
   state: null,
-  player: { char: null, x: 0, z: 0, yaw: 0, vx: 0, vz: 0, vehicle: null },
+  player: { char: null, x: 0, z: 0, y: 0.1, yaw: 0, vx: 0, vz: 0, vy: 0, onGround: true, vehicle: null },
   vehicles: [],
   citizens: [],
   traffic: [],
@@ -282,6 +284,17 @@ const game = {
   camera,
   cameraView: null,
   university: Uni,
+  inside: null,        // { id, level, building } while standing inside a walk-in building
+  buildMode: false,
+  buildItem: 'wall_solid',
+  buildColor: BUILD_COLORS[0],
+  buildRot: 0,
+  buildLift: 0,
+  buildGroup: null,
+  buildGhost: null,
+  buildMeshes: new Map(),
+  buildSurfaces: [],
+  elevatorBuilding: null,
   emotes: EMOTES,
   valetCooldown: 0,
   autosaveTimer: 60,
@@ -581,6 +594,10 @@ function applyState() {
   p.char.setOccupation(s.activeJob);
   p.char.setCarrying(false);
   p.x = s.player.x; p.z = s.player.z; p.yaw = s.player.yaw; p.vx = p.vz = 0;
+  s.builds = Build.normalizeBuildState(s.builds);
+  rebuildBuildWorld();
+  p.y = Number.isFinite(s.player.y) ? s.player.y : city.groundY(p.x, p.z);
+  p.vy = 0; p.onGround = true;
   Cam.setCameraMode(cam, s.player?.cameraMode, false, p.yaw);
   // vehicles
   for (const v of game.vehicles) v.dispose();
@@ -618,6 +635,7 @@ function snapshotState() {
   } else {
     s.player.x = p.x; s.player.z = p.z; s.player.inVehicle = null;
   }
+  s.player.y = p.y;
   s.player.yaw = p.yaw;
   s.player.cameraMode = cam.mode;
   if (s.clock) Time.setClock(s.clock, getClock(), Date.now());
@@ -695,7 +713,10 @@ window.addEventListener('keydown', (e) => {
   sfx.ensure();
   if (e.code === 'F5') { e.preventDefault(); saveGame(); return; }
   if (e.code === 'F9') { e.preventDefault(); loadGame(); return; }
-  if (e.code === 'Escape') { closeModal(); closeCreator(); hideHelp(); return; }
+  if (e.code === 'Escape') {
+    if (game.buildMode && !anyOverlay()) { toggleBuildMode(false); return; }
+    closeModal(); closeCreator(); hideHelp(); return;
+  }
   if (isTyping()) return;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   keys.add(e.code);
@@ -705,8 +726,28 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyB') closeModal();
     return;
   }
+  if (game.buildMode && !anyOverlay()) {
+    switch (e.code) {
+      case 'KeyE': placeBuildPiece(); return;
+      case 'KeyX': demolishBuildPiece(); return;
+      case 'KeyQ': game.buildRot = Build.snapRotation(game.buildRot - Math.PI / 2); renderBuildBar(); return;
+      case 'KeyR': game.buildRot = Build.snapRotation(game.buildRot + Math.PI / 2); renderBuildBar(); return;
+      case 'KeyC': cycleBuildColor(); return;
+      case 'Tab': e.preventDefault(); cycleBuildItem(e.shiftKey ? -1 : 1); return;
+      case 'PageUp': setBuildLift(1); return;
+      case 'PageDown': setBuildLift(-1); return;
+      case 'KeyY': toggleBuildMode(false); return;
+      default: break;
+    }
+  }
   if (e.code.startsWith('Digit')) {
     const idx = Number(e.code.slice(5)) - 1;
+    if (game.buildMode && idx >= 0 && idx < BUILD_ITEMS.length) {
+      game.buildItem = BUILD_ITEMS[idx].id;
+      renderBuildBar();
+      rebuildBuildGhost();
+      return;
+    }
     if (idx >= 0 && idx < EMOTES.length && !game.player.vehicle) {
       triggerEmote(EMOTES[idx].id);
       return;
@@ -725,6 +766,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyV': valet(); break;
     case 'KeyT': openGarageModal(); break;
     case 'KeyU': openUniversity(); break;
+    case 'KeyY': toggleBuildMode(); break;
     case 'KeyC': game.creatorOpen ? closeCreator() : openCreator(); break;
     case 'KeyX':
     case 'KeyP':
@@ -956,6 +998,7 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
       if (b.id === 't-emote') { openEmotesModal(); return; }
       if (b.id === 't-camera') { toggleCameraMode(); return; }
       if (b.id === 't-uni') { openUniversity(); return; }
+      if (b.id === 't-build') { toggleBuildMode(); return; }
       if (anyOverlay()) return;
       if (key === 'interact') interact();
       if (key === 'vehicle') toggleVehicle();
@@ -1789,6 +1832,8 @@ function dealerModal() {
 
 const modalActions = {
   close: () => closeModal(),
+  rideLift: ({ level }) => rideElevator(Number(level)),
+  toggleBuild: () => { closeModal(); toggleBuildMode(true); },
   emote: ({ emote }) => {
     if (triggerEmote(emote)) closeModal();
   },
@@ -2205,6 +2250,7 @@ function closeCreator() {
 }
 $('btn-camera')?.addEventListener('click', () => toggleCameraMode());
 $('btn-uni')?.addEventListener('click', () => (game.modal ? closeModal() : openUniversity()));
+$('btn-build')?.addEventListener('click', () => toggleBuildMode());
 $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
 $('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
 $('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : openEmotesModal()));
@@ -2263,6 +2309,8 @@ function enterVehicle(v, silent = false) {
   playerHeadlight.position.set(0, 0.72, v.model.len / 2 - 0.1);
   playerHeadlight.target.position.set(0, 0.1, v.model.len / 2 + 16);
   v.syncMesh(city.groundY(v.x, v.z));
+  p.y = city.groundY(v.x, v.z);
+  p.vy = 0;
   updateDayNight(getClock(), true);
   cam.yaw = v.yaw;
   cam.cockpitYaw = 0;
@@ -2322,6 +2370,7 @@ function exitVehicle() {
   }
   detachFromVehicle();
   p.x = spot.x; p.z = spot.z; p.yaw = v.yaw; p.vx = p.vz = 0;
+  p.y = city.groundY(p.x, p.z); p.vy = 0; p.onGround = true;
   cam.yaw = v.yaw;
 }
 
@@ -2607,7 +2656,10 @@ function findInteraction() {
   if (!out.e) {
     let best = null; let bd = Infinity;
     // weight > 1 lowers priority (moving citizens shouldn't steal the prompt from fixed places)
+    const insideNow = city.buildingAt(p.x, p.z);
+    const onUpper = !!insideNow && insideNow.building.kind === 'tower' && p.y > insideNow.building.baseY + 1.4;
     const consider = (x, z, r, text, action, weight = 1) => {
+      if (onUpper) return; // upper storeys can't reach street-level pads (the lift is added separately)
       const d = (x - p.x) ** 2 + (z - p.z) ** 2;
       if (d < r * r && d * weight < bd) { bd = d * weight; best = { text, action }; }
     };
@@ -2641,6 +2693,19 @@ function findInteraction() {
       const label = c.data.employer ? `Chat with ${c.data.name}` : `Talk to ${c.data.name} (looking for work)`;
       consider(c.x, c.z, 2.2, label, () => { c.idle = 3; c.yaw = Math.atan2(p.x - c.x, p.z - c.z); openModal(hireModal(c.data.id)); }, 6);
     }
+    // walk-in building interiors: lifts + reception desks
+    for (const spot of city.indoorSpots) {
+      consider(spot.x, spot.z, 3.3, spot.prompt, () => openIndoorSpot(spot), 0.8);
+    }
+    const lift = city.towerLiftNear(p.x, p.z);
+    if (lift && lift.dist < 4.4) {
+      const lvl = levelIn(lift.building);
+      const dl = (lift.landing.x - p.x) ** 2 + (lift.landing.z - p.z) ** 2;
+      if (best === null || dl * 0.55 < bd) {
+        bd = dl * 0.55;
+        best = { text: `🛗 ${lift.building.name} lift — ${Interiors.floorLabel(lift.building, lvl)}`, action: openElevatorModal };
+      }
+    }
     out.e = best;
   }
   const v = nearestOwnedVehicle(3.2);
@@ -2653,6 +2718,437 @@ function interact() {
   const it = game.prompt;
   if (it && it.e && it.e.action) it.e.action();
 }
+
+
+// ===========================================================================
+// Walk-in interiors: lifts, floor badges & interior reception desks
+// ===========================================================================
+function levelIn(building) {
+  return Math.max(0, Math.min(building.floors, Math.round((game.player.y - building.baseY) / Interiors.FLOOR_HEIGHT)));
+}
+
+function updateInteriorState() {
+  const p = game.player;
+  const inside = p.vehicle ? null : city.buildingAt(p.x, p.z);
+  if (inside && inside.building.kind === 'tower') {
+    const b = inside.building;
+    const lvl = levelIn(b);
+    city.setActiveInterior(b.id, lvl);
+    game.inside = { id: b.id, level: lvl, building: b };
+  } else {
+    city.clearActiveInterior();
+    game.inside = inside ? { id: inside.building.id, level: 0, building: inside.building } : null;
+  }
+  updateFloorBadge();
+}
+
+let floorBadgeText = '';
+function updateFloorBadge() {
+  const el = $('floor-badge');
+  if (!el) return;
+  const inside = game.player.vehicle ? null : game.inside;
+  if (!inside) {
+    if (floorBadgeText) { el.classList.add('hidden'); floorBadgeText = ''; }
+    return;
+  }
+  const b = inside.building;
+  const label = b.kind === 'tower' ? Interiors.floorLabel(b, inside.level) : 'Interior';
+  const text = `${b.name} · ${label}${b.kind === 'tower' ? ' · 🛗 Press E at the lift' : ''}`;
+  if (text !== floorBadgeText) { el.textContent = text; floorBadgeText = text; }
+  el.classList.remove('hidden');
+}
+
+function openIndoorSpot(spot) {
+  if (spot.type === 'station') {
+    const st = STATIONS[spot.id];
+    if (st) openModal(stationModal(st.id));
+    return;
+  }
+  if (spot.type === 'boutique') { openBoutique(); return; }
+  if (spot.type === 'lot') { openModal(lotModal(spot.lot || spot.id)); }
+}
+
+function openElevatorModal() {
+  const near = city.towerLiftNear(game.player.x, game.player.z);
+  if (!near) { toast('Look for the glowing Metro Lift inside a walk-in tower.', ''); return; }
+  const b = near.building;
+  game.elevatorBuilding = b;
+  const stops = Interiors.elevatorStops(b);
+  openModal(() => {
+    const here = levelIn(b);
+    return `
+      <h2>🛗 ${b.name} — Metro Lift</h2>
+      <p class="sub">${Interiors.themeFor(b.themeId).name} · ${b.floors} floors + Sky Deck · ${stops.length} stops</p>
+      <div class="lift-grid">
+        ${stops.map((st) => `<button class="lift-btn ${st.level === here ? 'active' : ''}" data-action="rideLift" data-level="${st.level}">
+          <b>${st.short}</b><span>${st.label}</span></button>`).join('')}
+      </div>
+      <p class="muted">Every floor is a real 3D interior — executive offices, apartments, boardrooms, server farms, penthouses and clinics. The top stop is an open-air <b>Sky Deck</b> with a panorama over Metro City.</p>
+      <div class="actions"><button data-action="close">Close</button></div>`;
+  });
+}
+
+function rideElevator(level) {
+  const b = game.elevatorBuilding;
+  if (!b) { closeModal(); return; }
+  const p = game.player;
+  if (p.vehicle) { toast('Step out of the car first.', 'bad'); return; }
+  const target = Math.max(0, Math.min(b.floors, level));
+  const landing = city.elevatorLanding(b);
+  const ceiling = city.ceilingAt(landing.x, landing.z, b.baseY + target * Interiors.FLOOR_HEIGHT);
+  p.x = landing.x; p.z = landing.z;
+  p.y = b.baseY + target * Interiors.FLOOR_HEIGHT;
+  p.vx = p.vz = p.vy = 0; p.onGround = true;
+  city.setActiveInterior(b.id, target);
+  game.inside = { id: b.id, level: target, building: b };
+  closeModal();
+  updateFloorBadge();
+  if (ceiling && ceiling < p.y + 2) toast('The ceiling feels low here — watch the camera.', 'warn');
+  toast(`🛗 ${Interiors.floorLabel(b, target)}`, 'good');
+  sfx.tone(320, 0.08, 'triangle', 0.05);
+  sfx.tone(480, 0.12, 'triangle', 0.04, 0.09);
+}
+
+// ===========================================================================
+// 3D Architect Build & Furnish Mode
+// ===========================================================================
+const BUILD_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
+const BUILD_MAT_CACHE = new Map();
+
+function buildMaterial(color, opts = {}) {
+  const { glass = false, ghost = false, rough = 0.62, metal = 0.06, glow = false } = opts;
+  const key = `${color}|${glass}|${ghost}|${rough}|${metal}|${glow}`;
+  const hit = BUILD_MAT_CACHE.get(key);
+  if (hit) return hit;
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    roughness: rough,
+    metalness: metal,
+    transparent: glass || ghost,
+    opacity: glass ? 0.34 : ghost ? 0.48 : 1,
+    depthWrite: !(glass || ghost),
+  });
+  if (glow) { mat.emissive = new THREE.Color(color); mat.emissiveIntensity = 0.85; }
+  BUILD_MAT_CACHE.set(key, mat);
+  return mat;
+}
+
+/** Build a 3D mesh for one placed piece (or its translucent ghost preview). */
+function makeBuildMesh(piece, ghost = false) {
+  const item = Build.itemById(piece.item);
+  const g = new THREE.Group();
+  g.position.set(piece.x, piece.y, piece.z);
+  g.rotation.y = piece.rot || 0;
+  const solid = buildMaterial(piece.color || item?.defaultColor || '#f1f5f9', { ghost });
+  const trim = buildMaterial('#334155', { ghost });
+  const glass = buildMaterial('#bae6fd', { glass: true, ghost });
+  const soft = buildMaterial('#94a3b8', { ghost, rough: 0.8 });
+  const dark = buildMaterial('#0f172a', { ghost, rough: 0.4, metal: 0.4 });
+  const warm = buildMaterial('#fbbf24', { ghost, glow: true });
+  const green = buildMaterial('#22c55e', { ghost, rough: 0.85 });
+  const box = (x, y, z, w, h, d, mat, opts = {}) => {
+    const m = new THREE.Mesh(BUILD_BOX_GEO, mat);
+    m.scale.set(w, h, d);
+    m.position.set(x, y, z);
+    m.castShadow = !ghost;
+    m.receiveShadow = !ghost;
+    if (opts.rotX) m.rotation.x = opts.rotX;
+    if (opts.rotZ) m.rotation.z = opts.rotZ;
+    g.add(m);
+    return m;
+  };
+  switch (piece.item) {
+    case 'floor_stone':
+    case 'floor_wood':
+      box(0, -0.1, 0, 4, 0.2, 4, solid);
+      box(0, 0.004, 0, 3.96, 0.012, 3.96, soft);
+      box(0, -0.205, 0, 4, 0.09, 0.16, trim);
+      break;
+    case 'wall_solid':
+      box(0, 1.6, 0, 4, 3.2, 0.22, solid);
+      box(0, 3.26, 0, 4, 0.16, 0.32, trim);
+      box(0, 0.08, 0, 4, 0.16, 0.32, trim);
+      break;
+    case 'wall_window':
+      box(0, 0.45, 0, 4, 0.9, 0.22, solid);
+      box(0, 1.7, 0, 4, 1.7, 0.07, glass);
+      box(0, 2.79, 0, 4, 0.82, 0.22, solid);
+      box(-1.86, 1.7, 0, 0.28, 1.7, 0.3, trim);
+      box(1.86, 1.7, 0, 0.28, 1.7, 0.3, trim);
+      box(0, 2.6, 0, 4, 0.12, 0.32, trim);
+      box(0, 0.84, 0, 4, 0.12, 0.32, trim);
+      break;
+    case 'wall_door':
+      box(-1.55, 1.6, 0, 0.9, 3.2, 0.22, solid);
+      box(1.55, 1.6, 0, 0.9, 3.2, 0.22, solid);
+      box(0, 2.8, 0, 2.2, 0.8, 0.22, solid);
+      box(0, 2.42, 0, 2.4, 0.14, 0.34, trim);
+      box(-1.09, 1.2, 0, 0.1, 2.4, 0.32, trim);
+      box(1.09, 1.2, 0, 0.1, 2.4, 0.32, trim);
+      break;
+    case 'glass_wall':
+      box(0, 1.6, 0, 4, 3.2, 0.08, glass);
+      box(0, 3.24, 0, 4, 0.14, 0.24, trim);
+      box(0, 0.07, 0, 4, 0.14, 0.24, trim);
+      for (const mx of [-1.34, 0, 1.34]) box(mx, 1.6, 0, 0.1, 3.2, 0.16, trim);
+      break;
+    case 'stairs':
+      for (let i = 0; i < 8; i++) {
+        const z = -1.6 + i * 0.4 + 0.2;
+        box(0, (i + 1) * 0.4 - 0.2, z, 4, 0.4, 0.4, solid);
+        box(0, (i + 1) * 0.4 - 0.01, z, 3.9, 0.03, 0.36, trim);
+      }
+      for (const sx of [-1.95, 1.95]) box(sx, 1.6, 0, 0.12, 0.12, 3.4, trim, { rotX: -0.78 });
+      break;
+    case 'pillar':
+      box(0, 1.6, 0, 0.6, 3.2, 0.6, solid);
+      box(0, 3.12, 0, 0.9, 0.18, 0.9, trim);
+      box(0, 0.1, 0, 0.9, 0.2, 0.9, trim);
+      break;
+    case 'railing':
+      box(0, 0.62, 0, 4, 0.9, 0.06, glass);
+      box(0, 1.12, 0, 4, 0.1, 0.14, trim);
+      for (const px of [-2, 0, 2]) box(px, 0.56, 0, 0.1, 1.12, 0.1, trim);
+      break;
+    case 'roof_gable':
+      box(-0.95, 0.85, 0, 2.4, 0.16, 4.8, solid, { rotZ: 0.52 });
+      box(0.95, 0.85, 0, 2.4, 0.16, 4.8, solid, { rotZ: -0.52 });
+      box(0, 1.42, 0, 0.42, 0.28, 4.9, trim);
+      box(0, 0.05, 0, 4.4, 0.16, 4.9, trim);
+      break;
+    // ---- furniture ------------------------------------------------------
+    case 'sofa':
+      box(0, 0.24, 0, 2.6, 0.42, 1.0, solid);
+      box(0, 0.66, -0.4, 2.6, 0.5, 0.2, solid);
+      box(-1.25, 0.55, 0, 0.12, 0.5, 1.0, solid);
+      box(1.25, 0.55, 0, 0.12, 0.5, 1.0, solid);
+      box(-0.62, 0.5, 0.04, 1.16, 0.14, 0.84, soft);
+      box(0.62, 0.5, 0.04, 1.16, 0.14, 0.84, soft);
+      for (const dx of [-1.05, 1.05]) for (const dz of [-0.36, 0.36]) box(dx, 0.06, dz, 0.1, 0.12, 0.1, dark);
+      break;
+    case 'bed':
+      box(0, 0.26, 0, 2.0, 0.3, 2.3, dark);
+      box(0, 0.49, 0, 1.94, 0.24, 2.2, soft);
+      box(0, 0.64, 0.35, 1.9, 0.16, 1.4, solid);
+      box(-0.46, 0.68, -0.86, 0.78, 0.18, 0.44, trim);
+      box(0.46, 0.68, -0.86, 0.78, 0.18, 0.44, trim);
+      box(0, 0.85, -1.16, 2.06, 1.1, 0.16, dark);
+      break;
+    case 'desk':
+      box(0, 0.75, 0, 2.0, 0.09, 0.9, solid);
+      for (const dx of [-0.9, 0.9]) box(dx, 0.37, 0, 0.1, 0.74, 0.8, dark);
+      box(0, 1.06, -0.24, 0.62, 0.4, 0.05, dark);
+      box(0, 1.12, -0.2, 0.56, 0.32, 0.02, glass);
+      box(0, 0.82, 0.2, 0.5, 0.03, 0.16, trim);
+      box(0, 0.45, 1.0, 0.5, 0.75, 0.08, solid);
+      box(0, 0.06, 1.0, 0.5, 0.1, 0.4, dark);
+      break;
+    case 'table':
+      box(0, 0.74, 0, 2.0, 0.1, 1.2, solid);
+      for (const dx of [-0.8, 0.8]) box(dx, 0.36, 0, 0.12, 0.72, 0.9, dark);
+      for (const dz of [-0.95, 0.95]) box(0, 0.45, dz, 0.5, 0.75, 0.1, trim);
+      break;
+    case 'tv_stand':
+      box(0, 0.32, 0, 2.4, 0.55, 0.5, dark);
+      box(0, 1.3, 0, 2.1, 1.2, 0.1, dark);
+      box(0, 1.3, 0.07, 1.96, 1.06, 0.03, glass);
+      break;
+    case 'bookshelf':
+      box(-1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
+      box(1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
+      box(0, 2.16, 0, 2.0, 0.1, 0.5, dark);
+      for (let i = 0; i < 4; i++) {
+        box(0, 0.36 + i * 0.56, 0.02, 1.94, 0.07, 0.44, solid);
+        for (let b = 0; b < 6; b++) box(-0.78 + b * 0.3, 0.52 + i * 0.56, 0.04, 0.2, 0.26, 0.34, b % 2 ? trim : warm);
+      }
+      break;
+    case 'lamp':
+      box(0, 0.02, 0, 0.4, 0.04, 0.4, dark);
+      box(0, 0.85, 0, 0.07, 1.7, 0.07, dark);
+      box(0, 1.74, 0, 0.46, 0.34, 0.46, warm);
+      break;
+    case 'plant':
+      box(0, 0.24, 0, 0.66, 0.48, 0.66, trim);
+      box(0, 0.48, 0, 0.6, 0.06, 0.6, dark);
+      for (let i = 0; i < 7; i++) {
+        const a = i * 0.9;
+        const leaf = box(Math.cos(a) * 0.3, 0.95 + (i % 3) * 0.2, Math.sin(a) * 0.3, 0.14, 0.8, 0.14, green);
+        leaf.rotation.z = Math.cos(a) * 0.5;
+        leaf.rotation.x = Math.sin(a) * 0.5;
+      }
+      break;
+    default:
+      box(0, 0.4, 0, 1, 0.8, 1, solid);
+  }
+  return g;
+}
+
+function addBuildPieceMesh(piece) {
+  if (!game.buildGroup) return;
+  const mesh = makeBuildMesh(piece, false);
+  game.buildGroup.add(mesh);
+  game.buildMeshes.set(piece.id, mesh);
+}
+
+function removeBuildPieceMesh(id) {
+  const mesh = game.buildMeshes.get(id);
+  if (mesh) { game.buildGroup.remove(mesh); game.buildMeshes.delete(id); }
+}
+
+function refreshBuildSurfaces() {
+  game.buildSurfaces = Build.walkSurfaces(game.state?.builds || { pieces: [] });
+}
+
+function rebuildBuildWorld() {
+  if (!game.buildGroup) {
+    game.buildGroup = new THREE.Group();
+    scene.add(game.buildGroup);
+  }
+  for (const mesh of game.buildMeshes.values()) game.buildGroup.remove(mesh);
+  game.buildMeshes.clear();
+  const builds = game.state?.builds;
+  if (builds) for (const piece of builds.pieces) addBuildPieceMesh(piece);
+  refreshBuildSurfaces();
+}
+
+function ghostTarget() {
+  const item = Build.itemById(game.buildItem);
+  const grid = Build.gridFor(item);
+  const reach = item?.cat === 'structure' ? 4.2 : 3.0;
+  const x = Build.snap(game.player.x + Math.sin(cam.yaw) * reach, grid);
+  const z = Build.snap(game.player.z + Math.cos(cam.yaw) * reach, grid);
+  return { x, z, y: +(game.player.y + game.buildLift).toFixed(2), rot: game.buildRot };
+}
+
+function rebuildBuildGhost() {
+  if (game.buildGhost) { scene.remove(game.buildGhost); game.buildGhost = null; }
+  if (!game.buildMode) return;
+  const item = Build.itemById(game.buildItem);
+  if (!item) return;
+  game.buildGhost = makeBuildMesh({ item: item.id, x: 0, y: 0, z: 0, rot: game.buildRot, color: game.buildColor }, true);
+  game.buildGhost.traverse((o) => { o.castShadow = false; o.receiveShadow = false; });
+  scene.add(game.buildGhost);
+}
+
+function updateBuildGhost() {
+  if (!game.buildMode || !game.buildGhost) return;
+  const t = ghostTarget();
+  game.buildGhost.position.set(t.x, t.y, t.z);
+  game.buildGhost.rotation.y = game.buildRot;
+  game.buildGhost.visible = !game.player.vehicle;
+}
+
+function renderBuildBar() {
+  const el = $('build-bar');
+  if (!el) return;
+  const builds = game.state?.builds || { pieces: [] };
+  const stats = Build.summary(builds);
+  const structures = BUILD_ITEMS.filter((i) => i.cat === 'structure');
+  const furniture = BUILD_ITEMS.filter((i) => i.cat === 'furniture');
+  const btn = (i) => `<button class="build-item ${i.id === game.buildItem ? 'active' : ''}" data-build-item="${i.id}" title="${i.name}"><span>${i.icon}</span><small>${i.name.replace(/ \(.*\)$/, '')}</small></button>`;
+  const swatch = (c) => `<button class="build-swatch ${c === game.buildColor ? 'active' : ''}" style="background:${c}" data-build-color="${c}" aria-label="colour ${c}"></button>`;
+  el.innerHTML = `
+    <div class="build-row build-head">
+      <b>🏗 Build &amp; Furnish</b>
+      <span class="build-meta">${stats.structure} structure · ${stats.furniture} furniture / ${MAX_CUSTOM_BUILDS}</span>
+      <span class="build-tools">
+        <span class="build-level">Height ${(game.player.y + game.buildLift).toFixed(1)} m</span>
+        <button data-build-lift="1" title="Raise ghost one storey (PageUp)">▲ storey</button>
+        <button data-build-lift="-1" title="Lower ghost one storey (PageDown)">▼ storey</button>
+        <button data-build-rotate="-1" title="Rotate left (Q)">⟲</button>
+        <button data-build-rotate="1" title="Rotate right (R)">⟳</button>
+        <button data-build-demolish="1" title="Demolish (X)">🧨 Demolish</button>
+        <button class="danger" data-build-exit="1" title="Exit Build Mode (Y)">✕ Exit</button>
+      </span>
+    </div>
+    <div class="build-row"><span class="build-label">Structure</span>${structures.map(btn).join('')}</div>
+    <div class="build-row"><span class="build-label">Furniture</span>${furniture.map(btn).join('')}</div>
+    <div class="build-row"><span class="build-label">Colour</span>${BUILD_COLORS.map(swatch).join('')}
+      <span class="build-hint"><kbd>E</kbd> place · <kbd>X</kbd> demolish · <kbd>Q</kbd>/<kbd>R</kbd> rotate · <kbd>Tab</kbd> item · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> storey · <kbd>Y</kbd> exit</span>
+    </div>`;
+}
+
+function setBuildLift(delta) {
+  game.buildLift = Math.max(-2 * BUILD_STORY_H, Math.min(10 * BUILD_STORY_H, game.buildLift + delta * BUILD_STORY_H));
+  renderBuildBar();
+}
+
+function cycleBuildColor() {
+  const i = BUILD_COLORS.indexOf(game.buildColor);
+  game.buildColor = BUILD_COLORS[(i + 1) % BUILD_COLORS.length];
+  renderBuildBar();
+  rebuildBuildGhost();
+}
+
+function cycleBuildItem(dir = 1) {
+  const list = BUILD_ITEMS;
+  const i = list.findIndex((it) => it.id === game.buildItem);
+  game.buildItem = list[(i + dir + list.length) % list.length].id;
+  renderBuildBar();
+  rebuildBuildGhost();
+}
+
+function toggleBuildMode(on) {
+  const next = on === undefined ? !game.buildMode : !!on;
+  if (next && game.player.vehicle) { toast('Step out of the car to enter Build Mode.', 'bad'); return; }
+  game.buildMode = next;
+  document.body.classList.toggle('build-mode', next);
+  $('build-bar')?.classList.toggle('hidden', !next);
+  if (next) {
+    if (!game.state.builds) game.state.builds = Build.createBuildState();
+    if (!game.buildGroup) rebuildBuildWorld();
+    renderBuildBar();
+    rebuildBuildGhost();
+    toast('🏗 Build Mode — E place · X demolish · Q/R rotate · C colour · Tab item · PgUp/PgDn storey', 'good');
+  } else {
+    if (game.buildGhost) { scene.remove(game.buildGhost); game.buildGhost = null; }
+    renderBuildBar();
+    saveGame(true);
+  }
+  sfx.click();
+}
+
+function placeBuildPiece() {
+  const item = Build.itemById(game.buildItem);
+  if (!item) return;
+  const target = ghostTarget();
+  const res = Build.addPiece(game.state.builds, item.id, target, { color: game.buildColor });
+  if (!res.ok) { toast(res.msg, 'warn'); sfx.error(); return; }
+  addBuildPieceMesh(res.piece);
+  refreshBuildSurfaces();
+  renderBuildBar();
+  sfx.tone(520, 0.06, 'square', 0.05);
+  toast(`🏗 ${res.msg}`, 'good');
+  updateHUD(true);
+}
+
+function demolishBuildPiece() {
+  const t = ghostTarget();
+  const piece = Build.pieceNear(game.state.builds, t.x, t.z, t.y, 3.4);
+  if (!piece) { toast('Nothing to demolish there — aim at your build.', 'warn'); sfx.error(); return; }
+  const res = Build.removePiece(game.state.builds, piece.id);
+  if (!res.ok) { toast(res.msg, 'warn'); return; }
+  removeBuildPieceMesh(piece.id);
+  refreshBuildSurfaces();
+  renderBuildBar();
+  sfx.wrench();
+  toast(`🧨 ${res.msg}`, 'good');
+}
+
+function openBuildMode() { toggleBuildMode(true); }
+
+$('build-bar')?.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-build-item]');
+  if (item) { game.buildItem = item.dataset.buildItem; renderBuildBar(); rebuildBuildGhost(); sfx.click(); return; }
+  const col = e.target.closest('[data-build-color]');
+  if (col) { game.buildColor = col.dataset.buildColor; renderBuildBar(); rebuildBuildGhost(); return; }
+  const rot = e.target.closest('[data-build-rotate]');
+  if (rot) { game.buildRot = Build.snapRotation(game.buildRot + Number(rot.dataset.buildRotate) * (Math.PI / 2)); renderBuildBar(); return; }
+  const lift = e.target.closest('[data-build-lift]');
+  if (lift) { setBuildLift(Number(lift.dataset.buildLift)); return; }
+  if (e.target.closest('[data-build-demolish]')) { demolishBuildPiece(); return; }
+  if (e.target.closest('[data-build-exit]')) toggleBuildMode(false);
+});
 
 function updatePrompt() {
   const it = findInteraction();
@@ -2832,21 +3328,54 @@ function updatePlayer(dt) {
   p.vx += (mx * speed - p.vx) * k2;
   p.vz += (mz * speed - p.vz) * k2;
   p.x += p.vx * dt; p.z += p.vz * dt;
-  const res = resolveCircle(p.x, p.z, 0.4, city.colliderCache);
-  p.x = res.x; p.z = res.z;
-  for (const c of carCirclesAll(null)) {
-    const dx = p.x - c.x; const dz = p.z - c.z; const d = Math.hypot(dx, dz); const min = c.r + 0.4;
-    if (d < min && d > 1e-4) { p.x += (dx / d) * (min - d); p.z += (dz / d) * (min - d); }
+  let px = p.x; let pz = p.z;
+  let res = resolveCircle(px, pz, 0.4, city.colliderCache);
+  px = res.x; pz = res.z;
+  // roof parapets & upper-storey shells only block at their own elevation
+  const upper = city.upperCollidersAt(p.y);
+  if (upper.length) { res = resolveCircle(px, pz, 0.4, upper); px = res.x; pz = res.z; }
+  // furniture inside the building you are standing in
+  const insideNow = city.buildingAt(px, pz);
+  if (insideNow) {
+    const lvl = Math.max(0, Math.min(insideNow.building.floors, Math.round((p.y - insideNow.building.baseY) / Interiors.FLOOR_HEIGHT)));
+    const furn = city.interiorCollidersFor(insideNow.building.id, lvl);
+    if (furn.length) { res = resolveCircle(px, pz, 0.4, furn); px = res.x; pz = res.z; }
+  }
+  // player-built walls & furniture on this storey
+  const ownWalls = Build.collidersNear(game.state.builds, p.y + 0.05);
+  if (ownWalls.length) { res = resolveCircle(px, pz, 0.4, ownWalls); px = res.x; pz = res.z; }
+  p.x = px; p.z = pz;
+  if (p.y < 1.4) {
+    for (const c of carCirclesAll(null)) {
+      const dx = p.x - c.x; const dz = p.z - c.z; const d = Math.hypot(dx, dz); const min = c.r + 0.4;
+      if (d < min && d > 1e-4) { p.x += (dx / d) * (min - d); p.z += (dz / d) * (min - d); }
+    }
   }
   p.x = THREE.MathUtils.clamp(p.x, -WORLD_LIMIT, WORLD_LIMIT);
   p.z = THREE.MathUtils.clamp(p.z, -WORLD_LIMIT, WORLD_LIMIT);
+  // vertical support: street, tower floor slabs, built floors & stairs
+  const groundY = city.groundY(p.x, p.z);
+  let support = groundY;
+  const towerY = city.walkSurfaceAt(p.x, p.z, p.y, Build.STEP_UP);
+  if (towerY != null && towerY > support) support = towerY;
+  const builtY = Build.supportAt(game.buildSurfaces, p.x, p.z, p.y, -Infinity);
+  if (builtY > support) support = builtY;
+  if (p.y <= support + 0.02) {
+    p.y = support; p.vy = 0; p.onGround = true;
+  } else {
+    p.vy -= 22 * dt;
+    p.y += p.vy * dt;
+    p.onGround = false;
+    if (p.y <= support) { p.y = support; p.vy = 0; p.onGround = true; }
+  }
+  if (p.y < groundY - 0.4) { p.y = groundY; p.vy = 0; }
   const moving = Math.hypot(p.vx, p.vz);
   if (cam.mode === 'first' && !game.creatorOpen) {
     p.yaw = cam.yaw;
   } else if (moving > 0.3 && len > 0.05) {
     p.yaw = lerpAngle(p.yaw, Math.atan2(mx, mz), Math.min(1, dt * 12));
   }
-  p.char.group.position.set(p.x, city.groundY(p.x, p.z), p.z);
+  p.char.group.position.set(p.x, p.y, p.z);
   p.char.group.rotation.y = p.yaw;
   p.char.animate(dt, moving);
   sfx.setEngine(false, 0);
@@ -2858,7 +3387,7 @@ function updateCamera(dt) {
   $('fp-reticle')?.classList.toggle('hidden', !(inFirst && !p.vehicle && !anyOverlay()));
 
   // Q / R look or orbit
-  if (!anyOverlay() && !isTyping()) {
+  if (!anyOverlay() && !isTyping() && !game.buildMode) {
     if (inFirst && p.vehicle) {
       if (k('KeyQ')) {
         cam.cockpitYaw = THREE.MathUtils.clamp(cam.cockpitYaw + dt * 1.85, -CAM_COCKPIT_YAW_MAX, CAM_COCKPIT_YAW_MAX);
@@ -2928,7 +3457,7 @@ function updateCamera(dt) {
     const pose = Cam.computeFootFirstPersonPose(cam, {
       x: p.x,
       z: p.z,
-      groundY: city.groundY(p.x, p.z),
+      groundY: p.y,
       buildH,
       jumpY: p.char.jumpY || 0,
       movingSpeed: moving,
@@ -2962,11 +3491,11 @@ function updateCamera(dt) {
     pitch = cam.pitch;
     camera.fov += (Cam.targetFov(cam, true, v.speed) - camera.fov) * Math.min(1, dt * 3);
   } else {
-    target.set(p.x, city.groundY(p.x, p.z) + 1.55 + (p.char.jumpY || 0) * 0.4, p.z);
+    target.set(p.x, p.y + 1.55 + (p.char.jumpY || 0) * 0.4, p.z);
     camera.fov += (Cam.targetFov(cam, false, 0) - camera.fov) * Math.min(1, dt * 3);
   }
   camera.updateProjectionMatrix();
-  const indoorCeil = !p.vehicle ? city.ceilingY(p.x, p.z) : null;
+  const indoorCeil = !p.vehicle ? city.ceilingAt(p.x, p.z, p.y) : null;
   if (indoorCeil != null) {
     dist = Math.min(dist, 5.2);
   }
@@ -3409,6 +3938,8 @@ function frame() {
   const s = game.state;
 
   updatePlayer(dt);
+  updateInteriorState();
+  updateBuildGhost();
   if (net) { net.update(dt, netLocalState()); updateRemotes(dt); }
 
   // owned parked vehicles coast to a stop & stay out of walls (wrecks animate smoke)

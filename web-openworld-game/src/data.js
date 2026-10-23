@@ -1,7 +1,7 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 7; // v7: bespoke 3D vehicle interiors, Metro Grand University campus & 1,000+ academic courses
+export const SAVE_VERSION = 8; // v8: walk-in multi-floor skyscrapers/city interiors + full 3D Build & Furnish mode
 
 export const STARTING_CASH = 500;
 export const PAYROLL_INTERVAL = 30; // real seconds per 12-in-game-minute shift (30s * 24 = 720s = 12m)
@@ -492,5 +492,48 @@ export const CAM_COCKPIT_PITCH_MAX = 0.65;     // glance up at roof header / ope
 export const CAM_COCKPIT_RECENTER_DELAY = 1.8; // s after freelook before gentle auto-center while driving
 export const CAM_HEADBOB_FREQ = 9.4;           // stride frequency factor in 1st-person
 export const CAM_HEADBOB_AMP = 0.03;           // max vertical bob (m) at full sprint
+
+// ---------------------------------------------------------------------------
+// Full 3D Architect Build & Furnish Mode (Structure + Furniture)
+// ---------------------------------------------------------------------------
+export const BUILD_STORY_H = 3.2;              // standard player-built story height (m)
+export const MAX_CUSTOM_BUILDS = 800;          // generous per-save piece budget
+
+export const BUILD_COLORS = [
+  '#f1f5f9', // Limestone White
+  '#cbd5e1', // Architectural Concrete
+  '#b45309', // Terracotta / Warm Brick
+  '#78350f', // Rich Mahogany Wood
+  '#1e293b', // Obsidian Slate
+  '#1e3a8a', // Royal Navy
+  '#991b1b', // Velvet Crimson
+  '#065f46', // Emerald Sage
+  '#f59e0b', // 24k Gold Accent
+];
+
+export const BUILD_ITEMS = [
+  // --- Structure (snaps cleanly to a 4m architectural grid; supports multi-story stacking!) ---
+  { id: 'floor_stone',  cat: 'structure', icon: '⬜', name: 'Marble Floor (4×4m)',   grid: 4.0, dist: 4.2, defaultColor: '#f1f5f9' },
+  { id: 'floor_wood',   cat: 'structure', icon: '🟫', name: 'Hardwood Floor (4×4m)', grid: 4.0, dist: 4.2, defaultColor: '#78350f' },
+  { id: 'wall_solid',   cat: 'structure', icon: '🧱', name: 'Solid Wall (4m)',       grid: 4.0, dist: 4.0, defaultColor: '#f1f5f9' },
+  { id: 'wall_window',  cat: 'structure', icon: '🪟', name: 'Window Wall (4m)',      grid: 4.0, dist: 4.0, defaultColor: '#cbd5e1' },
+  { id: 'wall_door',    cat: 'structure', icon: '🚪', name: 'Doorway Wall (4m)',     grid: 4.0, dist: 4.0, defaultColor: '#f1f5f9' },
+  { id: 'glass_wall',   cat: 'structure', icon: '🏙', name: 'Glass Curtain (4m)',    grid: 4.0, dist: 4.0, defaultColor: '#1e293b' },
+  { id: 'stairs',       cat: 'structure', icon: '🪜', name: '3D Stairs (+1 Floor)',  grid: 4.0, dist: 4.4, defaultColor: '#78350f' },
+  { id: 'pillar',       cat: 'structure', icon: '🏛', name: 'Support Pillar',        grid: 4.0, dist: 3.6, defaultColor: '#f1f5f9' },
+  { id: 'railing',      cat: 'structure', icon: '🚧', name: 'Glass Balcony Rail',    grid: 4.0, dist: 3.8, defaultColor: '#1e293b' },
+  { id: 'roof_gable',   cat: 'structure', icon: '🏠', name: 'Pitched Roof (4×4m)',   grid: 4.0, dist: 4.4, defaultColor: '#991b1b' },
+
+  // --- 3D Furniture & Interior Decor (fine 0.5m placement grid inside any room or tower!) ---
+  { id: 'sofa',         cat: 'furniture', icon: '🛋', name: 'Luxury Lounge Sofa',    grid: 0.5, dist: 3.2, defaultColor: '#1e3a8a' },
+  { id: 'bed',          cat: 'furniture', icon: '🛏', name: 'King Platform Bed',     grid: 0.5, dist: 3.5, defaultColor: '#991b1b' },
+  { id: 'desk',         cat: 'furniture', icon: '🖥', name: 'Exec Desk & Monitors',  grid: 0.5, dist: 3.2, defaultColor: '#78350f' },
+  { id: 'table',        cat: 'furniture', icon: '🍽', name: 'Dining / Conf. Table',  grid: 0.5, dist: 3.3, defaultColor: '#78350f' },
+  { id: 'tv_stand',     cat: 'furniture', icon: '📺', name: 'Widescreen Smart TV',   grid: 0.5, dist: 3.2, defaultColor: '#1e293b' },
+  { id: 'bookshelf',    cat: 'furniture', icon: '📚', name: 'Tall Bookshelf',        grid: 0.5, dist: 3.0, defaultColor: '#78350f' },
+  { id: 'lamp',         cat: 'furniture', icon: '💡', name: 'Warm Floor Lamp',       grid: 0.5, dist: 2.8, defaultColor: '#f59e0b' },
+  { id: 'plant',        cat: 'furniture', icon: '🪴', name: 'Indoor Palm Plant',     grid: 0.5, dist: 2.8, defaultColor: '#065f46' },
+];
+
 
 
