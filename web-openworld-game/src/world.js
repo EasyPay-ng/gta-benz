@@ -233,6 +233,7 @@ export class City {
     this.interiorFurniture = {};   // building id -> static furniture colliders (single-storey interiors)
     this._activeFloor = null;      // { id, level, group, colliders } lazily dressed floor
     this._pm = null;               // shared interior prop materials
+    this._towerCount = 0;          // stable unique tower names
     this.lectureBoard = null;      // live 3D smartboard canvas in the Main Lecture Amphitheatre
     this._lastBoardKey = '';
     this.boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -1013,7 +1014,7 @@ export class City {
         yaw: ox >= 0 ? Math.PI / 2 : -Math.PI / 2,
         seed: Math.round(p.x * 31 + p.z * 17 + w * 7),
         themeId: Interiors.themeForSeed(Math.round(p.x * 31 + p.z * 17)),
-        name: TOWER_NAMES[(Math.abs(Math.round(p.x + p.z)) + Math.round(w)) % TOWER_NAMES.length],
+        name: TOWER_NAMES[this._towerCount++ % TOWER_NAMES.length],
       });
       // cornice ring right above the parapet
       const building = this.enterables[this.enterables.length - 1];
