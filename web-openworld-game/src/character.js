@@ -795,6 +795,23 @@ export class Character {
       return;
     }
 
+    // Lying down (beds, loungers, treatment tables)
+    if (this.pose === 'lie') {
+      this.jumpY = 0; this.jumpVy = 0;
+      this._resetJoints();
+      body.rotation.set(-1.42, 0, 0);
+      body.position.y = 0.55;
+      this.legL.rotation.x = 0.08;
+      this.legR.rotation.x = -0.06;
+      this.shinL.rotation.x = 0.05;
+      this.shinR.rotation.x = 0.05;
+      this.armL.rotation.set(0.25, 0, 0.42);
+      this.armR.rotation.set(0.25, 0, -0.42);
+      this.foreArmL.rotation.x = -0.25;
+      this.foreArmR.rotation.x = -0.25;
+      return;
+    }
+
     // Pedestrian dodge dive
     if (this.pose === 'dive') {
       body.rotation.x = Math.min(body.rotation.x + dt * 6.5, 1.22);

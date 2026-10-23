@@ -7,7 +7,7 @@ import {
   FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
   ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
   EMOTES, CAR_LIVERIES, RIM_FINISHES, UNDERGLOW_OPTIONS, RESPRAY_COST, CLOTHING_ITEMS, OUTFIT_BUNDLES,
-  CAM_COCKPIT_YAW_MAX,
+  CAM_COCKPIT_YAW_MAX, BUILD_ITEMS, BUILD_COLORS, BUILD_STORY_H, MAX_CUSTOM_BUILDS,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
@@ -17,6 +17,10 @@ import * as Heat from './src/heat.js';
 import * as Cust from './src/customization.js';
 import * as Cam from './src/camera.js';
 import * as Uni from './src/university.js';
+import * as Build from './src/build.js';
+import * as Interiors from './src/interiors.js';
+import * as Props from './src/props.js';
+import * as Places from './src/publicPlaces.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -156,6 +160,10 @@ const sfx = {
     o.start(t); o.stop(t + 0.15);
   },
   click() { this.tone(660, 0.05, 'square', 0.04); },
+  door() {
+    this.tone(150, 0.1, 'triangle', 0.06);
+    this.tone(96, 0.22, 'sine', 0.05, 0.05);
+  },
   error() { this.tone(180, 0.18, 'square', 0.06); },
   rankUp() { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.1, i * 0.09)); },
   stall() { this.tone(150, 0.25, 'sawtooth', 0.09); this.tone(85, 0.45, 'sawtooth', 0.09, 0.18); },
@@ -261,7 +269,7 @@ const marker = (() => {
 // ===========================================================================
 const game = {
   state: null,
-  player: { char: null, x: 0, z: 0, yaw: 0, vx: 0, vz: 0, vehicle: null },
+  player: { char: null, x: 0, z: 0, y: 0.1, yaw: 0, vx: 0, vz: 0, vy: 0, onGround: true, vehicle: null },
   vehicles: [],
   citizens: [],
   traffic: [],
@@ -282,6 +290,20 @@ const game = {
   camera,
   cameraView: null,
   university: Uni,
+  inside: null,        // { id, level, building } while standing inside a walk-in building
+  buildMode: false,
+  buildItem: 'wall_solid',
+  buildColor: BUILD_COLORS[0],
+  buildRot: 0,
+  buildLift: 0,
+  buildGroup: null,
+  buildGhost: null,
+  buildMeshes: new Map(),
+  buildSurfaces: [],
+  elevatorBuilding: null,
+  seat: null,          // { spot, pose, yOffset } while sitting / lying on furniture
+  nearDoor: null,      // door the player is standing next to
+  placeService: null,  // public-place id whose service desk is open
   emotes: EMOTES,
   valetCooldown: 0,
   autosaveTimer: 60,
@@ -577,10 +599,17 @@ function applyState() {
   // player
   const p = game.player;
   if (p.vehicle) detachFromVehicle();
+  game.seat = null;
+  p.char.setPose('stand');
+  if (!s.leisure) s.leisure = Props.createLeisureState();
   p.char.setAppearance(s.appearance);
   p.char.setOccupation(s.activeJob);
   p.char.setCarrying(false);
   p.x = s.player.x; p.z = s.player.z; p.yaw = s.player.yaw; p.vx = p.vz = 0;
+  s.builds = Build.normalizeBuildState(s.builds);
+  rebuildBuildWorld();
+  p.y = Number.isFinite(s.player.y) ? s.player.y : city.groundY(p.x, p.z);
+  p.vy = 0; p.onGround = true;
   Cam.setCameraMode(cam, s.player?.cameraMode, false, p.yaw);
   // vehicles
   for (const v of game.vehicles) v.dispose();
@@ -618,6 +647,7 @@ function snapshotState() {
   } else {
     s.player.x = p.x; s.player.z = p.z; s.player.inVehicle = null;
   }
+  s.player.y = p.y;
   s.player.yaw = p.yaw;
   s.player.cameraMode = cam.mode;
   if (s.clock) Time.setClock(s.clock, getClock(), Date.now());
@@ -671,6 +701,7 @@ function triggerJump() {
 
 function triggerEmote(id) {
   if (game.player.vehicle) { toast('Step out of the car to perform emotes.', 'bad'); return false; }
+  if (game.seat) standUpFromProp(true);
   if (game.creatorOpen) return false;
   const def = EMOTE_BY_ID[id];
   if (!def) return false;
@@ -695,7 +726,10 @@ window.addEventListener('keydown', (e) => {
   sfx.ensure();
   if (e.code === 'F5') { e.preventDefault(); saveGame(); return; }
   if (e.code === 'F9') { e.preventDefault(); loadGame(); return; }
-  if (e.code === 'Escape') { closeModal(); closeCreator(); hideHelp(); return; }
+  if (e.code === 'Escape') {
+    if (game.buildMode && !anyOverlay()) { toggleBuildMode(false); return; }
+    closeModal(); closeCreator(); hideHelp(); return;
+  }
   if (isTyping()) return;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   keys.add(e.code);
@@ -705,8 +739,28 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyB') closeModal();
     return;
   }
+  if (game.buildMode && !anyOverlay()) {
+    switch (e.code) {
+      case 'KeyE': placeBuildPiece(); return;
+      case 'KeyX': demolishBuildPiece(); return;
+      case 'KeyQ': game.buildRot = Build.snapRotation(game.buildRot - Math.PI / 2); renderBuildBar(); return;
+      case 'KeyR': game.buildRot = Build.snapRotation(game.buildRot + Math.PI / 2); renderBuildBar(); return;
+      case 'KeyC': cycleBuildColor(); return;
+      case 'Tab': e.preventDefault(); cycleBuildItem(e.shiftKey ? -1 : 1); return;
+      case 'PageUp': setBuildLift(1); return;
+      case 'PageDown': setBuildLift(-1); return;
+      case 'KeyY': toggleBuildMode(false); return;
+      default: break;
+    }
+  }
   if (e.code.startsWith('Digit')) {
     const idx = Number(e.code.slice(5)) - 1;
+    if (game.buildMode && idx >= 0 && idx < BUILD_ITEMS.length) {
+      game.buildItem = BUILD_ITEMS[idx].id;
+      renderBuildBar();
+      rebuildBuildGhost();
+      return;
+    }
     if (idx >= 0 && idx < EMOTES.length && !game.player.vehicle) {
       triggerEmote(EMOTES[idx].id);
       return;
@@ -725,6 +779,7 @@ window.addEventListener('keydown', (e) => {
     case 'KeyV': valet(); break;
     case 'KeyT': openGarageModal(); break;
     case 'KeyU': openUniversity(); break;
+    case 'KeyY': toggleBuildMode(); break;
     case 'KeyC': game.creatorOpen ? closeCreator() : openCreator(); break;
     case 'KeyX':
     case 'KeyP':
@@ -956,6 +1011,7 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
       if (b.id === 't-emote') { openEmotesModal(); return; }
       if (b.id === 't-camera') { toggleCameraMode(); return; }
       if (b.id === 't-uni') { openUniversity(); return; }
+      if (b.id === 't-build') { toggleBuildMode(); return; }
       if (anyOverlay()) return;
       if (key === 'interact') interact();
       if (key === 'vehicle') toggleVehicle();
@@ -1021,6 +1077,13 @@ function updateHUD(force = false) {
       uniEl.textContent = '1,105 courses (U)';
     }
   }
+  const wellEl = $('hud-well');
+  if (wellEl) {
+    const leisure = s.leisure || Props.createLeisureState();
+    const hotel = Places.hotelStatus(s);
+    const base = `${Props.wellbeingLabel(leisure)} · ⚡${Math.round(leisure.energy)}% · 🛋${Math.round(leisure.comfort)}%`;
+    wellEl.textContent = hotel ? `${base} · 🗝 ${hotel.room}` : base;
+  }
   $('hud-vehicles').textContent = `${s.vehicles.length} vehicle${s.vehicles.length === 1 ? '' : 's'}`;
   const heatRow = $('hud-heat-row');
   if (heatRow) {
@@ -1078,6 +1141,14 @@ $('modal-body').addEventListener('click', (e) => {
 
 function result(res) {
   if (res.ok) { sfx.cash(); toast(res.msg, 'good'); } else { sfx.error(); toast(res.msg, 'bad'); }
+  return res.ok;
+}
+
+/** Apply a public-service result, persist and refresh the HUD. */
+function serviceResult(res) {
+  if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); }
+  else { sfx.error(); toast(res.msg, 'warn'); }
+  updateHUD(true);
   return res.ok;
 }
 
@@ -1789,6 +1860,41 @@ function dealerModal() {
 
 const modalActions = {
   close: () => closeModal(),
+  rideLift: ({ level }) => rideElevator(Number(level)),
+  openUni: () => { closeModal(); openUniversity(); },
+  hotelBook: ({ room, nights }) => {
+    const res = Places.bookHotelRoom(game.state, { roomType: room, nights: Number(nights) || 1, day: Time.dayOf(getClock()) });
+    if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); } else { sfx.error(); toast(res.msg, 'warn'); }
+    updateHUD(true);
+  },
+  hotelCheckout: () => {
+    const res = Places.checkoutHotel(game.state);
+    if (res.ok) { toast(res.msg, 'good'); saveGame(true); } else toast(res.msg, 'warn');
+    updateHUD(true);
+  },
+  hotelSleep: () => {
+    const res = Places.sleepHotelNight(game.state, {});
+    if (res.ok) {
+      game.seat = null;
+      const bed = city.propSpotsNear(game.player.x, game.player.z, game.player.y, 6).find((x) => x.type === 'bed');
+      if (bed) sitOnProp(bed, { pose: 'lie', y: 0.62 });
+      sfx.cash(); toast(res.msg, 'good'); saveGame(true);
+    } else { sfx.error(); toast(res.msg, 'warn'); }
+    updateHUD(true);
+  },
+  hospitalTreat: ({ tier }) => serviceResult(Places.treatPatient(game.state, { tier })),
+  museumTicket: ({ tier }) => serviceResult(Places.visitMuseum(game.state, { tier })),
+  gymOffer: ({ offer }) => serviceResult(Places.buyGymOffer(game.state, { offer })),
+  mallMeal: ({ meal }) => serviceResult(Places.buyMeal(game.state, { meal })),
+  movieTicket: ({ movie }) => serviceResult(Places.watchMovie(game.state, { movie })),
+  mallBoutique: () => { closeModal(); openBoutique(); },
+  libraryBorrow: () => serviceResult(Places.borrowBook(game.state)),
+  libraryStudy: () => {
+    const res = Uni.studySession(game.state, { spot: 'Metro Public Library' });
+    if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); } else { sfx.error(); toast(res.msg, 'warn'); }
+    updateHUD(true);
+  },
+  toggleBuild: () => { closeModal(); toggleBuildMode(true); },
   emote: ({ emote }) => {
     if (triggerEmote(emote)) closeModal();
   },
@@ -2205,6 +2311,7 @@ function closeCreator() {
 }
 $('btn-camera')?.addEventListener('click', () => toggleCameraMode());
 $('btn-uni')?.addEventListener('click', () => (game.modal ? closeModal() : openUniversity()));
+$('btn-build')?.addEventListener('click', () => toggleBuildMode());
 $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
 $('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
 $('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : openEmotesModal()));
@@ -2263,6 +2370,8 @@ function enterVehicle(v, silent = false) {
   playerHeadlight.position.set(0, 0.72, v.model.len / 2 - 0.1);
   playerHeadlight.target.position.set(0, 0.1, v.model.len / 2 + 16);
   v.syncMesh(city.groundY(v.x, v.z));
+  p.y = city.groundY(v.x, v.z);
+  p.vy = 0;
   updateDayNight(getClock(), true);
   cam.yaw = v.yaw;
   cam.cockpitYaw = 0;
@@ -2322,6 +2431,7 @@ function exitVehicle() {
   }
   detachFromVehicle();
   p.x = spot.x; p.z = spot.z; p.yaw = v.yaw; p.vx = p.vz = 0;
+  p.y = city.groundY(p.x, p.z); p.vy = 0; p.onGround = true;
   cam.yaw = v.yaw;
 }
 
@@ -2342,6 +2452,7 @@ function wreckVehicle(v) {
 
 function toggleVehicle() {
   if (game.creatorOpen) return;
+  if (game.seat) { standUpFromProp(); return; }
   if (game.player.vehicle) { exitVehicle(); return; }
   const v = nearestOwnedVehicle(3.2);
   if (v) enterVehicle(v);
@@ -2587,6 +2698,8 @@ function findInteraction() {
   const inCar = !!p.vehicle;
   const pos = inCar ? p.vehicle : p;
   const out = { e: null, f: null };
+  // seated on furniture: the only prompt is to get up
+  if (!inCar && game.seat) return { e: { text: '🚶 Stand up', action: () => standUpFromProp() }, f: null };
   // task step
   if (game.task) {
     const step = game.task.steps[game.task.idx];
@@ -2607,7 +2720,10 @@ function findInteraction() {
   if (!out.e) {
     let best = null; let bd = Infinity;
     // weight > 1 lowers priority (moving citizens shouldn't steal the prompt from fixed places)
+    const insideNow = city.buildingAt(p.x, p.z);
+    const onUpper = !!insideNow && insideNow.building.kind === 'tower' && p.y > insideNow.building.baseY + 1.4;
     const consider = (x, z, r, text, action, weight = 1) => {
+      if (onUpper) return; // upper storeys can't reach street-level pads (the lift is added separately)
       const d = (x - p.x) ** 2 + (z - p.z) ** 2;
       if (d < r * r && d * weight < bd) { bd = d * weight; best = { text, action }; }
     };
@@ -2641,6 +2757,56 @@ function findInteraction() {
       const label = c.data.employer ? `Chat with ${c.data.name}` : `Talk to ${c.data.name} (looking for work)`;
       consider(c.x, c.z, 2.2, label, () => { c.idle = 3; c.yaw = Math.atan2(p.x - c.x, p.z - c.z); openModal(hireModal(c.data.id)); }, 6);
     }
+    // walk-in building interiors: lifts + reception desks
+    for (const spot of city.indoorSpots) {
+      consider(spot.x, spot.z, 3.3, spot.prompt, () => openIndoorSpot(spot), 0.8);
+    }
+    const lift = city.towerLiftNear(p.x, p.z);
+    if (lift && lift.dist < 4.4) {
+      const lvl = levelIn(lift.building);
+      const dl = (lift.landing.x - p.x) ** 2 + (lift.landing.z - p.z) ** 2;
+      if (best === null || dl * 0.55 < bd) {
+        bd = dl * 0.55;
+        best = { text: `🛗 ${lift.building.name} lift — ${Interiors.floorLabel(lift.building, lvl)}`, action: openElevatorModal };
+      }
+    }
+
+    // ---- interactive furniture, doors & service counters (any floor) --------
+    let local = null; let localD = Infinity;
+    const pushLocal = (x, z, r, text, action, weight = 1) => {
+      const d = (x - p.x) ** 2 + (z - p.z) ** 2;
+      if (d >= r * r) return;
+      if (d * weight < localD) { localD = d * weight; local = { text, action }; }
+    };
+    for (const spot of city.propSpotsNear(p.x, p.z, p.y, 2.6)) {
+      const def = Props.interactionFor(spot.type);
+      if (!def) continue;
+      pushLocal(spot.x, spot.z, 2.6, `${def.icon} ${def.verb}`, () => usePropSpot(spot), 0.8);
+    }
+    for (const spot of builtPropSpotsNear(p.x, p.z, p.y, 2.6)) {
+      const def = Props.interactionFor(spot.type);
+      if (!def) continue;
+      pushLocal(spot.x, spot.z, 2.6, `${def.icon} ${def.verb} (your build)`, () => usePropSpot(spot), 0.8);
+    }
+    for (const spot of city.serviceSpotsNear(p.x, p.z, p.y, 4.2)) {
+      pushLocal(spot.x, spot.z, 4.2, spot.prompt, () => openPlaceService(spot.placeId), 0.62);
+    }
+    if (!onUpper) {
+      for (const d of city.districtSpots) {
+        pushLocal(d.x, d.z, 5.2, `${d.icon} ${d.name}`, () => openPlaceService(d.id), 0.9);
+      }
+    }
+    const door = city.nearestDoor(p.x, p.z, p.y, 3.2);
+    if (door) {
+      game.nearDoor = door;
+      pushLocal(door.x, door.z, 3.2, `${door.open ? '🚪 Close' : '🚪 Open'} ${door.label}`, () => {
+        const res = Props.toggleDoorState(door);
+        if (res.ok) { sfx.door?.(); toast(res.msg, 'good'); } else { sfx.error(); toast(res.msg, 'warn'); }
+      }, 0.7);
+    } else {
+      game.nearDoor = null;
+    }
+    if (local && (best === null || localD < bd)) best = local;
     out.e = best;
   }
   const v = nearestOwnedVehicle(3.2);
@@ -2650,9 +2816,729 @@ function findInteraction() {
 
 function interact() {
   if (game.creatorOpen) return;
+  if (game.seat && !game.prompt?.e?.action) { standUpFromProp(); return; }
   const it = game.prompt;
   if (it && it.e && it.e.action) it.e.action();
 }
+
+
+
+// ===========================================================================
+// Interactive furniture: sitting, sleeping, TV, bookshelves, gym, service desks
+// ===========================================================================
+function seatOffsetY() {
+  return game.seat ? (game.seat.yOffset || 0) : 0;
+}
+
+function buildingNameOf(id) {
+  const b = id ? city.buildingById(id) : null;
+  return b ? b.name : '';
+}
+
+function sitOnProp(spot, def) {
+  const p = game.player;
+  if (p.vehicle) return;
+  game.seat = { spot, pose: def.pose, yOffset: def.y || 0 };
+  p.x = spot.x; p.z = spot.z;
+  p.y = Number.isFinite(spot.y) ? spot.y : p.y;
+  p.yaw = spot.rot || 0;
+  p.vx = p.vz = 0; p.vy = 0; p.onGround = true;
+  p.char.setPose(def.pose);
+  p.char.group.position.set(p.x, p.y + seatOffsetY(), p.z);
+  p.char.group.rotation.y = p.yaw;
+  cam.yaw = p.yaw;
+  if (game.seat.pose === 'lie') cam.pitch = 0.15;
+}
+
+function standUpFromProp(quiet = false) {
+  if (!game.seat) return false;
+  const p = game.player;
+  const spot = game.seat.spot;
+  p.char.setPose('stand');
+  const fx = Math.sin(spot.rot || 0);
+  const fz = Math.cos(spot.rot || 0);
+  let sx = spot.x + fx * 1.15;
+  let sz = spot.z + fz * 1.15;
+  const res = resolveCircle(sx, sz, 0.4, city.colliderCache);
+  if (res.hit) { sx = spot.x - fx * 1.15; sz = spot.z - fz * 1.15; }
+  p.x = sx; p.z = sz; p.y = Number.isFinite(spot.y) ? spot.y : p.y;
+  p.vx = p.vz = 0;
+  game.seat = null;
+  if (!quiet) sfx.click();
+  return true;
+}
+
+/** Nearest player-built piece that can be used (sofas, beds, desks, lamps...). */
+function builtPropSpotsNear(x, z, y, radius = 2.6) {
+  const out = [];
+  const pieces = game.state?.builds?.pieces || [];
+  for (const piece of pieces) {
+    const type = Props.propTypeForBuild(piece.item);
+    if (!type || !Props.isInteractable(type)) continue;
+    if (Math.abs(piece.y - y) > 1.7) continue;
+    const d = Math.hypot(piece.x - x, piece.z - z);
+    if (d < radius) out.push({ type, x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, built: true });
+  }
+  return out;
+}
+
+function propSpotLabel(spot) {
+  const name = buildingNameOf(spot.buildingId);
+  return name || (spot.built ? 'your build' : '');
+}
+
+function usePropSpot(spot) {
+  const s = game.state;
+  const def = Props.interactionFor(spot.type);
+  if (!def) return;
+  if (game.seat) { standUpFromProp(); return; }
+  if (game.player.vehicle) { toast('Step out of the car first.', 'warn'); return; }
+
+  // Hotel beds are reserved for paying guests
+  if (spot.type === 'bed' && spot.buildingId === 'grand_hotel') {
+    const res = Places.sleepHotelNight(s, {});
+    if (res.ok) {
+      sitOnProp(spot, { pose: 'lie', y: 0.62 });
+      toast(res.msg, 'good');
+      sfx.cash();
+      saveGame(true);
+      updateHUD(true);
+    } else {
+      toast(`${res.msg} (Front desk is in the lobby.)`, 'warn');
+      sfx.error();
+    }
+    return;
+  }
+
+  if (def.service) {
+    openServiceForBuilding(spot.buildingId);
+    return;
+  }
+
+  const res = Props.useProp(s, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
+  if (!res.ok) { toast(res.msg, 'warn'); sfx.error(); return; }
+  let msg = res.msg;
+  if (res.study) {
+    const study = Uni.studySession(s, { spot: propSpotLabel(spot) || 'study desk' });
+    if (study.ok) msg += ` ${study.msg}`;
+  }
+  if (res.pose) sitOnProp(spot, res.def);
+  toast(msg, 'good');
+  if (res.fresh) sfx.cash();
+  updateHUD(true);
+  saveGame(true);
+}
+
+/** Open the right counter for a building (station, boutique, lot or public place). */
+function openServiceForBuilding(buildingId) {
+  if (!buildingId) { toast('There is no service desk here.', 'warn'); return; }
+  if (Places.placeById(buildingId)) { openPlaceService(buildingId); return; }
+  if (buildingId === 'boutique') { openBoutique(); return; }
+  const station = Object.values(STATIONS).find((st) => buildingId === `station-${st.id}`);
+  if (station) { openModal(stationModal(station.id)); return; }
+  if (buildingId.startsWith('lot-')) { openModal(lotModal(buildingId.slice(4))); return; }
+  toast('The desk is unattended right now.', '');
+}
+
+// ===========================================================================
+// Swing doors
+// ===========================================================================
+function toggleNearbyDoor() {
+  const p = game.player;
+  const door = city.nearestDoor(p.x, p.z, p.y, 3.4);
+  if (!door) return false;
+  const res = Props.toggleDoorState(door);
+  if (res.ok) {
+    sfx.door?.();
+    cam.shake = Math.max(cam.shake, 0.04);
+  } else {
+    sfx.error();
+  }
+  toast(res.msg, res.ok ? 'good' : 'warn');
+  return true;
+}
+
+// ===========================================================================
+// Public place service desks (hotel, hospital, museum, mall, gym, library)
+// ===========================================================================
+function openPlaceService(placeId) {
+  const place = Places.placeById(placeId);
+  if (!place) return;
+  game.placeService = placeId;
+  openModal(placeServiceModal(placeId));
+}
+
+function hotelCard() {
+  const s = game.state;
+  const status = Places.hotelStatus(s);
+  const leisure = s.leisure || Props.createLeisureState();
+  const roomCards = Places.HOTEL_ROOMS.map((r) => `
+    <div class="svc-card">
+      <div class="svc-head"><b>${r.icon} ${r.name}</b><span class="svc-price">$${r.price} / night</span></div>
+      <p class="muted">${r.blurb}</p>
+      <div class="row">
+        ${[1, 2, 3].map((n) => `<button data-action="hotelBook" data-room="${r.id}" data-nights="${n}" ${s.cash < r.price * n || status ? 'disabled' : ''}>${n} night${n > 1 ? 's' : ''} · $${r.price * n}</button>`).join('')}
+      </div>
+    </div>`).join('');
+  return `
+    <h2>🏨 The Grand Meridian Hotel — Front Desk</h2>
+    <p class="sub">Sleep restores energy, comfort and health. Rooms are charged per night · cash <b>${money(s.cash)}</b> · fatigue <b>${Math.round(leisure.energy)}%</b></p>
+    ${status ? `<div class="svc-banner">🗝 ${status.label}<div class="row"><button data-action="hotelCheckout">🧾 Check out</button><button data-action="hotelSleep" class="primary">🛏 Sleep a night</button></div></div>` : ''}
+    ${roomCards}
+    <p class="muted">Your key card opens the room floors above — ride the lift and sleep in any hotel bed.</p>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function hospitalCard() {
+  const s = game.state;
+  const leisure = s.leisure || Props.createLeisureState();
+  const tiers = [
+    { id: 'checkup', name: 'Quick checkup', price: 45, blurb: '+25 health, +8 comfort.' },
+    { id: 'emergency', name: 'Emergency treatment', price: 120, blurb: '+60 health, +30 energy.' },
+    { id: 'full', name: 'Full-body treatment', price: 260, blurb: 'Restores health & energy completely.' },
+  ];
+  return `
+    <h2>🏥 Metro General Hospital — Reception</h2>
+    <p class="sub">Walk-in clinic & 24/7 emergency · cash <b>${money(s.cash)}</b> · health <b>${Math.round(leisure.health)}%</b></p>
+    <div class="svc-grid">
+      ${tiers.map((t) => `
+        <div class="svc-card">
+          <div class="svc-head"><b>${t.name}</b><span class="svc-price">$${t.price}</span></div>
+          <p class="muted">${t.blurb}</p>
+          <button data-action="hospitalTreat" data-tier="${t.id}" ${s.cash < t.price ? 'disabled' : ''}>Treat me</button>
+        </div>`).join('')}
+    </div>
+    <p class="muted">Treatment beds inside are interactive too — press <kbd>E</kbd> beside one for a $25 rest.</p>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function museumCard() {
+  const s = game.state;
+  const tickets = [
+    { id: 'general', name: 'General admission', price: 22, blurb: 'Wander the galleries at your own pace.' },
+    { id: 'guided', name: 'Curator guided tour', price: 48, blurb: 'A full tour of the collection.' },
+    { id: 'patron', name: 'Patron evening', price: 150, blurb: 'After-hours tour, rooftop champagne & a $25 gift-shop voucher.' },
+  ];
+  return `
+    <h2>🖼 Metro Museum of Art — Ticketing</h2>
+    <p class="sub">Three galleries, a sculpture court and a rooftop gallery · cash <b>${money(s.cash)}</b></p>
+    <div class="svc-grid">
+      ${tickets.map((t) => `
+        <div class="svc-card">
+          <div class="svc-head"><b>${t.name}</b><span class="svc-price">$${t.price}</span></div>
+          <p class="muted">${t.blurb}</p>
+          <button data-action="museumTicket" data-tier="${t.id}" ${s.cash < t.price ? 'disabled' : ''}>Buy ticket</button>
+        </div>`).join('')}
+    </div>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function mallCard() {
+  const s = game.state;
+  return `
+    <h2>🛍 Metro Central Mall &amp; Cineplex — Concierge</h2>
+    <p class="sub">Boutiques, food court & six-screen cinema · cash <b>${money(s.cash)}</b></p>
+    <div class="svc-grid">
+      <div class="svc-card">
+        <div class="svc-head"><b>👗 Fashion boutiques</b></div>
+        <p class="muted">Maison Verve couture, chains, shades & footwear.</p>
+        <button class="primary" data-action="mallBoutique">Browse the racks</button>
+      </div>
+      <div class="svc-card">
+        <div class="svc-head"><b>🍽 Food court</b><span class="svc-price">$9–$18</span></div>
+        <p class="muted">Hot meals and smoothies that restore energy & comfort.</p>
+        <div class="row">${Places.FOOD_COURT_MEALS.map((m) => `<button data-action="mallMeal" data-meal="${m.id}" ${s.cash < m.price ? 'disabled' : ''}>${m.name} · $${m.price}</button>`).join('')}</div>
+      </div>
+      <div class="svc-card">
+        <div class="svc-head"><b>🎬 Cineplex</b><span class="svc-price">$20–$24</span></div>
+        <p class="muted">Grab a ticket and unwind in the dark.</p>
+        <div class="row">${Places.MOVIES.map((m) => `<button data-action="movieTicket" data-movie="${m.id}" ${s.cash < m.price ? 'disabled' : ''}>${m.icon} ${m.title} · $${m.price}</button>`).join('')}</div>
+      </div>
+    </div>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function gymCard() {
+  const s = game.state;
+  const leisure = s.leisure || Props.createLeisureState();
+  const offers = Object.entries(Places.GYM_OFFERS).map(([id, o]) => `
+    <div class="svc-card">
+      <div class="svc-head"><b>🏋 ${o.name}</b><span class="svc-price">$${o.price}</span></div>
+      <p class="muted">+${o.fitness} fitness, +${o.comfort} comfort.</p>
+      <button data-action="gymOffer" data-offer="${id}" ${s.cash < o.price ? 'disabled' : ''}>Buy</button>
+    </div>`).join('');
+  return `
+    <h2>🏋 Metro Iron Fitness Club — Front Desk</h2>
+    <p class="sub">Fitness makes you sprint faster · fitness <b>${Math.round(leisure.fitness)}%</b> · cash <b>${money(s.cash)}</b></p>
+    <div class="svc-grid">${offers}</div>
+    <p class="muted">Treadmills, weight benches and dumbbell racks inside are all interactive — just walk up and press <kbd>E</kbd>.</p>
+    <div class="actions"><button data-action="close">Close</button></div>`;
+}
+
+function libraryCard() {
+  const s = game.state;
+  const acad = s.academic || Uni.createAcademicState();
+  const course = acad.activeCourseId ? Uni.COURSE_BY_ID[acad.activeCourseId] : null;
+  const credits = course ? (acad.creditsByCourse[course.id] || 0) : 0;
+  return `
+    <h2>📚 Metro Public Library — Front Desk</h2>
+    <p class="sub">${course ? `Studying <b>${course.code} — ${course.title}</b> · ${credits}/${course.creditsRequired} credits` : 'No active course — enroll at Metro Grand University (U)'}</p>
+    <div class="svc-grid">
+      <div class="svc-card">
+        <div class="svc-head"><b>📖 Study session</b></div>
+        <p class="muted">Quiet reading room + research desks. Earns course credits and a study stipend.</p>
+        <button class="primary" data-action="libraryStudy">Study now</button>
+      </div>
+      <div class="svc-card">
+        <div class="svc-head"><b>📕 Borrow a novel</b></div>
+        <p class="muted">Free. Restores comfort and counts as reading.</p>
+        <button data-action="libraryBorrow">Borrow a book</button>
+      </div>
+    </div>
+    <div class="actions"><button data-action="openUni">🎓 Open University catalog</button><button data-action="close">Close</button></div>`;
+}
+
+function placeServiceModal(placeId) {
+  return () => {
+    if (placeId === 'grand_hotel') return hotelCard();
+    if (placeId === 'metro_hospital') return hospitalCard();
+    if (placeId === 'metro_museum') return museumCard();
+    if (placeId === 'metro_mall') return mallCard();
+    if (placeId === 'metro_gym') return gymCard();
+    if (placeId === 'metro_library') return libraryCard();
+    return '<h2>Front desk</h2><div class="actions"><button data-action="close">Close</button></div>';
+  };
+}
+
+// ===========================================================================
+// Walk-in interiors: lifts, floor badges & interior reception desks
+// ===========================================================================
+function levelIn(building) {
+  return Math.max(0, Math.min(building.floors, Math.round((game.player.y - building.baseY) / Interiors.FLOOR_HEIGHT)));
+}
+
+function updateInteriorState() {
+  const p = game.player;
+  const inside = p.vehicle ? null : city.buildingAt(p.x, p.z);
+  if (inside && inside.building.kind === 'tower') {
+    const b = inside.building;
+    const lvl = levelIn(b);
+    city.setActiveInterior(b.id, lvl);
+    game.inside = { id: b.id, level: lvl, building: b };
+  } else {
+    city.clearActiveInterior();
+    game.inside = inside ? { id: inside.building.id, level: 0, building: inside.building } : null;
+  }
+  updateFloorBadge();
+}
+
+let floorBadgeText = '';
+function updateFloorBadge() {
+  const el = $('floor-badge');
+  if (!el) return;
+  const inside = game.player.vehicle ? null : game.inside;
+  if (!inside) {
+    if (floorBadgeText) { el.classList.add('hidden'); floorBadgeText = ''; }
+    return;
+  }
+  const b = inside.building;
+  const label = b.kind === 'tower' ? Interiors.floorLabel(b, inside.level) : 'Interior';
+  const text = `${b.name} · ${label}${b.kind === 'tower' ? ' · 🛗 Press E at the lift' : ''}`;
+  if (text !== floorBadgeText) { el.textContent = text; floorBadgeText = text; }
+  el.classList.remove('hidden');
+}
+
+function openIndoorSpot(spot) {
+  if (spot.type === 'station') {
+    const st = STATIONS[spot.id];
+    if (st) openModal(stationModal(st.id));
+    return;
+  }
+  if (spot.type === 'boutique') { openBoutique(); return; }
+  if (spot.type === 'lot') { openModal(lotModal(spot.lot || spot.id)); }
+}
+
+function openElevatorModal() {
+  const near = city.towerLiftNear(game.player.x, game.player.z);
+  if (!near) { toast('Look for the glowing Metro Lift inside a walk-in tower.', ''); return; }
+  const b = near.building;
+  game.elevatorBuilding = b;
+  const stops = Interiors.elevatorStops(b);
+  openModal(() => {
+    const here = levelIn(b);
+    return `
+      <h2>🛗 ${b.name} — Metro Lift</h2>
+      <p class="sub">${Interiors.themeFor(b.themeId).name} · ${b.floors} floors + Sky Deck · ${stops.length} stops</p>
+      <div class="lift-grid">
+        ${stops.map((st) => `<button class="lift-btn ${st.level === here ? 'active' : ''}" data-action="rideLift" data-level="${st.level}">
+          <b>${st.short}</b><span>${st.label}</span></button>`).join('')}
+      </div>
+      <p class="muted">Every floor is a real 3D interior — executive offices, apartments, boardrooms, server farms, penthouses and clinics. The top stop is an open-air <b>Sky Deck</b> with a panorama over Metro City.</p>
+      <div class="actions"><button data-action="close">Close</button></div>`;
+  });
+}
+
+function rideElevator(level) {
+  const b = game.elevatorBuilding;
+  if (!b) { closeModal(); return; }
+  const p = game.player;
+  if (p.vehicle) { toast('Step out of the car first.', 'bad'); return; }
+  const target = Math.max(0, Math.min(b.floors, level));
+  const landing = city.elevatorLanding(b);
+  const ceiling = city.ceilingAt(landing.x, landing.z, b.baseY + target * Interiors.FLOOR_HEIGHT);
+  p.x = landing.x; p.z = landing.z;
+  p.y = b.baseY + target * Interiors.FLOOR_HEIGHT;
+  p.vx = p.vz = p.vy = 0; p.onGround = true;
+  city.setActiveInterior(b.id, target);
+  game.inside = { id: b.id, level: target, building: b };
+  closeModal();
+  updateFloorBadge();
+  if (ceiling && ceiling < p.y + 2) toast('The ceiling feels low here — watch the camera.', 'warn');
+  toast(`🛗 ${Interiors.floorLabel(b, target)}`, 'good');
+  sfx.tone(320, 0.08, 'triangle', 0.05);
+  sfx.tone(480, 0.12, 'triangle', 0.04, 0.09);
+}
+
+// ===========================================================================
+// 3D Architect Build & Furnish Mode
+// ===========================================================================
+const BUILD_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
+const BUILD_MAT_CACHE = new Map();
+
+function buildMaterial(color, opts = {}) {
+  const { glass = false, ghost = false, rough = 0.62, metal = 0.06, glow = false } = opts;
+  const key = `${color}|${glass}|${ghost}|${rough}|${metal}|${glow}`;
+  const hit = BUILD_MAT_CACHE.get(key);
+  if (hit) return hit;
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(color),
+    roughness: rough,
+    metalness: metal,
+    transparent: glass || ghost,
+    opacity: glass ? 0.34 : ghost ? 0.48 : 1,
+    depthWrite: !(glass || ghost),
+  });
+  if (glow) { mat.emissive = new THREE.Color(color); mat.emissiveIntensity = 0.85; }
+  BUILD_MAT_CACHE.set(key, mat);
+  return mat;
+}
+
+/** Build a 3D mesh for one placed piece (or its translucent ghost preview). */
+function makeBuildMesh(piece, ghost = false) {
+  const item = Build.itemById(piece.item);
+  const g = new THREE.Group();
+  g.position.set(piece.x, piece.y, piece.z);
+  g.rotation.y = piece.rot || 0;
+  const solid = buildMaterial(piece.color || item?.defaultColor || '#f1f5f9', { ghost });
+  const trim = buildMaterial('#334155', { ghost });
+  const glass = buildMaterial('#bae6fd', { glass: true, ghost });
+  const soft = buildMaterial('#94a3b8', { ghost, rough: 0.8 });
+  const dark = buildMaterial('#0f172a', { ghost, rough: 0.4, metal: 0.4 });
+  const warm = buildMaterial('#fbbf24', { ghost, glow: true });
+  const green = buildMaterial('#22c55e', { ghost, rough: 0.85 });
+  const box = (x, y, z, w, h, d, mat, opts = {}) => {
+    const m = new THREE.Mesh(BUILD_BOX_GEO, mat);
+    m.scale.set(w, h, d);
+    m.position.set(x, y, z);
+    m.castShadow = !ghost;
+    m.receiveShadow = !ghost;
+    if (opts.rotX) m.rotation.x = opts.rotX;
+    if (opts.rotZ) m.rotation.z = opts.rotZ;
+    g.add(m);
+    return m;
+  };
+  switch (piece.item) {
+    case 'floor_stone':
+    case 'floor_wood':
+      box(0, -0.1, 0, 4, 0.2, 4, solid);
+      box(0, 0.004, 0, 3.96, 0.012, 3.96, soft);
+      box(0, -0.205, 0, 4, 0.09, 0.16, trim);
+      break;
+    case 'wall_solid':
+      box(0, 1.6, 0, 4, 3.2, 0.22, solid);
+      box(0, 3.26, 0, 4, 0.16, 0.32, trim);
+      box(0, 0.08, 0, 4, 0.16, 0.32, trim);
+      break;
+    case 'wall_window':
+      box(0, 0.45, 0, 4, 0.9, 0.22, solid);
+      box(0, 1.7, 0, 4, 1.7, 0.07, glass);
+      box(0, 2.79, 0, 4, 0.82, 0.22, solid);
+      box(-1.86, 1.7, 0, 0.28, 1.7, 0.3, trim);
+      box(1.86, 1.7, 0, 0.28, 1.7, 0.3, trim);
+      box(0, 2.6, 0, 4, 0.12, 0.32, trim);
+      box(0, 0.84, 0, 4, 0.12, 0.32, trim);
+      break;
+    case 'wall_door':
+      box(-1.55, 1.6, 0, 0.9, 3.2, 0.22, solid);
+      box(1.55, 1.6, 0, 0.9, 3.2, 0.22, solid);
+      box(0, 2.8, 0, 2.2, 0.8, 0.22, solid);
+      box(0, 2.42, 0, 2.4, 0.14, 0.34, trim);
+      box(-1.09, 1.2, 0, 0.1, 2.4, 0.32, trim);
+      box(1.09, 1.2, 0, 0.1, 2.4, 0.32, trim);
+      break;
+    case 'glass_wall':
+      box(0, 1.6, 0, 4, 3.2, 0.08, glass);
+      box(0, 3.24, 0, 4, 0.14, 0.24, trim);
+      box(0, 0.07, 0, 4, 0.14, 0.24, trim);
+      for (const mx of [-1.34, 0, 1.34]) box(mx, 1.6, 0, 0.1, 3.2, 0.16, trim);
+      break;
+    case 'stairs':
+      for (let i = 0; i < 8; i++) {
+        const z = -1.6 + i * 0.4 + 0.2;
+        box(0, (i + 1) * 0.4 - 0.2, z, 4, 0.4, 0.4, solid);
+        box(0, (i + 1) * 0.4 - 0.01, z, 3.9, 0.03, 0.36, trim);
+      }
+      for (const sx of [-1.95, 1.95]) box(sx, 1.6, 0, 0.12, 0.12, 3.4, trim, { rotX: -0.78 });
+      break;
+    case 'pillar':
+      box(0, 1.6, 0, 0.6, 3.2, 0.6, solid);
+      box(0, 3.12, 0, 0.9, 0.18, 0.9, trim);
+      box(0, 0.1, 0, 0.9, 0.2, 0.9, trim);
+      break;
+    case 'railing':
+      box(0, 0.62, 0, 4, 0.9, 0.06, glass);
+      box(0, 1.12, 0, 4, 0.1, 0.14, trim);
+      for (const px of [-2, 0, 2]) box(px, 0.56, 0, 0.1, 1.12, 0.1, trim);
+      break;
+    case 'roof_gable':
+      box(-0.95, 0.85, 0, 2.4, 0.16, 4.8, solid, { rotZ: 0.52 });
+      box(0.95, 0.85, 0, 2.4, 0.16, 4.8, solid, { rotZ: -0.52 });
+      box(0, 1.42, 0, 0.42, 0.28, 4.9, trim);
+      box(0, 0.05, 0, 4.4, 0.16, 4.9, trim);
+      break;
+    // ---- furniture ------------------------------------------------------
+    case 'sofa':
+      box(0, 0.24, 0, 2.6, 0.42, 1.0, solid);
+      box(0, 0.66, -0.4, 2.6, 0.5, 0.2, solid);
+      box(-1.25, 0.55, 0, 0.12, 0.5, 1.0, solid);
+      box(1.25, 0.55, 0, 0.12, 0.5, 1.0, solid);
+      box(-0.62, 0.5, 0.04, 1.16, 0.14, 0.84, soft);
+      box(0.62, 0.5, 0.04, 1.16, 0.14, 0.84, soft);
+      for (const dx of [-1.05, 1.05]) for (const dz of [-0.36, 0.36]) box(dx, 0.06, dz, 0.1, 0.12, 0.1, dark);
+      break;
+    case 'bed':
+      box(0, 0.26, 0, 2.0, 0.3, 2.3, dark);
+      box(0, 0.49, 0, 1.94, 0.24, 2.2, soft);
+      box(0, 0.64, 0.35, 1.9, 0.16, 1.4, solid);
+      box(-0.46, 0.68, -0.86, 0.78, 0.18, 0.44, trim);
+      box(0.46, 0.68, -0.86, 0.78, 0.18, 0.44, trim);
+      box(0, 0.85, -1.16, 2.06, 1.1, 0.16, dark);
+      break;
+    case 'desk':
+      box(0, 0.75, 0, 2.0, 0.09, 0.9, solid);
+      for (const dx of [-0.9, 0.9]) box(dx, 0.37, 0, 0.1, 0.74, 0.8, dark);
+      box(0, 1.06, -0.24, 0.62, 0.4, 0.05, dark);
+      box(0, 1.12, -0.2, 0.56, 0.32, 0.02, glass);
+      box(0, 0.82, 0.2, 0.5, 0.03, 0.16, trim);
+      box(0, 0.45, 1.0, 0.5, 0.75, 0.08, solid);
+      box(0, 0.06, 1.0, 0.5, 0.1, 0.4, dark);
+      break;
+    case 'table':
+      box(0, 0.74, 0, 2.0, 0.1, 1.2, solid);
+      for (const dx of [-0.8, 0.8]) box(dx, 0.36, 0, 0.12, 0.72, 0.9, dark);
+      for (const dz of [-0.95, 0.95]) box(0, 0.45, dz, 0.5, 0.75, 0.1, trim);
+      break;
+    case 'tv_stand':
+      box(0, 0.32, 0, 2.4, 0.55, 0.5, dark);
+      box(0, 1.3, 0, 2.1, 1.2, 0.1, dark);
+      box(0, 1.3, 0.07, 1.96, 1.06, 0.03, glass);
+      break;
+    case 'bookshelf':
+      box(-1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
+      box(1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
+      box(0, 2.16, 0, 2.0, 0.1, 0.5, dark);
+      for (let i = 0; i < 4; i++) {
+        box(0, 0.36 + i * 0.56, 0.02, 1.94, 0.07, 0.44, solid);
+        for (let b = 0; b < 6; b++) box(-0.78 + b * 0.3, 0.52 + i * 0.56, 0.04, 0.2, 0.26, 0.34, b % 2 ? trim : warm);
+      }
+      break;
+    case 'lamp':
+      box(0, 0.02, 0, 0.4, 0.04, 0.4, dark);
+      box(0, 0.85, 0, 0.07, 1.7, 0.07, dark);
+      box(0, 1.74, 0, 0.46, 0.34, 0.46, warm);
+      break;
+    case 'plant':
+      box(0, 0.24, 0, 0.66, 0.48, 0.66, trim);
+      box(0, 0.48, 0, 0.6, 0.06, 0.6, dark);
+      for (let i = 0; i < 7; i++) {
+        const a = i * 0.9;
+        const leaf = box(Math.cos(a) * 0.3, 0.95 + (i % 3) * 0.2, Math.sin(a) * 0.3, 0.14, 0.8, 0.14, green);
+        leaf.rotation.z = Math.cos(a) * 0.5;
+        leaf.rotation.x = Math.sin(a) * 0.5;
+      }
+      break;
+    default:
+      box(0, 0.4, 0, 1, 0.8, 1, solid);
+  }
+  return g;
+}
+
+function addBuildPieceMesh(piece) {
+  if (!game.buildGroup) return;
+  const mesh = makeBuildMesh(piece, false);
+  game.buildGroup.add(mesh);
+  game.buildMeshes.set(piece.id, mesh);
+}
+
+function removeBuildPieceMesh(id) {
+  const mesh = game.buildMeshes.get(id);
+  if (mesh) { game.buildGroup.remove(mesh); game.buildMeshes.delete(id); }
+}
+
+function refreshBuildSurfaces() {
+  game.buildSurfaces = Build.walkSurfaces(game.state?.builds || { pieces: [] });
+}
+
+function rebuildBuildWorld() {
+  if (!game.buildGroup) {
+    game.buildGroup = new THREE.Group();
+    scene.add(game.buildGroup);
+  }
+  for (const mesh of game.buildMeshes.values()) game.buildGroup.remove(mesh);
+  game.buildMeshes.clear();
+  const builds = game.state?.builds;
+  if (builds) for (const piece of builds.pieces) addBuildPieceMesh(piece);
+  refreshBuildSurfaces();
+}
+
+function ghostTarget() {
+  const item = Build.itemById(game.buildItem);
+  const grid = Build.gridFor(item);
+  const reach = item?.cat === 'structure' ? 4.2 : 3.0;
+  const x = Build.snap(game.player.x + Math.sin(cam.yaw) * reach, grid);
+  const z = Build.snap(game.player.z + Math.cos(cam.yaw) * reach, grid);
+  return { x, z, y: +(game.player.y + game.buildLift).toFixed(2), rot: game.buildRot };
+}
+
+function rebuildBuildGhost() {
+  if (game.buildGhost) { scene.remove(game.buildGhost); game.buildGhost = null; }
+  if (!game.buildMode) return;
+  const item = Build.itemById(game.buildItem);
+  if (!item) return;
+  game.buildGhost = makeBuildMesh({ item: item.id, x: 0, y: 0, z: 0, rot: game.buildRot, color: game.buildColor }, true);
+  game.buildGhost.traverse((o) => { o.castShadow = false; o.receiveShadow = false; });
+  scene.add(game.buildGhost);
+}
+
+function updateBuildGhost() {
+  if (!game.buildMode || !game.buildGhost) return;
+  const t = ghostTarget();
+  game.buildGhost.position.set(t.x, t.y, t.z);
+  game.buildGhost.rotation.y = game.buildRot;
+  game.buildGhost.visible = !game.player.vehicle;
+}
+
+function renderBuildBar() {
+  const el = $('build-bar');
+  if (!el) return;
+  const builds = game.state?.builds || { pieces: [] };
+  const stats = Build.summary(builds);
+  const structures = BUILD_ITEMS.filter((i) => i.cat === 'structure');
+  const furniture = BUILD_ITEMS.filter((i) => i.cat === 'furniture');
+  const btn = (i) => `<button class="build-item ${i.id === game.buildItem ? 'active' : ''}" data-build-item="${i.id}" title="${i.name}"><span>${i.icon}</span><small>${i.name.replace(/ \(.*\)$/, '')}</small></button>`;
+  const swatch = (c) => `<button class="build-swatch ${c === game.buildColor ? 'active' : ''}" style="background:${c}" data-build-color="${c}" aria-label="colour ${c}"></button>`;
+  el.innerHTML = `
+    <div class="build-row build-head">
+      <b>🏗 Build &amp; Furnish</b>
+      <span class="build-meta">${stats.structure} structure · ${stats.furniture} furniture / ${MAX_CUSTOM_BUILDS}</span>
+      <span class="build-tools">
+        <span class="build-level">Height ${(game.player.y + game.buildLift).toFixed(1)} m</span>
+        <button data-build-lift="1" title="Raise ghost one storey (PageUp)">▲ storey</button>
+        <button data-build-lift="-1" title="Lower ghost one storey (PageDown)">▼ storey</button>
+        <button data-build-rotate="-1" title="Rotate left (Q)">⟲</button>
+        <button data-build-rotate="1" title="Rotate right (R)">⟳</button>
+        <button data-build-demolish="1" title="Demolish (X)">🧨 Demolish</button>
+        <button class="danger" data-build-exit="1" title="Exit Build Mode (Y)">✕ Exit</button>
+      </span>
+    </div>
+    <div class="build-row"><span class="build-label">Structure</span>${structures.map(btn).join('')}</div>
+    <div class="build-row"><span class="build-label">Furniture</span>${furniture.map(btn).join('')}</div>
+    <div class="build-row"><span class="build-label">Colour</span>${BUILD_COLORS.map(swatch).join('')}
+      <span class="build-hint"><kbd>E</kbd> place · <kbd>X</kbd> demolish · <kbd>Q</kbd>/<kbd>R</kbd> rotate · <kbd>Tab</kbd> item · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> storey · <kbd>Y</kbd> exit</span>
+    </div>`;
+}
+
+function setBuildLift(delta) {
+  game.buildLift = Math.max(-2 * BUILD_STORY_H, Math.min(10 * BUILD_STORY_H, game.buildLift + delta * BUILD_STORY_H));
+  renderBuildBar();
+}
+
+function cycleBuildColor() {
+  const i = BUILD_COLORS.indexOf(game.buildColor);
+  game.buildColor = BUILD_COLORS[(i + 1) % BUILD_COLORS.length];
+  renderBuildBar();
+  rebuildBuildGhost();
+}
+
+function cycleBuildItem(dir = 1) {
+  const list = BUILD_ITEMS;
+  const i = list.findIndex((it) => it.id === game.buildItem);
+  game.buildItem = list[(i + dir + list.length) % list.length].id;
+  renderBuildBar();
+  rebuildBuildGhost();
+}
+
+function toggleBuildMode(on) {
+  const next = on === undefined ? !game.buildMode : !!on;
+  if (next && game.player.vehicle) { toast('Step out of the car to enter Build Mode.', 'bad'); return; }
+  game.buildMode = next;
+  document.body.classList.toggle('build-mode', next);
+  $('build-bar')?.classList.toggle('hidden', !next);
+  if (next) {
+    if (!game.state.builds) game.state.builds = Build.createBuildState();
+    if (!game.buildGroup) rebuildBuildWorld();
+    renderBuildBar();
+    rebuildBuildGhost();
+    toast('🏗 Build Mode — E place · X demolish · Q/R rotate · C colour · Tab item · PgUp/PgDn storey', 'good');
+  } else {
+    if (game.buildGhost) { scene.remove(game.buildGhost); game.buildGhost = null; }
+    renderBuildBar();
+    saveGame(true);
+  }
+  sfx.click();
+}
+
+function placeBuildPiece() {
+  const item = Build.itemById(game.buildItem);
+  if (!item) return;
+  const target = ghostTarget();
+  const res = Build.addPiece(game.state.builds, item.id, target, { color: game.buildColor });
+  if (!res.ok) { toast(res.msg, 'warn'); sfx.error(); return; }
+  addBuildPieceMesh(res.piece);
+  refreshBuildSurfaces();
+  renderBuildBar();
+  sfx.tone(520, 0.06, 'square', 0.05);
+  toast(`🏗 ${res.msg}`, 'good');
+  updateHUD(true);
+}
+
+function demolishBuildPiece() {
+  const t = ghostTarget();
+  const piece = Build.pieceNear(game.state.builds, t.x, t.z, t.y, 3.4);
+  if (!piece) { toast('Nothing to demolish there — aim at your build.', 'warn'); sfx.error(); return; }
+  const res = Build.removePiece(game.state.builds, piece.id);
+  if (!res.ok) { toast(res.msg, 'warn'); return; }
+  removeBuildPieceMesh(piece.id);
+  refreshBuildSurfaces();
+  renderBuildBar();
+  sfx.wrench();
+  toast(`🧨 ${res.msg}`, 'good');
+}
+
+function openBuildMode() { toggleBuildMode(true); }
+
+$('build-bar')?.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-build-item]');
+  if (item) { game.buildItem = item.dataset.buildItem; renderBuildBar(); rebuildBuildGhost(); sfx.click(); return; }
+  const col = e.target.closest('[data-build-color]');
+  if (col) { game.buildColor = col.dataset.buildColor; renderBuildBar(); rebuildBuildGhost(); return; }
+  const rot = e.target.closest('[data-build-rotate]');
+  if (rot) { game.buildRot = Build.snapRotation(game.buildRot + Number(rot.dataset.buildRotate) * (Math.PI / 2)); renderBuildBar(); return; }
+  const lift = e.target.closest('[data-build-lift]');
+  if (lift) { setBuildLift(Number(lift.dataset.buildLift)); return; }
+  if (e.target.closest('[data-build-demolish]')) { demolishBuildPiece(); return; }
+  if (e.target.closest('[data-build-exit]')) toggleBuildMode(false);
+});
 
 function updatePrompt() {
   const it = findInteraction();
@@ -2817,9 +3703,22 @@ function updatePlayer(dt) {
     return;
   }
   sfx.setSkid(false, 0);
-  // on foot
+  // on foot — sitting / lying on furniture holds the player in place
+  const { f: f2, r: r2 } = { f, r };
+  const inputLen = Math.abs(f2) + Math.abs(r2);
+  if (game.seat && inputLen > 0.05) standUpFromProp(true);
+  if (game.seat) {
+    p.vx = p.vz = 0;
+    p.x = game.seat.spot.x; p.z = game.seat.spot.z;
+    p.char.group.position.set(p.x, p.y + seatOffsetY(), p.z);
+    p.char.group.rotation.y = p.yaw;
+    p.char.animate(dt, 0);
+    if (game.state.leisure) Props.tickLeisure(game.state.leisure, dt, { seated: true });
+    sfx.setEngine(false, 0);
+    return;
+  }
   const sprint = k('ShiftLeft', 'ShiftRight') || touchInput.sprint;
-  const speed = sprint ? 7.2 : 3.8;
+  const speed = sprint ? 7.2 * Props.sprintMultiplier(game.state.leisure) : 3.8;
   const fx = Math.sin(cam.yaw); const fz = Math.cos(cam.yaw);
   // camera-relative movement: forward = (sin, cos), right = (-cos, sin)
   let mx = fx * f - fz * r;
@@ -2832,23 +3731,62 @@ function updatePlayer(dt) {
   p.vx += (mx * speed - p.vx) * k2;
   p.vz += (mz * speed - p.vz) * k2;
   p.x += p.vx * dt; p.z += p.vz * dt;
-  const res = resolveCircle(p.x, p.z, 0.4, city.colliderCache);
-  p.x = res.x; p.z = res.z;
-  for (const c of carCirclesAll(null)) {
-    const dx = p.x - c.x; const dz = p.z - c.z; const d = Math.hypot(dx, dz); const min = c.r + 0.4;
-    if (d < min && d > 1e-4) { p.x += (dx / d) * (min - d); p.z += (dz / d) * (min - d); }
+  let px = p.x; let pz = p.z;
+  let res = resolveCircle(px, pz, 0.4, city.colliderCache);
+  px = res.x; pz = res.z;
+  // roof parapets & upper-storey shells only block at their own elevation
+  const upper = city.upperCollidersAt(p.y);
+  if (upper.length) { res = resolveCircle(px, pz, 0.4, upper); px = res.x; pz = res.z; }
+  // furniture inside the building you are standing in
+  const insideNow = city.buildingAt(px, pz);
+  if (insideNow) {
+    const lvl = Math.max(0, Math.min(insideNow.building.floors, Math.round((p.y - insideNow.building.baseY) / Interiors.FLOOR_HEIGHT)));
+    const furn = city.interiorCollidersFor(insideNow.building.id, lvl);
+    if (furn.length) { res = resolveCircle(px, pz, 0.4, furn); px = res.x; pz = res.z; }
+  }
+  // player-built walls & furniture on this storey
+  const ownWalls = Build.collidersNear(game.state.builds, p.y + 0.05);
+  if (ownWalls.length) { res = resolveCircle(px, pz, 0.4, ownWalls); px = res.x; pz = res.z; }
+  // closed swing doors block the doorway until you open them
+  const doorCols = city.doorCollidersAt(p.y);
+  if (doorCols.length) { res = resolveCircle(px, pz, 0.4, doorCols); px = res.x; pz = res.z; }
+  p.x = px; p.z = pz;
+  if (p.y < 1.4) {
+    for (const c of carCirclesAll(null)) {
+      const dx = p.x - c.x; const dz = p.z - c.z; const d = Math.hypot(dx, dz); const min = c.r + 0.4;
+      if (d < min && d > 1e-4) { p.x += (dx / d) * (min - d); p.z += (dz / d) * (min - d); }
+    }
   }
   p.x = THREE.MathUtils.clamp(p.x, -WORLD_LIMIT, WORLD_LIMIT);
   p.z = THREE.MathUtils.clamp(p.z, -WORLD_LIMIT, WORLD_LIMIT);
+  // vertical support: street, tower floor slabs, built floors & stairs
+  const groundY = city.groundY(p.x, p.z);
+  let support = groundY;
+  const towerY = city.walkSurfaceAt(p.x, p.z, p.y, Build.STEP_UP);
+  if (towerY != null && towerY > support) support = towerY;
+  const builtY = Build.supportAt(game.buildSurfaces, p.x, p.z, p.y, -Infinity);
+  if (builtY > support) support = builtY;
+  if (p.y <= support + 0.02) {
+    p.y = support; p.vy = 0; p.onGround = true;
+  } else {
+    p.vy -= 22 * dt;
+    p.y += p.vy * dt;
+    p.onGround = false;
+    if (p.y <= support) { p.y = support; p.vy = 0; p.onGround = true; }
+  }
+  if (p.y < groundY - 0.4) { p.y = groundY; p.vy = 0; }
   const moving = Math.hypot(p.vx, p.vz);
   if (cam.mode === 'first' && !game.creatorOpen) {
     p.yaw = cam.yaw;
   } else if (moving > 0.3 && len > 0.05) {
     p.yaw = lerpAngle(p.yaw, Math.atan2(mx, mz), Math.min(1, dt * 12));
   }
-  p.char.group.position.set(p.x, city.groundY(p.x, p.z), p.z);
+  p.char.group.position.set(p.x, p.y + seatOffsetY(), p.z);
   p.char.group.rotation.y = p.yaw;
   p.char.animate(dt, moving);
+  if (game.state.leisure) {
+    Props.tickLeisure(game.state.leisure, dt, { sprinting: sprint && moving > 0.6, moving: moving > 0.25 });
+  }
   sfx.setEngine(false, 0);
 }
 
@@ -2858,7 +3796,7 @@ function updateCamera(dt) {
   $('fp-reticle')?.classList.toggle('hidden', !(inFirst && !p.vehicle && !anyOverlay()));
 
   // Q / R look or orbit
-  if (!anyOverlay() && !isTyping()) {
+  if (!anyOverlay() && !isTyping() && !game.buildMode) {
     if (inFirst && p.vehicle) {
       if (k('KeyQ')) {
         cam.cockpitYaw = THREE.MathUtils.clamp(cam.cockpitYaw + dt * 1.85, -CAM_COCKPIT_YAW_MAX, CAM_COCKPIT_YAW_MAX);
@@ -2928,7 +3866,7 @@ function updateCamera(dt) {
     const pose = Cam.computeFootFirstPersonPose(cam, {
       x: p.x,
       z: p.z,
-      groundY: city.groundY(p.x, p.z),
+      groundY: p.y + seatOffsetY() * 0.6,
       buildH,
       jumpY: p.char.jumpY || 0,
       movingSpeed: moving,
@@ -2962,11 +3900,11 @@ function updateCamera(dt) {
     pitch = cam.pitch;
     camera.fov += (Cam.targetFov(cam, true, v.speed) - camera.fov) * Math.min(1, dt * 3);
   } else {
-    target.set(p.x, city.groundY(p.x, p.z) + 1.55 + (p.char.jumpY || 0) * 0.4, p.z);
+    target.set(p.x, p.y + 1.55 + (p.char.jumpY || 0) * 0.4 + seatOffsetY() * 0.55, p.z);
     camera.fov += (Cam.targetFov(cam, false, 0) - camera.fov) * Math.min(1, dt * 3);
   }
   camera.updateProjectionMatrix();
-  const indoorCeil = !p.vehicle ? city.ceilingY(p.x, p.z) : null;
+  const indoorCeil = !p.vehicle ? city.ceilingAt(p.x, p.z, p.y) : null;
   if (indoorCeil != null) {
     dist = Math.min(dist, 5.2);
   }
@@ -3334,6 +4272,13 @@ mmBase.width = mmBase.height = 200;
   g.fillRect(toMM(-34), toMM(-230), 68 * MM_SCALE, 36 * MM_SCALE);
   g.fillRect(toMM(-74), toMM(-226), 34 * MM_SCALE, 32 * MM_SCALE);
   g.fillRect(toMM(40), toMM(-226), 34 * MM_SCALE, 32 * MM_SCALE);
+  // South Waterfront public district (z 157..240): pads, beach & sea
+  g.fillStyle = '#cfd6dd';
+  g.fillRect(toMM(-162), toMM(157), 324 * MM_SCALE, 74 * MM_SCALE);
+  g.fillStyle = '#e8d3a0';
+  g.fillRect(toMM(-162), toMM(228), 324 * MM_SCALE, 11 * MM_SCALE);
+  g.fillStyle = '#0e7490';
+  g.fillRect(toMM(-162), toMM(239), 324 * MM_SCALE, 8 * MM_SCALE);
   g.fillStyle = '#8f9196';
   for (const bx of BLOCK_CENTERS) for (const bz of BLOCK_CENTERS) {
     const h = BLOCK_HALF + 3;
@@ -3349,6 +4294,9 @@ mmBase.width = mmBase.height = 200;
     g.fillRect(toMM(r - ROAD_HALF), toMM(-157), ROAD_HALF * 2 * MM_SCALE, 314 * MM_SCALE);
     g.fillRect(toMM(-157), toMM(r - ROAD_HALF), 314 * MM_SCALE, ROAD_HALF * 2 * MM_SCALE);
   }
+  // South Waterfront avenues: 5 north–south strips + the waterfront cross avenue
+  for (const r of ROAD_LINES) g.fillRect(toMM(r - ROAD_HALF), toMM(157), ROAD_HALF * 2 * MM_SCALE, 70 * MM_SCALE);
+  g.fillRect(toMM(-162), toMM(190 - ROAD_HALF), 324 * MM_SCALE, ROAD_HALF * 2 * MM_SCALE);
 }
 function drawMinimap() {
   const g = mmCtx;
@@ -3367,6 +4315,7 @@ function drawMinimap() {
   square(DEALERSHIP.x, DEALERSHIP.z, 13, DEALERSHIP.color, 'M');
   square(BOUTIQUE.x, BOUTIQUE.z, 13, BOUTIQUE.color, 'B');
   square(UNIVERSITY.x, UNIVERSITY.z, 15, UNIVERSITY.color, 'U');
+  for (const place of Places.PUBLIC_PLACES) square(place.x, place.z, 15, place.color, place.mapLabel);
   for (const st of Object.values(FUEL_STATIONS)) square(st.x, st.z, 11, st.color, 'F');
   for (const t of game.traffic) dot(t.x, t.z, 1.6, '#e5e7eb');
   for (const cop of game.police) {
@@ -3409,6 +4358,8 @@ function frame() {
   const s = game.state;
 
   updatePlayer(dt);
+  updateInteriorState();
+  updateBuildGhost();
   if (net) { net.update(dt, netLocalState()); updateRemotes(dt); }
 
   // owned parked vehicles coast to a stop & stay out of walls (wrecks animate smoke)
@@ -3498,7 +4449,7 @@ function frame() {
     const liveSchedule = Uni.getLiveCampusSchedule(nowInGame);
     if (liveSchedule.length) city.updateLectureBoard(liveSchedule[0]);
   }
-  city.update(game.elapsed);
+  city.update(game.elapsed, dt);
   updatePrompt();
   updateCamera(dt);
   updateHUD();
