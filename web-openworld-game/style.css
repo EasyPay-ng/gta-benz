@@ -250,6 +250,20 @@ button.big { padding: 12px 22px; font-size: 1.05rem; }
 .login-alt { margin-top: 10px; }
 .login-alt button { flex: 1; font-size: 12px; opacity: 0.85; }
 #btn-account.on { border-color: var(--primary); color: var(--primary); }
+#btn-camera.on, #t-camera.on {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.2);
+  color: #e0f2fe;
+  font-weight: 700;
+}
+#fp-reticle {
+  position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+  transform: translate(-50%, -50%); border-radius: 50%;
+  background: rgba(248, 250, 252, 0.82);
+  border: 1px solid rgba(15, 23, 42, 0.75);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.45);
+  pointer-events: none; z-index: 4;
+}
 .peer-tag { color: #7dd3fc; }
 
 /* ===== Boutique, Exotic Showroom & Car Customizer ===== */

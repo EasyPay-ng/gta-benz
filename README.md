@@ -38,18 +38,22 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 
 ## Controls
 
-| On foot | Driving & Street Heat |
+| On foot | Driving, 3D Cockpit & Street Heat |
 |---|---|
 | `WASD` / arrows: move · `Shift`: sprint | `W`/`S`: gas, brake & reverse · `A`/`D`: steer |
-| Mouse drag, `Q`/`R`: orbit camera · wheel: zoom | `Space`: handbrake (drift & twin tyre skids!) · `G`: horn |
-| `E`: interact · `Space`: jump | `E`: complete waypoints / stalled-car assist |
+| `X` / `P` (or HUD `🎥`): toggle **1st-Person** / **3rd-Person** camera | `X` / `P` (or HUD `🎥`): toggle **Outside Chase** / **3D Cockpit Interior** |
+| Mouse drag, `Q`/`R`: look / orbit camera · wheel: zoom | Mouse drag, `Q`/`R` in cockpit: look around cabin, mirrors & side windows |
+| `E`: interact · `Space`: jump | `Space`: handbrake (drift & twin tyre skids!) · `G`: horn · `E`: waypoints |
 | `B` or `1`–`8`: character actions, greetings & dances | `F`: exit · `T`: Garage & Roadside Assist |
-| `F`: get in/out of your car · `V`: valet (calls your last car) | High-speed hits & explosions raise **Police Heat (`★`–`★★★`)** — outrun cruisers to cool down |
-| `T`: Garage & Roadside Assist · `C`: character creator · `H`: help · `M`: mute | `F5`: save · `F9`: load (also autosaves) |
+| `F`: get in/out of your car · `V`: valet · `T`: Garage · `C`: look · `H`: help · `M`: mute | High-speed hits & explosions raise **Police Heat (`★`–`★★★`)** · `F5` save / `F9` load |
 
-On touch devices you get an on-screen joystick and buttons.
+On touch devices you get an on-screen joystick and buttons (including `🎥` camera view toggle).
 
 ## Features
+
+- **First-Person Street POV & Sleek 3D Car Cockpit Interior View (`X` / `P` / `🎥`).** Switch seamlessly at any time between classic Third-Person Orbit/Chase and immersive First-Person (`src/camera.js`, persisted in save v6):
+  - **On-foot First-Person:** eye-level street perspective scaled to your character's body build with natural walk/sprint head-bob, responsive pitch/yaw freelook and WASD strafing — hiding your own head/hat/shades so nothing clips your vision while your 3D outfit, jacket/tunic, chains, swinging arms, carried courier parcels, legs and footwear remain visible when looking down.
+  - **Sleek 3D Car Cockpit Interior (all 11 vehicles):** step inside a sculpted luxury cabin tailored to each car's silhouette (low-slung carbon-trim *Valkyrie X12 Hypercar*, elevated *G-Wagen 4×4* with passenger grab handle, open-air *Aero Spider Convertible*, *Metro Cab* with visible fare passenger beside you, etc.). Features framed Alcantara A/B/C-pillars, headliner, sun visors, rearview mirror & clear windshield; multi-tier stitched leather dashboard with carbon/brushed-aluminium/piano-black trim, 5 chrome turbine AC vents and glowing ambient LED light strip; **live 12 Hz digital OLED instrument cluster** (`km/h`, 16-segment RPM bar, gear, fuel & body HP) and **angled widescreen GPS street-radar infotainment display** (live rotating Metro City road map, active mission waypoint route, 24× clock & drive mode); **live-rotating 3-spoke sport steering wheel** with shift paddles and **3D driver hands/cuffs** synced to your skin tone and shirt colour; plus quilted leather bucket seats, door cards and center console with shifter & illuminated `START` button.
 
 - **Realistic PBR visuals & atmospheric city.** Procedural diffuse, normal, roughness and emissive PBR maps (`src/textures.js`) with ACES Filmic tone mapping, PMREM environment reflections and a custom atmospheric `SkyDome` shader (dawn/sunset horizon scatter, drifting clouds and twinkling night stars). Features tyre-polished weathered asphalt, irregular flagstone sidewalks, curb storm drains, 6 brick/limestone/glass-curtain architectural facades, multi-cluster avenue trees and soft additive streetlamp & vehicle lens flares.
 - **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
@@ -82,7 +86,8 @@ web-openworld-game/
   index.html          HUD, modals, character creator, help, touch controls
   style.css           glassmorphism UI
   game.js             entry: renderer, loop, player, citizens, tasks, UI, save/load
-  src/data.js         all tunable data (jobs, startups, vehicles, clock, telemetry, emotes, heat)
+  src/data.js         all tunable data (jobs, startups, vehicles, clock, telemetry, emotes, heat, camera)
+  src/camera.js       pure 1st/3rd-person & 3D car cockpit camera state, freelook & world-pose math
   src/time.js         pure 24× city clock, day/night lighting & shift boundaries
   src/economy.js      pure game-state logic & save migrations (unit-tested, no DOM)
   src/customization.js pure Boutique wardrobe, outfit bundles, vehicle mods & multiplayer vehicle codec

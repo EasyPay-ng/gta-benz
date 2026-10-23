@@ -38,6 +38,7 @@
       <canvas id="minimap" width="200" height="200" class="glass"></canvas>
       <div class="side-buttons">
         <button id="btn-account" class="hidden" title="Sign in / switch player">🪪 Account</button>
+        <button id="btn-camera" title="Toggle 1st / 3rd person &amp; car cockpit view (X / P)">🎥 3rd View</button>
         <button id="btn-garage" title="Garage, telemetry &amp; roadside assist (T)">🛠 Garage</button>
         <button id="btn-creator" title="Character creator (C)">👤 Look</button>
         <button id="btn-emotes" title="Character actions &amp; emotes (B / 1–8)">✋ Actions</button>
@@ -49,6 +50,8 @@
         <button id="btn-reset" class="danger" title="Delete save and restart">↺ Reset</button>
       </div>
     </div>
+
+    <div id="fp-reticle" class="hidden" aria-hidden="true"></div>
 
     <div id="prompt" class="hidden"><kbd id="prompt-key">E</kbd><span id="prompt-text"></span></div>
 
@@ -78,7 +81,7 @@
         </div>
       </div>
       <div id="veh-fault" class="veh-fault hidden">⚙ ENGINE FAULT — service soon</div>
-      <div class="veh-keys">W/S drive · A/D steer · Space drift · G horn · T roadside · F exit</div>
+      <div class="veh-keys">W/S drive · A/D steer · Space drift · X cockpit · G horn · F exit</div>
     </div>
 
     <div id="toasts"></div>
@@ -92,6 +95,7 @@
         <button data-key="jump">⤒</button>
         <button data-key="sprint">⇧</button>
         <button data-key="horn">📯</button>
+        <button id="t-camera" type="button" title="Toggle 1st / 3rd person camera">🎥</button>
         <button id="t-emote" type="button">✋</button>
       </div>
     </div>
@@ -160,7 +164,8 @@
             <ul>
               <li><kbd>W A S D</kbd> / arrows: move</li>
               <li><kbd>Shift</kbd>: sprint</li>
-              <li>Mouse drag / <kbd>Q</kbd> <kbd>R</kbd>: orbit camera · wheel: zoom</li>
+              <li><kbd>X</kbd> / <kbd>P</kbd>: toggle <b>1st-Person</b> / <b>3rd-Person</b> camera</li>
+              <li>Mouse drag / <kbd>Q</kbd> <kbd>R</kbd>: look / orbit · wheel: zoom</li>
               <li><kbd>E</kbd>: interact · <kbd>Space</kbd>: jump</li>
               <li><kbd>F</kbd>: get in/out of your car</li>
               <li><kbd>B</kbd> / <kbd>1–8</kbd>: emotes &amp; dances</li>
@@ -169,10 +174,11 @@
             </ul>
           </div>
           <div>
-            <h3>Driving &amp; Street Heat</h3>
+            <h3>Driving &amp; 3D Cockpit</h3>
             <ul>
-              <li><kbd>W</kbd>/<kbd>S</kbd>: gas / brake &amp; reverse</li>
-              <li><kbd>A</kbd>/<kbd>D</kbd>: steer</li>
+              <li><kbd>W</kbd>/<kbd>S</kbd>: gas / brake &amp; reverse · <kbd>A</kbd>/<kbd>D</kbd>: steer</li>
+              <li><kbd>X</kbd> / <kbd>P</kbd>: switch between <b>Outside Chase</b> &amp; <b>3D Cockpit Interior</b></li>
+              <li>Mouse drag / <kbd>Q</kbd> <kbd>R</kbd> in cockpit: look around cabin &amp; mirrors</li>
               <li><kbd>Space</kbd>: handbrake (drift &amp; tyre skids!)</li>
               <li><kbd>G</kbd>: horn · <kbd>E</kbd>: complete waypoints</li>
               <li>Wrecking cars or reckless hits raise <b>Police Heat (★–★★★)</b> — outrun cruisers to cool down!</li>

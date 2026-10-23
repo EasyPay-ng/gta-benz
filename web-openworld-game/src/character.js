@@ -147,8 +147,15 @@ export class Character {
     this.landingSquash = 0;
     this.occupation = null;
     this.carrying = false;
+    this.firstPerson = false;
     this._build();
     this.setAppearance(appearance);
+  }
+
+  setFirstPerson(on) {
+    this.firstPerson = !!on;
+    if (this.headGroup) this.headGroup.visible = !this.firstPerson;
+    if (this.collar) this.collar.visible = !this.firstPerson;
   }
 
   _build() {
