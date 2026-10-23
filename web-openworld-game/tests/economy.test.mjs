@@ -109,14 +109,14 @@ test('every business unlocks an occupation that points back to it', () => {
     assert.equal(OCCUPATIONS[b.occupation].business, b.id);
   }
 });
-test('v2 saves migrate with a fresh vehicle condition, wardrobe, cameraMode and anchored clock (save v6)', () => {
+test('v2 saves migrate with a fresh vehicle condition, wardrobe, academic state, cameraMode and anchored clock (save v7)', () => {
   const now = 1_700_000_000_000;
   const s = Eco.migrateState({
     version: 2,
     stats: { day: 3, tasksCompleted: 2, totalEarned: 440, payrollTimer: 12 },
     vehicles: [{ id: 'v1', model: 'hatch', color: '#b45309', x: 0, z: 0, yaw: 0 }],
   }, now);
-  assert.equal(s.version, 6);
+  assert.equal(s.version, 7);
   assert.deepEqual(s.vehicles[0].cond, { hp: 100, fuel: 100, tires: 100, engine: 100 });
   assert.equal(s.vehicles[0].wrecked, false);
   assert.equal(s.vehicles[0].lastServicedInGameMs, 0);
@@ -125,6 +125,7 @@ test('v2 saves migrate with a fresh vehicle condition, wardrobe, cameraMode and 
   assert.equal(s.vehicles[0].underglow, 'none');
   assert.equal(s.player.cameraMode, 'third');
   assert.ok(Array.isArray(s.wardrobe) && s.wardrobe.includes('top:tee'));
+  assert.ok(s.academic && Array.isArray(s.academic.completedIds));
   // Resumes at Day 3 · 08:00 without a surprise jump
   assert.equal(s.stats.day, 3);
   assert.equal(s.clock.realBase, now);

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   ROAD_LINES, ROAD_HALF, SIDEWALK_W, BLOCK_HALF, SIDEWALK_RING, BLOCK_CENTERS, BUSINESSES,
-  STATIONS, DEALERSHIP, BOUTIQUE, FUEL_STATIONS, STREET_NAMES_X, STREET_NAMES_Z, MAX_BUSINESS_LEVEL,
+  STATIONS, DEALERSHIP, BOUTIQUE, UNIVERSITY, FUEL_STATIONS, STREET_NAMES_X, STREET_NAMES_Z, MAX_BUSINESS_LEVEL,
   STREET_LAMP_POOL,
 } from './data.js';
 import { mulberry32 } from './economy.js';
@@ -216,6 +216,10 @@ export class City {
     this.lampFlareMat = null;      // additive warm glow flare on streetlamp bulbs
     this._lastLampFocus = { x: 1e9, z: 1e9, factor: -1 };
     this._nightFactor = 0;
+    this.interiorZones = [];       // [{ minX, maxX, minZ, maxZ, ceilingY }] for enterable campus buildings
+    this.universitySpots = [];     // interactive campus markers (Registrar, Amphitheatre, Library, Science Lab, Quad)
+    this.lectureBoard = null;      // live 3D smartboard canvas in the Main Lecture Amphitheatre
+    this._lastBoardKey = '';
     this.boxGeo = new THREE.BoxGeometry(1, 1, 1);
     this.trunkGeo = new THREE.CylinderGeometry(0.14, 0.23, 2.5, 8);
     this.boughGeo = new THREE.CylinderGeometry(0.06, 0.1, 1.1, 6);
@@ -225,6 +229,7 @@ export class City {
     this._buildGround();
     this._buildRoads();
     this._buildBlocks();
+    this._buildUniversity();
     this._buildStreetLamps();
     this._buildSidewalkGraph();
     this._buildOutskirts();
@@ -887,6 +892,373 @@ export class City {
     this.frameCollider(frame, 0, 10, 0.5, 0.5, list);
   }
 
+  // ----- Metro Grand University (160m × 76m walk-in enterable 3D campus!) ----
+  _addHollowShell({
+    parent, minX, maxX, minZ, maxZ, height, doorX, doorW = 6.8, doorH = 4.6,
+    wallMat, roofMat, trimMat, interiorFloorMat, ceilingLightColor = 0xfef3c7,
+  }) {
+    const cx = (minX + maxX) * 0.5;
+    const cz = (minZ + maxZ) * 0.5;
+    const W = maxX - minX;
+    const D = maxZ - minZ;
+    const t = 0.65;
+    const y0 = CURB_Y;
+
+    // Walkable polished interior floor slab + coffered roof + warm illuminated ceiling panels
+    this.box(parent, cx, y0 + 0.03, cz, W - 0.3, 0.06, D - 0.3, interiorFloorMat, { cast: false });
+    this.box(parent, cx, y0 + height + 0.28, cz, W + 0.9, 0.56, D + 0.9, roofMat);
+    this.box(parent, cx, y0 + height + 0.68, cz, W + 1.3, 0.26, D + 1.3, trimMat);
+
+    const panelGlow = new THREE.MeshBasicMaterial({ color: ceilingLightColor });
+    for (const px of [cx - W * 0.26, cx, cx + W * 0.26]) {
+      for (const pz of [cz - D * 0.24, cz + D * 0.22]) {
+        this.box(parent, px, y0 + height - 0.06, pz, 4.2, 0.08, 2.2, panelGlow, { cast: false, receive: false });
+      }
+    }
+
+    // Back wall (North, minZ) + Left wall (West, minX) + Right wall (East, maxX)
+    this.box(parent, cx, y0 + height * 0.5, minZ, W, height, t, wallMat);
+    this.box(parent, minX, y0 + height * 0.5, cz, t, height, D, wallMat);
+    this.box(parent, maxX, y0 + height * 0.5, cz, t, height, D, wallMat);
+
+    this.addCollider(minX, maxX, minZ - t * 0.5, minZ + t * 0.5);
+    this.addCollider(minX - t * 0.5, minX + t * 0.5, minZ, maxZ);
+    this.addCollider(maxX - t * 0.5, maxX + t * 0.5, minZ, maxZ);
+
+    // Split Front Wall (South, maxZ) leaving an open 6.8m walk-in doorway at `doorX`!
+    const leftEnd = doorX - doorW * 0.5;
+    const rightStart = doorX + doorW * 0.5;
+    const leftW = Math.max(0.5, leftEnd - minX);
+    const rightW = Math.max(0.5, maxX - rightStart);
+
+    // Left & right front wall piers + large clear-glass display windows so players see inside from the quad!
+    const winGlass = new THREE.MeshPhysicalMaterial({
+      color: 0xbae6fd, transparent: true, opacity: 0.22, roughness: 0.06, metalness: 0.1, depthWrite: false,
+    });
+    for (const [segMin, segMax, segW] of [[minX, leftEnd, leftW], [rightStart, maxX, rightW]]) {
+      const segCx = (segMin + segMax) * 0.5;
+      if (segW > 7) {
+        // Low stone sill + upper stone spandrel + wide clear glass window in the middle!
+        this.box(parent, segCx, y0 + 0.65, maxZ, segW, 1.3, t, wallMat);
+        this.box(parent, segCx, y0 + height - (height - 4.4) * 0.5, maxZ, segW, height - 4.4, t, wallMat);
+        this.box(parent, segCx, y0 + 2.85, maxZ, segW - 1.6, 3.1, 0.12, winGlass, { cast: false });
+        this.box(parent, segMin + 0.45, y0 + height * 0.5, maxZ, 0.9, height, t + 0.08, trimMat);
+        this.box(parent, segMax - 0.45, y0 + height * 0.5, maxZ, 0.9, height, t + 0.08, trimMat);
+      } else {
+        this.box(parent, segCx, y0 + height * 0.5, maxZ, segW, height, t, wallMat);
+      }
+      this.addCollider(segMin, segMax, maxZ - t * 0.5, maxZ + t * 0.5);
+    }
+
+    // Lintel header above the open doorway + propped-open glass double doors!
+    const lintelH = Math.max(0.6, height - doorH);
+    this.box(parent, doorX, y0 + doorH + lintelH * 0.5, maxZ, doorW + 0.4, lintelH, t + 0.1, wallMat);
+    this.box(parent, leftEnd, y0 + doorH * 0.5, maxZ, 0.35, doorH, t + 0.2, trimMat);
+    this.box(parent, rightStart, y0 + doorH * 0.5, maxZ, 0.35, doorH, t + 0.2, trimMat);
+    for (const sx of [-1, 1]) {
+      const leaf = new THREE.Group();
+      leaf.position.set(doorX + sx * (doorW * 0.5 - 0.2), y0, maxZ + 0.1);
+      leaf.rotation.y = sx * 1.18; // swung wide open invitingly!
+      this.box(leaf, -sx * 0.85, doorH * 0.46, 0, 1.7, doorH * 0.9, 0.08, winGlass, { cast: false });
+      this.box(leaf, -sx * 0.85, doorH * 0.46, 0, 1.74, 0.1, 0.1, trimMat, { cast: false });
+      parent.add(leaf);
+      // Exterior brass/stone pedestrian bollards (blocks vehicles from driving indoors while players walk right in!)
+      const bx = doorX + sx * 1.65;
+      const bz = maxZ + 2.6;
+      this.box(parent, bx, y0 + 0.48, bz, 0.28, 0.96, 0.28, trimMat);
+      this.addCollider(bx - 0.22, bx + 0.22, bz - 0.22, bz + 0.22);
+    }
+
+    this.interiorZones.push({
+      minX: minX + 0.4,
+      maxX: maxX - 0.4,
+      minZ: minZ + 0.4,
+      maxZ: maxZ - 0.2,
+      ceilingY: y0 + height - 0.35,
+    });
+  }
+
+  _buildUniversity() {
+    const g = new THREE.Group();
+    this.root.add(g);
+
+    const limestone = new THREE.MeshStandardMaterial({
+      map: this.windowPairs[1].map,
+      normalMap: this.windowPairs[1].normalMap,
+      roughness: 0.78,
+      metalness: 0.08,
+    });
+    const stoneTrim = new THREE.MeshStandardMaterial({ color: 0xe7e5e4, roughness: 0.52, metalness: 0.08 });
+    const royalRoof = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.45, metalness: 0.25 });
+    const goldDomeMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.22, metalness: 0.88 });
+    const marbleFloor = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.26, metalness: 0.08 });
+    const woodMat = new THREE.MeshStandardMaterial({ color: 0x6b3e1e, roughness: 0.55, metalness: 0.06 });
+    const greenLampMat = new THREE.MeshBasicMaterial({ color: 0x4ade80 });
+    const labCyanMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+
+    // 1. Campus Grounds, Paved Driveway off 1st St (x=0, z=-157), Honor Quad Plaza & Wrought-Iron Fence
+    this.box(g, 0, CURB_Y * 0.5, -196, 160, CURB_Y, 76, this.mats.plaza, { cast: false });
+    // Central asphalt entry driveway connecting 1st St (z=-150) straight into the campus turnaround!
+    this.box(g, 0, 0.024, -167, 15, 0.03, 22, this.mats.road, { cast: false });
+    // Manicured emerald quad lawns flanking the central walkway
+    for (const sx of [-1, 1]) {
+      this.box(g, sx * 36, CURB_Y + 0.015, -175, 48, 0.03, 26, this.mats.grass, { cast: false });
+    }
+
+    // Perimeter wrought-iron & brick piers along 1st St (leaving wide 18m main gate open at x=0!)
+    for (const [fMin, fMax] of [[-79, -10], [10, 79]]) {
+      const fw = fMax - fMin;
+      const fx = (fMin + fMax) * 0.5;
+      this.box(g, fx, CURB_Y + 0.35, -158.5, fw, 0.7, 0.5, stoneTrim);
+      this.box(g, fx, CURB_Y + 1.15, -158.5, fw, 0.9, 0.14, this.mats.darkMetal);
+      this.addCollider(fMin, fMax, -158.9, -158.1);
+    }
+    // Side & rear campus boundary walls
+    this.box(g, -79.5, CURB_Y + 0.9, -196, 0.6, 1.8, 75, stoneTrim);
+    this.box(g, 79.5, CURB_Y + 0.9, -196, 0.6, 1.8, 75, stoneTrim);
+    this.box(g, 0, CURB_Y + 0.9, -233.5, 160, 1.8, 0.6, stoneTrim);
+    this.addCollider(-80, -79, -234, -158.5);
+    this.addCollider(79, 80, -234, -158.5);
+    this.addCollider(-80, 80, -234, -233);
+
+    // Monumental Entrance Archway at (0, -158.5)
+    for (const sx of [-1, 1]) {
+      this.box(g, sx * 9.5, CURB_Y + 3.4, -158.5, 1.8, 6.8, 1.8, stoneTrim);
+      this.addCollider(sx * 9.5 - 0.95, sx * 9.5 + 0.95, -159.4, -157.6);
+    }
+    this.box(g, 0, CURB_Y + 6.9, -158.5, 21.5, 1.3, 1.6, royalRoof);
+    this.sign(
+      g,
+      ['METRO GRAND UNIVERSITY', '12 FACULTIES · 1,100+ ACADEMIC COURSES'],
+      0, CURB_Y + 6.9, -157.62, 18.5, 1.15,
+      { bg: '#1e3a8a', fg: '#fef08a', border: '#f59e0b' },
+    );
+
+    // Honor Quad Marble Fountain at (0, -177) + trees & campus benches
+    const basin = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 5.0, 0.78, 24), stoneTrim);
+    basin.position.set(0, CURB_Y + 0.39, -177);
+    basin.castShadow = true;
+    g.add(basin);
+    this.campusFountainWater = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 0.1, 24), this.mats.water);
+    this.campusFountainWater.position.set(0, CURB_Y + 0.72, -177);
+    g.add(this.campusFountainWater);
+    const obelisk = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.7, 3.2, 12), goldDomeMat);
+    obelisk.position.set(0, CURB_Y + 1.8, -177);
+    obelisk.castShadow = true;
+    g.add(obelisk);
+    this.addCollider(-5.1, 5.1, -182.1, -171.9);
+
+    for (const [tx, tz] of [[-24, -168], [24, -168], [-48, -168], [48, -168], [-28, -184], [28, -184], [-68, -176], [68, -176]]) {
+      this.tree(tx, tz, 1.15);
+    }
+
+    // 2. MAIN WALK-IN BUILDING: Chancellor's Clocktower & Grand Lecture Rotunda (68m × 36m, height 8.8m!)
+    this._addHollowShell({
+      parent: g,
+      minX: -34, maxX: 34, minZ: -230, maxZ: -194,
+      height: 8.8, doorX: 0, doorW: 7.2, doorH: 5.0,
+      wallMat: limestone, roofMat: royalRoof, trimMat: stoneTrim, interiorFloorMat: marbleFloor,
+    });
+
+    // Neoclassical 6-Column Portico + Pediment + 28m Illuminated Clocktower & Gold Dome!
+    const colGeo = new THREE.CylinderGeometry(0.52, 0.58, 8.2, 16);
+    for (const cx of [-12, -7.2, -4.1, 4.1, 7.2, 12]) {
+      const col = new THREE.Mesh(colGeo, stoneTrim);
+      col.position.set(cx, CURB_Y + 4.1, -191.2);
+      col.castShadow = true;
+      g.add(col);
+      this.addCollider(cx - 0.6, cx + 0.6, -191.8, -190.6);
+    }
+    this.box(g, 0, CURB_Y + 8.55, -192.2, 27, 0.9, 4.2, stoneTrim);
+    const pediment = new THREE.Mesh(new THREE.ConeGeometry(15.5, 3.2, 4), royalRoof);
+    pediment.rotation.y = Math.PI / 4;
+    pediment.scale.set(1.25, 1, 0.26);
+    pediment.position.set(0, CURB_Y + 10.5, -191.9);
+    g.add(pediment);
+    this.sign(
+      g,
+      ['CHANCELLOR ROTUNDA & LECTURE HALL', 'WALK INSIDE · ADMISSIONS & EXAMS'],
+      0, CURB_Y + 8.55, -190.02, 20, 1.1,
+      { bg: '#0f172a', fg: '#fde68a', border: '#3b82f6' },
+    );
+
+    // Towering Campus Clocktower + Gold Dome atop Main Hall
+    this.box(g, 0, CURB_Y + 15.2, -212, 9.5, 12.2, 9.5, stoneTrim);
+    this.box(g, 0, CURB_Y + 21.8, -212, 10.6, 0.9, 10.6, royalRoof);
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(4.8, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), goldDomeMat);
+    dome.position.set(0, CURB_Y + 22.1, -212);
+    g.add(dome);
+    const spire = new THREE.Mesh(new THREE.ConeGeometry(0.45, 3.6, 8), goldDomeMat);
+    spire.position.set(0, CURB_Y + 28.2, -212);
+    g.add(spire);
+    this.sign(g, ['12:00', 'M · G · U'], 0, CURB_Y + 17.5, -207.18, 5.2, 3.2, { bg: '#0f172a', fg: '#fef08a', border: '#f59e0b' });
+
+    // --- Main Rotunda Interior Furnishings ---
+    // (a) Left Lobby: Admissions & Registrar Desk (-18, -203)
+    this.box(g, -18, CURB_Y + 0.62, -203, 7.6, 1.15, 1.4, woodMat);
+    this.box(g, -18, CURB_Y + 1.24, -203, 7.9, 0.1, 1.65, stoneTrim);
+    this.sign(
+      g,
+      ['REGISTRAR & ADMISSIONS', '1,105 REAL-WORLD COURSES'],
+      -18, CURB_Y + 3.4, -205.5, 7.4, 1.5,
+      { bg: '#1e3a8a', fg: '#ffffff', border: '#f59e0b' },
+    );
+    this.addCollider(-21.9, -14.1, -203.8, -202.2);
+
+    // (b) Right Lobby: Hall of Honours & Degree Diploma Showcase (+18, -203)
+    this.box(g, 18, CURB_Y + 0.62, -203, 7.6, 1.15, 1.4, woodMat);
+    this.sign(
+      g,
+      ['HONOURS & TRANSCRIPTS', 'BSc · BA · BEng · LLB · MBBS · MBA · PhD'],
+      18, CURB_Y + 3.4, -205.5, 8.2, 1.5,
+      { bg: '#0f172a', fg: '#fde68a', border: '#f59e0b' },
+    );
+    this.addCollider(14.1, 21.9, -203.8, -202.2);
+
+    // (c) Center Lecture Amphitheatre: Stage, Lectern, Live 3D Smartboard & 3 Rows of Lecture Desks!
+    this.box(g, 0, CURB_Y + 0.28, -225.2, 22, 0.5, 5.4, woodMat); // raised stage platform
+    this.box(g, 0, CURB_Y + 1.15, -223.4, 1.5, 1.25, 0.9, woodMat); // professor lectern
+
+    // Giant Live-Updating 3D Lecture Smartboard on North Amphitheatre Wall!
+    if (typeof document !== 'undefined') {
+      const bc = document.createElement('canvas');
+      bc.width = 768; bc.height = 256;
+      const bg = bc.getContext('2d');
+      const bTex = new THREE.CanvasTexture(bc);
+      bTex.colorSpace = THREE.SRGBColorSpace;
+      const bMat = new THREE.MeshBasicMaterial({ map: bTex });
+      const boardMesh = new THREE.Mesh(new THREE.PlaneGeometry(14.5, 4.4), bMat);
+      boardMesh.position.set(0, CURB_Y + 4.2, -229.45);
+      g.add(boardMesh);
+      this.box(g, 0, CURB_Y + 4.2, -229.55, 15.1, 4.9, 0.14, this.mats.darkMetal, { cast: false });
+      this.lectureBoard = { canvas: bc, ctx: bg, tex: bTex };
+      this.updateLectureBoard({
+        venue: 'Main Rotunda Amphitheatre',
+        window: '08:00–10:00',
+        course: { code: 'CSC-301', title: 'BSc Computer Science', facultyName: 'Computer Science, AI & Cybersecurity' },
+      });
+    }
+
+    // 3 rows × 2 banks of Amphitheatre lecture desks & benches (central aisle kept wide open for walking!)
+    for (const rowZ of [-218.5, -214.5, -210.5]) {
+      for (const bankX of [-7.5, 7.5]) {
+        this.box(g, bankX, CURB_Y + 0.78, rowZ, 7.4, 0.1, 0.95, woodMat);
+        this.box(g, bankX, CURB_Y + 0.4, rowZ, 7.0, 0.76, 0.14, this.mats.darkMetal);
+        this.box(g, bankX, CURB_Y + 0.46, rowZ + 0.85, 7.2, 0.1, 0.5, woodMat);
+        this.addCollider(bankX - 3.7, bankX + 3.7, rowZ - 0.5, rowZ + 1.1);
+      }
+    }
+
+    // 3. WEST WALK-IN WING: Grand University Library & Reading Hall (-74..-40, -226..-194, height 7.8m!)
+    this._addHollowShell({
+      parent: g,
+      minX: -74, maxX: -40, minZ: -226, maxZ: -194,
+      height: 7.8, doorX: -57, doorW: 6.4, doorH: 4.5,
+      wallMat: limestone, roofMat: royalRoof, trimMat: stoneTrim, interiorFloorMat: marbleFloor,
+    });
+    this.sign(
+      g,
+      ['WEST GRAND LIBRARY', 'QUIET STUDY & RESEARCH'],
+      -57, CURB_Y + 6.4, -193.55, 13.5, 1.15,
+      { bg: '#7c2d12', fg: '#fef3c7', border: '#f59e0b' },
+    );
+    // 6 Tall Mahogany 3D Bookshelf Stacks with colorful book-row bands + Reading Tables w/ Green Banker's Lamps!
+    const bookColors = [
+      new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0x047857, roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.7 }),
+    ];
+    for (const sx of [-69, -45]) {
+      for (const sz of [-221, -213, -205]) {
+        this.box(g, sx, CURB_Y + 2.1, sz, 1.3, 4.2, 5.2, woodMat);
+        for (let shelf = 0; shelf < 4; shelf++) {
+          this.box(g, sx, CURB_Y + 0.75 + shelf * 0.95, sz, 1.38, 0.52, 4.8, bookColors[(shelf + Math.abs(sz)) % 4]);
+        }
+        this.addCollider(sx - 0.75, sx + 0.75, sz - 2.65, sz + 2.65);
+      }
+    }
+    for (const rz of [-218, -206]) {
+      this.box(g, -57, CURB_Y + 0.78, rz, 6.2, 0.12, 2.2, woodMat);
+      this.box(g, -55.4, CURB_Y + 1.05, rz, 0.55, 0.35, 0.35, greenLampMat, { cast: false });
+      this.box(g, -58.6, CURB_Y + 1.05, rz, 0.55, 0.35, 0.35, greenLampMat, { cast: false });
+      this.addCollider(-60.1, -53.9, rz - 1.15, rz + 1.15);
+    }
+
+    // 4. EAST WALK-IN WING: Science, Engineering, AI & Medical Hall (40..74, -226..-194, height 7.8m!)
+    this._addHollowShell({
+      parent: g,
+      minX: 40, maxX: 74, minZ: -226, maxZ: -194,
+      height: 7.8, doorX: 57, doorW: 6.4, doorH: 4.5,
+      wallMat: limestone, roofMat: royalRoof, trimMat: stoneTrim, interiorFloorMat: marbleFloor,
+      ceilingLightColor: 0xe0f2fe,
+    });
+    this.sign(
+      g,
+      ['SCIENCE, AI & MEDICAL HALL', 'ENGINEERING · CS · MEDICINE LABS'],
+      57, CURB_Y + 6.4, -193.55, 14.5, 1.15,
+      { bg: '#0f766e', fg: '#ecfeff', border: '#38bdf8' },
+    );
+    // Glowing Stainless/Cyan Laboratory Workbenches & High-Performance AI Server Racks inside East Wing!
+    for (const lx of [46, 68]) {
+      for (const lz of [-220, -211, -203]) {
+        this.box(g, lx, CURB_Y + 0.55, lz, 2.2, 1.05, 4.6, stoneTrim);
+        this.box(g, lx, CURB_Y + 1.12, lz, 2.35, 0.08, 4.8, this.mats.darkMetal);
+        this.box(g, lx, CURB_Y + 1.52, lz, 0.35, 0.65, 1.8, labCyanMat, { cast: false });
+        this.addCollider(lx - 1.2, lx + 1.2, lz - 2.4, lz + 2.4);
+      }
+    }
+
+    // Covered Colonnade Breezeways linking West Library <-> Main Rotunda <-> East Science Hall
+    for (const bx of [-37, 37]) {
+      this.box(g, bx, CURB_Y + 4.8, -208, 6.2, 0.5, 8.0, royalRoof);
+    }
+
+    // 5. Interactive Glowing Campus Pads (inside the walk-in halls + courtyard directory!)
+    const uniColor = new THREE.Color(UNIVERSITY.color);
+    const goldColor = new THREE.Color(UNIVERSITY.accent);
+    const rawSpots = [
+      { id: 'quad',         x: 0,   z: -169.5, mode: 'catalog',       color: uniColor,  prompt: 'Press E — Metro Grand University Portal (1,105 Courses)' },
+      { id: 'registrar',    x: -18, z: -200.2, mode: 'catalog',       color: uniColor,  prompt: 'Press E — Admissions & 1,105 Real-World Course Catalog' },
+      { id: 'amphitheatre', x: 0,   z: -220.8, mode: 'classroom',     color: goldColor, prompt: 'Press E — Attend Live Lecture (+1 Credit) or Sit Final Exam' },
+      { id: 'library',      x: -57, z: -212.0, mode: 'study_library', color: goldColor, prompt: 'Press E — Library Research Session (+1 Credit) & Course Portal' },
+      { id: 'lab',          x: 57,  z: -212.0, mode: 'study_lab',     color: uniColor,  prompt: 'Press E — Science / AI / Medical Lab Session (+1 Credit)' },
+    ];
+    for (const sp of rawSpots) {
+      const pad = this._marker(sp.color);
+      pad.position.set(sp.x, CURB_Y + 0.08, sp.z);
+      this.root.add(pad);
+      this.stationMarkers.push(pad);
+      this.universitySpots.push(sp);
+    }
+    UNIVERSITY.interact = { x: 0, z: -169.5 };
+    UNIVERSITY.spots = this.universitySpots;
+  }
+
+  updateLectureBoard(scheduleItem) {
+    if (!this.lectureBoard || !scheduleItem?.course) return;
+    const key = `${scheduleItem.window}:${scheduleItem.course.id}`;
+    if (key === this._lastBoardKey) return;
+    this._lastBoardKey = key;
+    const { ctx: g2, tex } = this.lectureBoard;
+    const c = scheduleItem.course;
+    g2.fillStyle = '#091526';
+    g2.fillRect(0, 0, 768, 256);
+    g2.strokeStyle = '#f59e0b';
+    g2.lineWidth = 8;
+    g2.strokeRect(10, 10, 748, 236);
+    g2.fillStyle = '#fbbf24';
+    g2.font = 'bold 26px system-ui, sans-serif';
+    g2.textAlign = 'center';
+    g2.fillText(`METRO GRAND UNIVERSITY · LIVE LECTURE (${scheduleItem.window})`, 384, 54);
+    g2.fillStyle = '#ffffff';
+    g2.font = 'bold 42px system-ui, sans-serif';
+    g2.fillText(`${c.code}: ${c.title}`.slice(0, 44), 384, 128);
+    g2.fillStyle = '#93c5fd';
+    g2.font = 'bold 24px system-ui, sans-serif';
+    g2.fillText(`Faculty of ${c.facultyName} · Walk up & press [E] to attend`, 384, 196);
+    tex.needsUpdate = true;
+  }
   // ----- street lamps at the 25 intersections (feature 11) -------------------
   _buildStreetLamps() {
     const fxTex = getFXTextures();
@@ -1004,11 +1376,13 @@ export class City {
       const x = Math.cos(ang) * dist * 1.1;
       const z = Math.sin(ang) * dist * 1.1;
       if (Math.max(Math.abs(x), Math.abs(z)) < 165) continue;
-      this.tree(Math.max(-192, Math.min(192, x)), Math.max(-192, Math.min(192, z)), 1 + r() * 0.8);
+      // Keep the North Metro Grand University Campus clear of random outskirts trees!
+      if (x > -90 && x < 90 && z < -154) continue;
+      this.tree(Math.max(-236, Math.min(236, x)), Math.max(-236, Math.min(236, z)), 1 + r() * 0.8);
     }
     for (let i = 0; i < 26; i++) {
       const ang = (i / 26) * Math.PI * 2;
-      const dist = 250 + r() * 40;
+      const dist = 305 + r() * 45;
       const hill = new THREE.Mesh(new THREE.ConeGeometry(40 + r() * 30, 25 + r() * 35, 7), this.mats.hill);
       hill.position.set(Math.cos(ang) * dist, 0, Math.sin(ang) * dist);
       this.root.add(hill);
@@ -1078,8 +1452,22 @@ export class City {
   }
 
   groundY(x, z) {
+    // Metro Grand University Campus grounds & walk-in halls (North of 1st St)
+    if (x >= -80 && x <= 80 && z >= -234 && z <= -157) {
+      if (Math.abs(x) < 7.5 && z > -178) return 0; // entry driveway off 1st St
+      return CURB_Y;
+    }
     if (Math.abs(x) > MAP_EDGE || Math.abs(z) > MAP_EDGE) return 0;
     return this.isOnRoad(x, z) ? 0 : CURB_Y;
+  }
+
+  ceilingY(x, z) {
+    for (const zc of this.interiorZones) {
+      if (x >= zc.minX && x <= zc.maxX && z >= zc.minZ && z <= zc.maxZ) {
+        return zc.ceilingY;
+      }
+    }
+    return null;
   }
 
   allColliders() {
@@ -1091,8 +1479,14 @@ export class City {
   rebuildColliderCache() { this._cache = this.allColliders(); }
   get colliderCache() { if (!this._cache) this.rebuildColliderCache(); return this._cache; }
 
-  // Address label like "Broad Ave & 2nd St"
+  // Address label like "Broad Ave & 2nd St" or campus hall name
   addressFor(x, z) {
+    if (x >= -80 && x <= 80 && z < -158) {
+      if (z < -193 && x >= -34 && x <= 34) return 'Chancellor Rotunda · MGU';
+      if (z < -193 && x < -38) return 'West Grand Library · MGU';
+      if (z < -193 && x > 38) return 'Science & Medical Hall · MGU';
+      return 'Metro Grand University Quad';
+    }
     let bi = 0; let bj = 0;
     ROAD_LINES.forEach((r, i) => { if (Math.abs(x - r) < Math.abs(x - ROAD_LINES[bi])) bi = i; });
     ROAD_LINES.forEach((r, j) => { if (Math.abs(z - r) < Math.abs(z - ROAD_LINES[bj])) bj = j; });
@@ -1105,6 +1499,7 @@ export class City {
       m.rotation.z = t * 0.6;
     }
     if (this.fountainWater) this.fountainWater.position.y = 0.75 + Math.sin(t * 2) * 0.03;
+    if (this.campusFountainWater) this.campusFountainWater.position.y = CURB_Y + 0.72 + Math.sin(t * 2.2) * 0.03;
   }
 }
 

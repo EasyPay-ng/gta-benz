@@ -87,6 +87,11 @@ const G = {
   crownBand: new THREE.CylinderGeometry(0.176, 0.168, 0.075, 14),
   crownSpike: new THREE.ConeGeometry(0.036, 0.085, 5),
   crownGem: new THREE.SphereGeometry(0.018, 6, 6),
+  mortarSkull: new THREE.CylinderGeometry(0.162, 0.172, 0.085, 14),
+  mortarBoard: new THREE.BoxGeometry(0.42, 0.022, 0.42),
+  mortarTassel: new THREE.CylinderGeometry(0.009, 0.016, 0.15, 6),
+  gownSkirt: new THREE.CylinderGeometry(0.19, 0.245, 0.44, 14),
+  gownStole: new THREE.BoxGeometry(0.052, 0.44, 0.032),
   parcel: new THREE.BoxGeometry(0.4, 0.28, 0.3),
   parcelTape: new THREE.BoxGeometry(0.41, 0.05, 0.31),
 };
@@ -100,6 +105,7 @@ const SHARED_MAT = {
   silver: new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.2, metalness: 0.92 }),
   darkLens: new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.12, metalness: 0.55 }),
   tieRed: new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.42, metalness: 0.08 }),
+  royalBlue: new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.38, metalness: 0.12 }),
   ruby: new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.18, metalness: 0.35 }),
   parcel: new THREE.MeshStandardMaterial({ color: 0xb7884e, roughness: 0.85 }),
   tape: new THREE.MeshStandardMaterial({ color: 0xd6b37c, roughness: 0.65 }),
@@ -368,7 +374,7 @@ export class Character {
 
     // Sleeve length & shoulder coverage
     const sleeveless = topStyle === 'jersey';
-    const longSleeve = topStyle === 'hoodie' || topStyle === 'bomber' || topStyle === 'suit' || topStyle === 'senator';
+    const longSleeve = topStyle === 'hoodie' || topStyle === 'bomber' || topStyle === 'suit' || topStyle === 'senator' || topStyle === 'gown';
     for (const sh of this.shoulders) sh.material = sleeveless ? this.mats.skin : this.mats.shirt;
     for (const ua of this.upperArms) ua.material = sleeveless ? this.mats.skin : this.mats.shirt;
     for (const fa of this.foreArms) fa.material = longSleeve ? this.mats.shirt : this.mats.skin;
@@ -376,8 +382,8 @@ export class Character {
     // Shorts vs full-length trousers
     for (const calf of this.calves) calf.material = bottomStyle === 'shorts' ? this.mats.skin : this.mats.pants;
 
-    // Senator tunic drapes cleanly past the waist, hiding belt
-    const hideBelt = topStyle === 'senator' || topStyle === 'hoodie';
+    // Senator tunic & academic gown drape cleanly past the waist, hiding belt
+    const hideBelt = topStyle === 'senator' || topStyle === 'hoodie' || topStyle === 'gown';
     this.belt.visible = !hideBelt;
     this.buckle.visible = !hideBelt;
 
@@ -417,6 +423,19 @@ export class Character {
       const placket = part(G.senatorPlacket, SHARED_MAT.gold, -0.035, 0.41, 0.156);
       const motif = part(G.senatorMotif, SHARED_MAT.gold, 0.105, 0.44, 0.156);
       this.topExtras.add(skirt, placket, motif);
+    } else if (topStyle === 'gown') {
+      // Academic Convocation Gown: flowing pleated robe skirt + royal-blue & 24k gold convocation stoles
+      const skirt = part(G.gownSkirt, this.mats.shirt, 0, -0.17, 0);
+      skirt.scale.set(1.12, 1, 0.84);
+      const shirtNeck = part(G.innerShirt, SHARED_MAT.white, 0, 0.46, 0.145);
+      shirtNeck.scale.y = 0.48;
+      const stoleL = part(G.gownStole, SHARED_MAT.gold, -0.088, 0.34, 0.16);
+      const stoleR = part(G.gownStole, SHARED_MAT.gold, 0.088, 0.34, 0.16);
+      const velvetL = part(G.lapel, SHARED_MAT.royalBlue, -0.088, 0.42, 0.166);
+      const velvetR = part(G.lapel, SHARED_MAT.royalBlue, 0.088, 0.42, 0.166);
+      velvetL.scale.set(0.65, 0.65, 1);
+      velvetR.scale.set(0.65, 0.65, 1);
+      this.topExtras.add(skirt, shirtNeck, stoleL, stoleR, velvetL, velvetR);
     } else if (topStyle === 'jersey') {
       const bar = part(G.jerseyBar, SHARED_MAT.white, 0, 0.41, 0.162);
       this.topExtras.add(bar);
@@ -533,6 +552,17 @@ export class Character {
         fc.rotation.z = 0.08;
         add(fc);
         add(part(G.filaBand, SHARED_MAT.gold, 0, -0.032, 0));
+      } else if (casual === 'mortarboard') {
+        add(part(G.mortarSkull, hat, 0, 0.015, 0));
+        const board = part(G.mortarBoard, hat, 0, 0.068, 0.01);
+        board.rotation.y = Math.PI / 4; // classic diamond academic orientation!
+        add(board);
+        add(part(G.crownGem, SHARED_MAT.gold, 0, 0.082, 0.01));
+        const cord = part(G.drawstring, SHARED_MAT.gold, 0.12, 0.078, 0.05);
+        cord.rotation.z = Math.PI / 2 - 0.18;
+        cord.scale.y = 1.05;
+        add(cord);
+        add(part(G.mortarTassel, SHARED_MAT.gold, 0.205, 0.005, 0.08));
       } else if (casual === 'crown') {
         add(part(G.crownBand, SHARED_MAT.gold, 0, 0.005, 0));
         for (let k = 0; k < 6; k++) {

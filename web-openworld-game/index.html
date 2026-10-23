@@ -22,6 +22,7 @@
       <div class="xpbar" id="hud-xpwrap"><div id="hud-xp"></div></div>
       <div class="stat"><span class="label">Startups built</span><span id="hud-startups">0 / 4</span></div>
       <div class="stat"><span class="label">City employment</span><span id="hud-employment">0 / 12 citizens hired</span></div>
+      <div class="stat"><span class="label">University</span><span id="hud-uni">Open Enrollment</span></div>
       <div class="stat"><span class="label">Garage</span><span id="hud-vehicles">1 vehicle</span></div>
       <div class="stat heat-stat hidden" id="hud-heat-row"><span class="label">Police Heat</span><span id="hud-heat">★☆☆</span></div>
       <div class="stat small"><span class="label" id="hud-day">Day 1 · 08:00</span><span id="hud-payday">Shift in 30s</span></div>
@@ -39,6 +40,7 @@
       <div class="side-buttons">
         <button id="btn-account" class="hidden" title="Sign in / switch player">🪪 Account</button>
         <button id="btn-camera" title="Toggle 1st / 3rd person &amp; car cockpit view (X / P)">🎥 3rd View</button>
+        <button id="btn-uni" title="Metro Grand University — 1,105 courses, lectures &amp; degrees (U)">🎓 Uni</button>
         <button id="btn-garage" title="Garage, telemetry &amp; roadside assist (T)">🛠 Garage</button>
         <button id="btn-creator" title="Character creator (C)">👤 Look</button>
         <button id="btn-emotes" title="Character actions &amp; emotes (B / 1–8)">✋ Actions</button>
@@ -96,6 +98,7 @@
         <button data-key="sprint">⇧</button>
         <button data-key="horn">📯</button>
         <button id="t-camera" type="button" title="Toggle 1st / 3rd person camera">🎥</button>
+        <button id="t-uni" type="button" title="Metro Grand University">🎓</button>
         <button id="t-emote" type="button">✋</button>
       </div>
     </div>
@@ -170,6 +173,7 @@
               <li><kbd>F</kbd>: get in/out of your car</li>
               <li><kbd>B</kbd> / <kbd>1–8</kbd>: emotes &amp; dances</li>
               <li><kbd>V</kbd>: valet · <kbd>T</kbd>: garage &amp; roadside assist</li>
+              <li><kbd>U</kbd>: Metro Grand University (1,105 courses)</li>
               <li><kbd>C</kbd>: character creator</li>
             </ul>
           </div>
@@ -191,7 +195,7 @@
           <li>Clock in at the <b>Express Courier Depot</b>, <b>City Security HQ</b> or <b>Metro Cab Co.</b> (glowing rings).</li>
           <li>Buy a <b>FOR SALE</b> lot to launch a startup. Each one unlocks a new occupation.</li>
           <li>Walk up to unemployed citizens (or use the startup menu) to <b>hire</b> them. Collect profit every payday.</li>
-          <li>Visit <b>Metro Motors</b> (<kbd>M</kbd>) for G-Wagens, Hypercars, Convertibles &amp; Custom Mods, and <b>Maison Verve Boutique</b> (<kbd>B</kbd>) for Luxury Suits, Senator Tunics, Hoodies, Shades &amp; Gold Chains!</li>
+          <li>Visit <b>Metro Motors</b> (<kbd>M</kbd>) for G-Wagens, Hypercars, Convertibles &amp; Custom Mods, <b>Maison Verve Boutique</b> (<kbd>B</kbd>) for Luxury Suits, Senator Tunics &amp; Gold Chains, and walk right inside <b>Metro Grand University</b> (<kbd>U</kbd> on North Blvd) to enroll in <b>1,105 real-world academic courses</b>!</li>
         </ol>
         <button id="help-close" class="primary big">Start playing</button>
       </div>
