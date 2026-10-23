@@ -1,7 +1,7 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 5; // v5: unique signature vehicles, custom car mods, 3D clothing & Maison Verve Boutique
+export const SAVE_VERSION = 6; // v6: first-person street POV, sleek 3D car cockpit interiors & camera mode persistence
 
 export const STARTING_CASH = 500;
 export const PAYROLL_INTERVAL = 30; // real seconds per 12-in-game-minute shift (30s * 24 = 720s = 12m)
@@ -462,4 +462,23 @@ export const HEAT_MAX_CRUISERS = 2;               // active police interceptors 
 export const SKID_POOL_SIZE = 560;
 export const SPARK_POOL_SIZE = 72;
 export const SCORCH_POOL_SIZE = 28;
+
+// ---------------------------------------------------------------------------
+// Camera modes (Third-Person Orbit ↔ First-Person Street POV / Sleek Car Cockpit)
+// ---------------------------------------------------------------------------
+export const CAM_MODES = ['third', 'first'];
+export const CAM_THIRD_FOV = 62;
+export const CAM_FIRST_FOV = 74;
+export const CAM_COCKPIT_FOV = 72;
+export const CAM_FOOT_EYE_HEIGHT = 1.56;       // metres above ground for Balanced build
+export const CAM_FOOT_EYE_FORWARD = 0.14;      // slight forward offset clear of torso/collar
+export const CAM_FIRST_PITCH_MIN = -1.15;      // look down at outfit/shoes (~-66°)
+export const CAM_FIRST_PITCH_MAX = 1.15;       // look up at skyline towers (~+66°)
+export const CAM_COCKPIT_YAW_MAX = 2.15;       // head swivel inside car cabin (~±123°)
+export const CAM_COCKPIT_PITCH_MIN = -0.78;    // glance down at gauges, wheel & shifter
+export const CAM_COCKPIT_PITCH_MAX = 0.65;     // glance up at roof header / open sky
+export const CAM_COCKPIT_RECENTER_DELAY = 1.8; // s after freelook before gentle auto-center while driving
+export const CAM_HEADBOB_FREQ = 9.4;           // stride frequency factor in 1st-person
+export const CAM_HEADBOB_AMP = 0.03;           // max vertical bob (m) at full sprint
+
 

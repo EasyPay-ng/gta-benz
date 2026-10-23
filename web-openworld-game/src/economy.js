@@ -6,7 +6,7 @@ import {
   BASE_JOB_SLOTS, SLOTS_PER_LEVEL, MAX_BUSINESS_LEVEL, LEVEL_REVENUE_BONUS,
   VEHICLE_MODELS, DEFAULT_APPEARANCE, CITIZEN_NAMES, SKIN_TONES, SHIRT_COLORS,
   PANTS_COLORS, SHOE_COLORS, HAIR_COLORS, HAIR_STYLES, BUILDS, PAYROLL_INTERVAL, TOTAL_CITIZENS,
-  CLOCK_SPEED, CLOCK_START_HOUR, INGAME_HOUR_MS, INGAME_DAY_MS,
+  CLOCK_SPEED, CLOCK_START_HOUR, INGAME_HOUR_MS, INGAME_DAY_MS, CAM_MODES,
 } from './data.js';
 import { freshCond } from './vehicleCond.js';
 import { createClock, inGameNowMs, dayOf, secondsToNextShift } from './time.js';
@@ -98,7 +98,7 @@ export function createInitialState(wallNow = Date.now()) {
     ],
     nextVehicleId: 2,
     lastVehicleId: 'v1',
-    player: { x: -12.5, z: -15, yaw: Math.PI * 0.8, inVehicle: null },
+    player: { x: -12.5, z: -15, yaw: Math.PI * 0.8, inVehicle: null, cameraMode: 'third' },
     stats: {
       tasksCompleted: 0,
       totalEarned: 0,
@@ -140,6 +140,7 @@ export function migrateState(raw, wallNow = Date.now()) {
     }))
     : base.vehicles;
   s.player = { ...base.player, ...(raw.player || {}) };
+  if (!CAM_MODES.includes(s.player.cameraMode)) s.player.cameraMode = 'third';
   s.stats = { ...base.stats, ...(raw.stats || {}) };
   if (raw.clock && typeof raw.clock === 'object' && Number.isFinite(raw.clock.realBase) && Number.isFinite(raw.clock.inGameBase)) {
     s.clock = {

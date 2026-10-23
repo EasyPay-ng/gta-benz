@@ -7,6 +7,7 @@ import {
   FUEL_STATIONS, TOW_PRICE, MOTORS_REPAIR_MARKUP,
   ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
   EMOTES, CAR_LIVERIES, RIM_FINISHES, UNDERGLOW_OPTIONS, RESPRAY_COST, CLOTHING_ITEMS, OUTFIT_BUNDLES,
+  CAM_COCKPIT_YAW_MAX,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
@@ -14,6 +15,7 @@ import * as Time from './src/time.js';
 import * as VCard from './src/vehCard.js';
 import * as Heat from './src/heat.js';
 import * as Cust from './src/customization.js';
+import * as Cam from './src/camera.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -261,6 +263,8 @@ const game = {
   elapsed: 0,
   time: null,      // window.__mv.time = { now(), set(inGameMs), fastForwardTo(inGameMs), phase(), label() }
   telemetry: null, // window.__mv.telemetry = () => snapshot of all owned vehicles' cond
+  camera,
+  cameraView: null,
   emotes: EMOTES,
   valetCooldown: 0,
   autosaveTimer: 60,
@@ -560,7 +564,7 @@ function applyState() {
   p.char.setOccupation(s.activeJob);
   p.char.setCarrying(false);
   p.x = s.player.x; p.z = s.player.z; p.yaw = s.player.yaw; p.vx = p.vz = 0;
-  cam.yaw = p.yaw;
+  Cam.setCameraMode(cam, s.player?.cameraMode, false, p.yaw);
   // vehicles
   for (const v of game.vehicles) v.dispose();
   game.vehicles = s.vehicles.map((d) => {
@@ -584,6 +588,7 @@ function applyState() {
     const v = game.vehicles.find((x) => x.data.id === s.player.inVehicle);
     if (v && v.cond.hp > 0) enterVehicle(v, true);
   }
+  syncCameraViewMode();
   if (s.activeJob) newTask();
   updateHUD(true);
 }
@@ -597,6 +602,7 @@ function snapshotState() {
     s.player.x = p.x; s.player.z = p.z; s.player.inVehicle = null;
   }
   s.player.yaw = p.yaw;
+  s.player.cameraMode = cam.mode;
   if (s.clock) Time.setClock(s.clock, getClock(), Date.now());
 }
 
@@ -702,6 +708,10 @@ window.addEventListener('keydown', (e) => {
     case 'KeyV': valet(); break;
     case 'KeyT': openGarageModal(); break;
     case 'KeyC': game.creatorOpen ? closeCreator() : openCreator(); break;
+    case 'KeyX':
+    case 'KeyP':
+      toggleCameraMode();
+      break;
     case 'KeyH': showHelp(); break;
     case 'KeyM': toggleMute(); break;
     case 'KeyG': if (game.player.vehicle) honk(); break;
@@ -719,8 +729,79 @@ function axes() {
   return { f: THREE.MathUtils.clamp(f, -1, 1), r: THREE.MathUtils.clamp(r, -1, 1) };
 }
 
-// Camera orbit with mouse / touch drag
-const cam = { yaw: 0, pitch: 0.38, dist: 7.5, lastDrag: -10, drag: null, shake: 0 };
+// Camera orbit / first-person & 3D car cockpit freelook
+const cam = Cam.createCameraState('third');
+
+function syncCameraViewMode() {
+  const v = game.player.vehicle;
+  const isFirst = cam.mode === 'first' && !game.creatorOpen;
+  const inCockpit = !!(v && isFirst);
+  const onFootFP = !!(!v && isFirst);
+
+  const wantNear = isFirst ? 0.06 : 0.1;
+  if (camera.near !== wantNear) {
+    camera.near = wantNear;
+    camera.updateProjectionMatrix();
+  }
+
+  for (const veh of game.vehicles) {
+    if (veh === v && inCockpit) {
+      veh.setCockpitView(true, {
+        skin: game.state?.appearance?.skin,
+        shirt: game.state?.appearance?.shirt,
+      });
+    } else if (veh.cockpitView) {
+      veh.setCockpitView(false);
+    }
+  }
+
+  const ch = game.player.char;
+  if (ch) {
+    if (inCockpit) {
+      ch.group.visible = false;
+      ch.setFirstPerson(false);
+    } else {
+      ch.group.visible = true;
+      ch.setFirstPerson(onFootFP);
+    }
+  }
+
+  const btn = $('btn-camera');
+  if (btn) {
+    btn.classList.toggle('on', cam.mode === 'first');
+    btn.textContent = cam.mode === 'first'
+      ? (v ? '🎥 Cockpit' : '🎥 1st View')
+      : (v ? '🎥 Chase' : '🎥 3rd View');
+  }
+  $('t-camera')?.classList.toggle('on', cam.mode === 'first');
+  $('fp-reticle')?.classList.toggle('hidden', !onFootFP || anyOverlay());
+
+  if (game.state?.player) game.state.player.cameraMode = cam.mode;
+}
+
+function setCameraMode(mode, silent = false) {
+  if (game.creatorOpen) closeCreator();
+  const v = game.player.vehicle;
+  const res = Cam.setCameraMode(cam, mode, !!v, v ? v.yaw : game.player.yaw);
+  syncCameraViewMode();
+  if (!silent) {
+    sfx.click();
+    toast(`🎥 ${res.label}`, '');
+  }
+  return res.mode;
+}
+
+function toggleCameraMode(silent = false) {
+  return setCameraMode(cam.mode === 'first' ? 'third' : 'first', silent);
+}
+
+game.cameraView = {
+  getMode: () => cam.mode,
+  setMode: (m, silent = true) => setCameraMode(m, silent),
+  toggle: (silent = true) => toggleCameraMode(silent),
+  state: cam,
+};
+
 canvas.addEventListener('pointerdown', (e) => {
   sfx.ensure();
   cam.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
@@ -730,16 +811,16 @@ canvas.addEventListener('pointermove', (e) => {
   if (!cam.drag || cam.drag.id !== e.pointerId) return;
   const dx = e.clientX - cam.drag.x; const dy = e.clientY - cam.drag.y;
   cam.drag.x = e.clientX; cam.drag.y = e.clientY;
-  cam.yaw -= dx * 0.006;
-  cam.pitch = THREE.MathUtils.clamp(cam.pitch + dy * 0.004, 0.05, 1.25);
-  cam.lastDrag = game.elapsed;
+  Cam.applyCameraDrag(cam, dx, dy, { inVehicle: !!game.player.vehicle, elapsed: game.elapsed });
 });
 const endDrag = (e) => { if (cam.drag && cam.drag.id === e.pointerId) cam.drag = null; };
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  cam.dist = THREE.MathUtils.clamp(cam.dist + Math.sign(e.deltaY) * 0.8, 3.5, 18);
+  if (cam.mode === 'third') {
+    cam.dist = THREE.MathUtils.clamp(cam.dist + Math.sign(e.deltaY) * 0.8, 3.5, 18);
+  }
 }, { passive: false });
 
 // Touch controls
@@ -764,6 +845,7 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
     b.addEventListener('pointerdown', (e) => {
       e.preventDefault(); sfx.ensure();
       if (b.id === 't-emote') { openEmotesModal(); return; }
+      if (b.id === 't-camera') { toggleCameraMode(); return; }
       if (anyOverlay()) return;
       if (key === 'interact') interact();
       if (key === 'vehicle') toggleVehicle();
@@ -1667,6 +1749,7 @@ function openCreator() {
   closeModal();
   game.creatorOpen = true;
   game.player.char.setOccupation(null); // show casual clothes while editing
+  syncCameraViewMode();
   buildCreatorUI();
   $('creator').classList.remove('hidden');
 }
@@ -1676,10 +1759,12 @@ function closeCreator() {
   $('creator').classList.add('hidden');
   game.player.char.setOccupation(game.state.activeJob);
   game.player.char.setCarrying(!!(game.task && game.task.carrying));
+  syncCameraViewMode();
   document.activeElement?.blur?.();
   saveGame(true);
   if (net) net.setAppearance(game.state.appearance);
 }
+$('btn-camera')?.addEventListener('click', () => toggleCameraMode());
 $('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
 $('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
 $('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : openEmotesModal()));
@@ -1740,6 +1825,9 @@ function enterVehicle(v, silent = false) {
   v.syncMesh(city.groundY(v.x, v.z));
   updateDayNight(getClock(), true);
   cam.yaw = v.yaw;
+  cam.cockpitYaw = 0;
+  cam.cockpitPitch = -0.05;
+  syncCameraViewMode();
   $('vehicle-hud').classList.remove('hidden');
   $('veh-name').textContent = v.model.name;
   updateVehicleTelemetry(0, true);
@@ -1756,9 +1844,14 @@ function detachFromVehicle() {
   ch.setCarrying(!!(game.task && game.task.carrying));
   p.vehicle = null;
   if (prev) {
+    prev.setCockpitView(false);
     prev.occupied = false;
     prev.syncMesh(city.groundY(prev.x, prev.z));
+    cam.yaw = prev.yaw;
   }
+  cam.cockpitYaw = 0;
+  cam.fpPitch = -0.02;
+  syncCameraViewMode();
   playerHeadlight.visible = false;
   scene.add(playerHeadlight);
   scene.add(playerHeadlight.target);
@@ -2265,6 +2358,13 @@ function updatePlayer(dt) {
       toast('⛽ Out of fuel — engine stalled. Press E or T for Roadside Assist, or visit a fuel station!', 'danger');
     } else if (v.cond.fuel > 40) v.stallNotified = false;
     v.syncMesh(gy, dt);
+    if (cam.mode === 'first' || v.data.model === 'roadster') {
+      const step = game.task?.steps?.[game.task.idx] || null;
+      v.updateCockpit(dt, {
+        clockHHMM: Time.hhmm(getClock()),
+        waypoint: step ? { x: step.x, z: step.z } : null,
+      });
+    }
     p.x = v.x; p.z = v.z; p.yaw = v.yaw;
     p.char.animate(dt, 0);
     p.char.armL.rotation.z = p.char.armR.rotation.z = -v.steer * 0.4;
@@ -2298,7 +2398,11 @@ function updatePlayer(dt) {
   p.x = THREE.MathUtils.clamp(p.x, -WORLD_LIMIT, WORLD_LIMIT);
   p.z = THREE.MathUtils.clamp(p.z, -WORLD_LIMIT, WORLD_LIMIT);
   const moving = Math.hypot(p.vx, p.vz);
-  if (moving > 0.3 && len > 0.05) p.yaw = lerpAngle(p.yaw, Math.atan2(mx, mz), Math.min(1, dt * 12));
+  if (cam.mode === 'first' && !game.creatorOpen) {
+    p.yaw = cam.yaw;
+  } else if (moving > 0.3 && len > 0.05) {
+    p.yaw = lerpAngle(p.yaw, Math.atan2(mx, mz), Math.min(1, dt * 12));
+  }
   p.char.group.position.set(p.x, city.groundY(p.x, p.z), p.z);
   p.char.group.rotation.y = p.yaw;
   p.char.animate(dt, moving);
@@ -2307,14 +2411,29 @@ function updatePlayer(dt) {
 
 function updateCamera(dt) {
   const p = game.player;
-  // Q / R orbit
+  const inFirst = cam.mode === 'first' && !game.creatorOpen;
+  $('fp-reticle')?.classList.toggle('hidden', !(inFirst && !p.vehicle && !anyOverlay()));
+
+  // Q / R look or orbit
   if (!anyOverlay() && !isTyping()) {
-    if (k('KeyQ')) { cam.yaw += dt * 2; cam.lastDrag = game.elapsed; }
-    if (k('KeyR')) { cam.yaw -= dt * 2; cam.lastDrag = game.elapsed; }
+    if (inFirst && p.vehicle) {
+      if (k('KeyQ')) {
+        cam.cockpitYaw = THREE.MathUtils.clamp(cam.cockpitYaw + dt * 1.85, -CAM_COCKPIT_YAW_MAX, CAM_COCKPIT_YAW_MAX);
+        cam.lastDrag = game.elapsed;
+      }
+      if (k('KeyR')) {
+        cam.cockpitYaw = THREE.MathUtils.clamp(cam.cockpitYaw - dt * 1.85, -CAM_COCKPIT_YAW_MAX, CAM_COCKPIT_YAW_MAX);
+        cam.lastDrag = game.elapsed;
+      }
+    } else {
+      if (k('KeyQ')) { cam.yaw += dt * 2; cam.lastDrag = game.elapsed; }
+      if (k('KeyR')) { cam.yaw -= dt * 2; cam.lastDrag = game.elapsed; }
+    }
   }
   const target = new THREE.Vector3();
   let dist = cam.dist; let pitch = cam.pitch;
   if (game.creatorOpen) {
+    camera.up.set(0, 1, 0);
     const fy = p.yaw;
     const fwd = { x: Math.sin(fy), z: Math.cos(fy) };
     const camRight = { x: fwd.z, z: -fwd.x }; // camera looks back at the player
@@ -2323,6 +2442,71 @@ function updateCamera(dt) {
     camera.lookAt(target);
     return;
   }
+
+  // First-person 3D Car Cockpit Interior View
+  if (inFirst && p.vehicle) {
+    const v = p.vehicle;
+    if (!v.cockpitView) syncCameraViewMode();
+    const pose = Cam.computeCockpitCameraPose(cam, {
+      vx: v.x,
+      vy: v.y,
+      vz: v.z,
+      carYaw: v.yaw,
+      bodyPitch: v.parts?.body?.rotation?.x || 0,
+      bodyRoll: v.parts?.body?.rotation?.z || 0,
+      driverEye: v.parts?.cockpit?.driverEye || { x: 0.38, y: 1.24, z: -0.2 },
+      speed: v.speed,
+      steer: v.steer,
+      elapsed: game.elapsed,
+      dt,
+    });
+    camera.fov += (Cam.targetFov(cam, true, v.speed) - camera.fov) * Math.min(1, dt * 6);
+    camera.updateProjectionMatrix();
+    camera.position.set(pose.eye.x, pose.eye.y, pose.eye.z);
+    if (cam.shake > 0) {
+      camera.position.x += (Math.random() - 0.5) * cam.shake * 0.22;
+      camera.position.y += (Math.random() - 0.5) * cam.shake * 0.22;
+      cam.shake = Math.max(0, cam.shake - dt * 2.4);
+    }
+    camera.up.set(0, 1, 0);
+    camera.lookAt(pose.look.x, pose.look.y, pose.look.z);
+    if (pose.roll) camera.rotateZ(pose.roll);
+    sun.position.set(v.x + currentSunOffset.x, v.y + 1.2 + currentSunOffset.y, v.z + currentSunOffset.z);
+    sun.target.position.set(v.x, 0, v.z);
+    return;
+  }
+
+  // First-person On-Foot Street POV
+  if (inFirst && !p.vehicle) {
+    if (!p.char.firstPerson) syncCameraViewMode();
+    camera.up.set(0, 1, 0);
+    const moving = Math.hypot(p.vx, p.vz);
+    const buildH = (BUILDS[game.state?.appearance?.build] || BUILDS.Balanced).h;
+    const pose = Cam.computeFootFirstPersonPose(cam, {
+      x: p.x,
+      z: p.z,
+      groundY: city.groundY(p.x, p.z),
+      buildH,
+      jumpY: p.char.jumpY || 0,
+      movingSpeed: moving,
+      dt,
+    });
+    camera.fov += (Cam.targetFov(cam, false, moving) - camera.fov) * Math.min(1, dt * 6);
+    camera.updateProjectionMatrix();
+    camera.position.set(pose.eye.x, pose.eye.y, pose.eye.z);
+    if (cam.shake > 0) {
+      camera.position.x += (Math.random() - 0.5) * cam.shake * 0.3;
+      camera.position.y += (Math.random() - 0.5) * cam.shake * 0.3;
+      cam.shake = Math.max(0, cam.shake - dt * 2.2);
+    }
+    camera.lookAt(pose.look.x, pose.look.y, pose.look.z);
+    sun.position.set(pose.eye.x + currentSunOffset.x, pose.eye.y + currentSunOffset.y, pose.eye.z + currentSunOffset.z);
+    sun.target.position.set(pose.eye.x, 0, pose.eye.z);
+    return;
+  }
+
+  // Third-person Chase / Orbit Camera
+  camera.up.set(0, 1, 0);
   if (p.vehicle) {
     const v = p.vehicle;
     target.set(v.x, v.y + 1.3, v.z);
@@ -2333,10 +2517,10 @@ function updateCamera(dt) {
     }
     dist = Math.max(cam.dist, 7) + Math.abs(v.speed) * 0.07;
     pitch = cam.pitch;
-    camera.fov += ((62 + Math.abs(v.speed) * 0.35) - camera.fov) * Math.min(1, dt * 3);
+    camera.fov += (Cam.targetFov(cam, true, v.speed) - camera.fov) * Math.min(1, dt * 3);
   } else {
     target.set(p.x, city.groundY(p.x, p.z) + 1.55 + (p.char.jumpY || 0) * 0.4, p.z);
-    camera.fov += (62 - camera.fov) * Math.min(1, dt * 3);
+    camera.fov += (Cam.targetFov(cam, false, 0) - camera.fov) * Math.min(1, dt * 3);
   }
   camera.updateProjectionMatrix();
   const cp = Math.cos(pitch);
@@ -2418,6 +2602,7 @@ function disposeCarParts(parts) {
   parts.brakeMat?.dispose?.();
   parts.headFlareMat?.dispose?.();
   parts.tailFlareMat?.dispose?.();
+  parts.cockpit?.dispose?.();
 }
 
 function removeRemote(id) {

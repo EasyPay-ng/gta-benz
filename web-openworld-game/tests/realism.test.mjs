@@ -33,6 +33,8 @@ function makeCanvas(w = 256, h = 256) {
     moveTo: noop,
     lineTo: noop,
     quadraticCurveTo: noop,
+    rect: noop,
+    clip: noop,
     arc: noop,
     ellipse: noop,
     fill: noop,
@@ -198,3 +200,97 @@ test('World & StreetFX: PBR City, SkyDome shader, tyre skid marks, crash sparks 
   for (let i = 0; i < 45; i++) fx.update(0.05);
   assert.equal(fx.explosions.length, 0, 'explosion cleans up after lifetime');
 });
+
+test('First-Person Character Rig & Sleek 3D Car Cockpit Interiors across all 11 models', async () => {
+  const THREE = await import('three');
+  const { DEFAULT_APPEARANCE, VEHICLE_MODELS } = await import('../src/data.js');
+  const { Character } = await import('../src/character.js');
+  const { Vehicle } = await import('../src/vehicles.js');
+  const { createCameraState, computeCockpitCameraPose } = await import('../src/camera.js');
+
+  // 1. Character first-person toggles head/collar while keeping body, chains, arms & shoes visible
+  const ch = new Character({
+    ...DEFAULT_APPEARANCE,
+    topStyle: 'suit',
+    hatStyle: 'fedora',
+    glasses: 'aviators',
+    chain: 'gold',
+  });
+  assert.equal(ch.headGroup.visible, true);
+  assert.equal(ch.collar.visible, true);
+  ch.setFirstPerson(true);
+  assert.equal(ch.firstPerson, true);
+  assert.equal(ch.headGroup.visible, false, 'head, hat & glasses hidden in first-person');
+  assert.equal(ch.collar.visible, false, 'neck collar hidden to prevent eye-level clipping');
+  assert.equal(ch.torso.visible, true, 'torso remains visible when looking down');
+  assert.equal(ch.armL.visible, true, 'arms remain visible when walking');
+  assert.equal(ch.legL.visible, true, 'legs & shoes remain visible');
+  ch.setFirstPerson(false);
+  assert.equal(ch.headGroup.visible, true, 'head restored when returning to third-person');
+  assert.equal(ch.collar.visible, true);
+  ch.dispose();
+
+  // 2. Every one of the 11 vehicle models has a sleek 3D interior, rotating wheel, driver hands & live displays
+  const scene = new THREE.Scene();
+  const camState = createCameraState('first');
+  for (const modelId of Object.keys(VEHICLE_MODELS)) {
+    const v = new Vehicle(scene, { id: `ck_${modelId}`, model: modelId, color: '#2563eb', x: 0, z: 0, yaw: 0 });
+    assert.ok(v.parts.cockpit, `${modelId} builds 3D cockpit rig`);
+
+    if (modelId === 'roadster') {
+      assert.equal(v.parts.cockpit.group.visible, true, 'open-top roadster shows 3D interior even from outside');
+    } else {
+      assert.equal(v.parts.cockpit.group.visible, false, `${modelId} hides heavy cockpit meshes while outside`);
+      assert.equal(v.parts.exteriorCabin.visible, true, `${modelId} shows frosted exterior cabin while outside`);
+    }
+
+    // Switch into Inside Cockpit View
+    v.setCockpitView(true, { skin: '#8d5524', shirt: '#ec4899' });
+    assert.equal(v.cockpitView, true);
+    assert.equal(v.parts.cockpit.group.visible, true, `${modelId} 3D interior visible in cockpit view`);
+    assert.equal(v.parts.cockpit.driverHands.visible, true, `${modelId} 3D driver hands & cuffs visible on wheel`);
+    if (modelId !== 'roadster') {
+      assert.equal(v.parts.exteriorCabin.visible, false, `${modelId} frosted exterior cabin hidden in cockpit view`);
+    }
+
+    // Steering right (+steer) rotates steering wheel clockwise (+Z in local car frame)
+    v.steer = 0.45;
+    v.speed = 24;
+    v.syncMesh(0, 0.05);
+    assert.ok(v.parts.cockpit.steerWheel.rotation.z > 0.5, `${modelId} steering wheel rotates clockwise on right turn`);
+
+    // Live 12 Hz OLED instrument cluster + GPS street-radar infotainment canvas update
+    v.updateCockpit(0.12, {
+      clockHHMM: '21:30',
+      waypoint: { x: 40, z: 80 },
+    });
+
+    // Verify driver eye pose sits cleanly inside cabin bounds above dashboard & below roof
+    const pose = computeCockpitCameraPose(camState, {
+      vx: v.x,
+      vy: v.y,
+      vz: v.z,
+      carYaw: v.yaw,
+      bodyPitch: v.parts.body.rotation.x,
+      bodyRoll: v.parts.body.rotation.z,
+      driverEye: v.parts.cockpit.driverEye,
+      speed: v.speed,
+      steer: v.steer,
+      elapsed: 1.0,
+      dt: 0.05,
+    });
+    assert.ok(pose.eye.x > 0.25, `${modelId} driver eye sits on left-hand (+X) seat`);
+    assert.ok(pose.eye.y > 0.7 && pose.eye.y < 2.2, `${modelId} driver eye height (${pose.eye.y.toFixed(2)}m) sits cleanly inside cabin`);
+
+    // Switch back to Outside Chase View
+    v.setCockpitView(false);
+    assert.equal(v.cockpitView, false);
+    assert.equal(v.parts.cockpit.driverHands.visible, false);
+    if (modelId !== 'roadster') {
+      assert.equal(v.parts.cockpit.group.visible, false);
+      assert.equal(v.parts.exteriorCabin.visible, true);
+    }
+    v.dispose();
+  }
+});
+
