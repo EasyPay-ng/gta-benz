@@ -190,3 +190,49 @@ export function computeCockpitCameraPose(camState, {
     roll: clamp(bodyRoll * 0.5, -0.05, 0.05),
   };
 }
+
+/**
+ * Compute world-space camera pose for live 3D planar car mirrors ('rear', 'left', 'right').
+ * Combined with horizontally mirrored UVs on the mirror glass plane, this produces true
+ * optical reflections (left lane appears on the left side of the mirror, right lane on the right).
+ */
+export function computeMirrorCameraPose(which, {
+  vx, vy, vz, carYaw, bodyPitch = 0, bodyRoll = 0,
+  mirrorAnchors = null,
+}) {
+  const anchors = mirrorAnchors || {
+    rear:  { x: 0,     y: 1.24, z: -1.35 },
+    left:  { x: 0.98,  y: 0.92, z: 0.25 },
+    right: { x: -0.98, y: 0.92, z: 0.25 },
+  };
+  const a = anchors[which] || anchors.rear;
+
+  const sinC = Math.sin(carYaw);
+  const cosC = Math.cos(carYaw);
+  const posX = vx + cosC * a.x + sinC * a.z;
+  const posY = vy + a.y + bodyRoll * a.x * 0.35 - bodyPitch * a.z * 0.35;
+  const posZ = vz - sinC * a.x + cosC * a.z;
+
+  // At carYaw = 0 (forward = +Z, left = +X):
+  //   sin(PI - d) = +sin(d) (+X, outward-left), sin(PI + d) = -sin(d) (-X, outward-right)
+  const splay = which === 'left' ? -0.15 : which === 'right' ? 0.15 : 0;
+  const yaw = carYaw + Math.PI + splay;
+  const pitch = (which === 'rear' ? -0.025 : -0.045) + bodyPitch * 0.65;
+  const fov = which === 'rear' ? 48 : 42;
+
+  const cosP = Math.cos(pitch);
+  const sinP = Math.sin(pitch);
+  const dist = 24;
+
+  return {
+    pos: { x: posX, y: posY, z: posZ },
+    look: {
+      x: posX + Math.sin(yaw) * cosP * dist,
+      y: posY + sinP * dist,
+      z: posZ + Math.cos(yaw) * cosP * dist,
+    },
+    roll: clamp(-bodyRoll * 0.5, -0.05, 0.05),
+    fov,
+  };
+}
+

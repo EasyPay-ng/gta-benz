@@ -729,8 +729,93 @@ function axes() {
   return { f: THREE.MathUtils.clamp(f, -1, 1), r: THREE.MathUtils.clamp(r, -1, 1) };
 }
 
-// Camera orbit / first-person & 3D car cockpit freelook
+// Camera orbit / first-person & 3D car cockpit freelook + live 3D planar mirror rig
 const cam = Cam.createCameraState('third');
+let mirrorRig = null;
+
+function ensureMirrorRig() {
+  if (mirrorRig) return mirrorRig;
+  const rtOpts = { depthBuffer: true, stencilBuffer: false };
+  mirrorRig = {
+    rearRT: new THREE.WebGLRenderTarget(320, 96, rtOpts),
+    leftRT: new THREE.WebGLRenderTarget(224, 128, rtOpts),
+    rightRT: new THREE.WebGLRenderTarget(224, 128, rtOpts),
+    cam: new THREE.PerspectiveCamera(48, 320 / 96, 0.22, 240),
+    boundVeh: null,
+    needsPrime: true,
+    tick: 0,
+  };
+  return mirrorRig;
+}
+
+function renderCockpitMirrors() {
+  const v = game.player.vehicle;
+  if (!v || cam.mode !== 'first' || game.creatorOpen) return;
+  const rig = ensureMirrorRig();
+  if (rig.boundVeh !== v) {
+    v.setMirrorTextures({
+      rear: rig.rearRT.texture,
+      left: rig.leftRT.texture,
+      right: rig.rightRT.texture,
+    });
+    rig.boundVeh = v;
+    rig.needsPrime = true;
+  }
+
+  rig.tick = (rig.tick + 1) % 4;
+  let passes;
+  if (rig.needsPrime) {
+    passes = ['rear', 'left', 'right'];
+    rig.needsPrime = false;
+  } else {
+    const primarySide = cam.cockpitYaw < -0.12 ? 'right' : 'left';
+    const secondarySide = primarySide === 'left' ? 'right' : 'left';
+    passes = rig.tick === 0 ? ['rear', primarySide, secondarySide] : ['rear', primarySide];
+  }
+
+  const prevTarget = renderer.getRenderTarget();
+  const prevShadowAuto = renderer.shadowMap.autoUpdate;
+  const prevSkyPosX = atmosphere.skyMesh.position.x;
+  const prevSkyPosZ = atmosphere.skyMesh.position.z;
+  renderer.shadowMap.autoUpdate = false;
+  v.setMirrorSurfacesVisible(false);
+
+  const mirrorInput = {
+    vx: v.x,
+    vy: v.y,
+    vz: v.z,
+    carYaw: v.yaw,
+    bodyPitch: v.parts?.body?.rotation?.x || 0,
+    bodyRoll: v.parts?.body?.rotation?.z || 0,
+    mirrorAnchors: v.parts?.mirrorAnchors || null,
+  };
+
+  for (const which of passes) {
+    const rt = which === 'rear' ? rig.rearRT : which === 'left' ? rig.leftRT : rig.rightRT;
+    const pose = Cam.computeMirrorCameraPose(which, mirrorInput);
+    const mCam = rig.cam;
+    mCam.fov = pose.fov;
+    mCam.aspect = rt.width / rt.height;
+    mCam.updateProjectionMatrix();
+    mCam.position.set(pose.pos.x, pose.pos.y, pose.pos.z);
+    mCam.up.set(0, 1, 0);
+    mCam.lookAt(pose.look.x, pose.look.y, pose.look.z);
+    if (pose.roll) mCam.rotateZ(pose.roll);
+
+    atmosphere.skyMesh.position.set(pose.pos.x, 0, pose.pos.z);
+    const wasCockpitVis = v.parts?.cockpit ? v.parts.cockpit.group.visible : false;
+    if (which === 'rear' && v.parts?.cockpit) v.parts.cockpit.group.visible = false;
+    renderer.setRenderTarget(rt);
+    renderer.clear();
+    renderer.render(scene, mCam);
+    if (which === 'rear' && v.parts?.cockpit) v.parts.cockpit.group.visible = wasCockpitVis;
+  }
+
+  atmosphere.skyMesh.position.set(prevSkyPosX, 0, prevSkyPosZ);
+  v.setMirrorSurfacesVisible(true);
+  renderer.setRenderTarget(prevTarget);
+  renderer.shadowMap.autoUpdate = prevShadowAuto;
+}
 
 function syncCameraViewMode() {
   const v = game.player.vehicle;
@@ -746,12 +831,18 @@ function syncCameraViewMode() {
 
   for (const veh of game.vehicles) {
     if (veh === v && inCockpit) {
-      veh.setCockpitView(true, {
-        skin: game.state?.appearance?.skin,
-        shirt: game.state?.appearance?.shirt,
+      veh.setCockpitView(true, game.state?.appearance || null);
+      const rig = ensureMirrorRig();
+      veh.setMirrorTextures({
+        rear: rig.rearRT.texture,
+        left: rig.leftRT.texture,
+        right: rig.rightRT.texture,
       });
+      rig.boundVeh = veh;
+      rig.needsPrime = true;
     } else if (veh.cockpitView) {
       veh.setCockpitView(false);
+      if (mirrorRig?.boundVeh === veh) mirrorRig.boundVeh = null;
     }
   }
 
@@ -2602,6 +2693,8 @@ function disposeCarParts(parts) {
   parts.brakeMat?.dispose?.();
   parts.headFlareMat?.dispose?.();
   parts.tailFlareMat?.dispose?.();
+  parts.leftMirrorLiveMat?.dispose?.();
+  parts.rightMirrorLiveMat?.dispose?.();
   parts.cockpit?.dispose?.();
 }
 
@@ -3038,6 +3131,7 @@ function frame() {
   updateHUD();
   mmTimer -= dt;
   if (mmTimer <= 0) { mmTimer = 1 / 15; drawMinimap(); }
+  renderCockpitMirrors();
   renderer.render(scene, camera);
 }
 

@@ -116,6 +116,54 @@ function extrudeCarProfile(shape, width, bevelSize = 0.055, bevelThickness = 0.0
   return geo;
 }
 
+function getCabinBounds(m, yBot, yBelt) {
+  const L = m.len;
+  const W = m.wid;
+  const cabW = m.style === 'van' ? W * 0.92
+    : m.style === 'gwagen' ? W * 0.88
+    : m.style === 'hyper' ? W * 0.75
+    : (m.style === 'sports' || m.style === 'roadster') ? W * 0.8
+    : W * 0.85;
+
+  let zWindBase;
+  let zWindTop;
+  let zRearCab;
+  let zSeat;
+  if (m.style === 'van') {
+    zWindBase = L / 2 - 0.28;
+    zWindTop = L / 2 - 0.76;
+    zRearCab = -L / 2 + 0.22;
+    zSeat = 0.88;
+  } else if (m.style === 'gwagen') {
+    zWindBase = L * 0.22;
+    zWindTop = L * 0.09;
+    zRearCab = -L / 2 + 0.22;
+    zSeat = -0.1;
+  } else if (m.style === 'roadster') {
+    zWindBase = 0.68;
+    zWindTop = 0.36;
+    zRearCab = -0.64;
+    zSeat = -0.24;
+  } else if (m.style === 'hyper') {
+    zWindBase = m.cabinZ + m.cabinLen * 0.62;
+    zWindTop = m.cabinZ + m.cabinLen * 0.16;
+    zRearCab = m.cabinZ - m.cabinLen * 0.66;
+    zSeat = -0.22;
+  } else if (m.style === 'pickup') {
+    zWindBase = m.cabinZ + m.cabinLen * 0.55;
+    zWindTop = m.cabinZ + m.cabinLen * 0.2;
+    zRearCab = m.cabinZ - m.cabinLen * 0.46;
+    zSeat = m.cabinZ - 0.18;
+  } else {
+    zWindBase = m.cabinZ + m.cabinLen * 0.55;
+    zWindTop = m.cabinZ + m.cabinLen * 0.2;
+    zRearCab = m.cabinZ - m.cabinLen * 0.58;
+    zSeat = m.cabinZ - 0.16;
+  }
+  const yFloor = yBot + 0.065;
+  return { cabW, zWindBase, zWindTop, zRearCab, zSeat, yFloor };
+}
+
 function getSculptedGeometries(modelId) {
   if (PROFILE_CACHE.has(modelId)) return PROFILE_CACHE.get(modelId);
   const m = VEHICLE_MODELS[modelId];
@@ -130,6 +178,7 @@ function getSculptedGeometries(modelId) {
     : m.style === 'van' ? 0.06 : 0.11
   );
   const yTail = yBelt + (m.style === 'hyper' ? 0.06 : m.style === 'sports' || m.style === 'muscle' ? 0.04 : 0.01);
+  const bounds = getCabinBounds(m, yBot, yBelt);
 
   // 1. Sculpted lower body hull tailored to each vehicle archetype
   const hullShape = new THREE.Shape();
@@ -173,6 +222,23 @@ function getSculptedGeometries(modelId) {
   }
   const hullBevel = m.style === 'gwagen' ? 0.03 : 0.055;
   const hullGeo = extrudeCarProfile(hullShape, W, hullBevel, 0.065);
+
+  // 1b. Hollowed lower chassis for Cockpit View & open-top roadsters (drops cabin tub down to yFloor!)
+  const zCutFront = Math.min(L / 2 - 0.34, bounds.zWindBase - 0.03);
+  const zCutRear = Math.max(-L / 2 + 0.24, bounds.zRearCab + 0.03);
+  const yWell = Math.max(yBot + 0.012, bounds.yFloor - hullBevel - 0.012);
+  const cockpitHullShape = new THREE.Shape();
+  cockpitHullShape.moveTo(-L / 2 + 0.06, yBot + 0.06);
+  cockpitHullShape.lineTo(L / 2 - 0.1, yBot + 0.04);
+  cockpitHullShape.quadraticCurveTo(L / 2 + 0.02, yBot + 0.11, L / 2 - 0.02, yNose);
+  cockpitHullShape.lineTo(Math.max(zCutFront + 0.08, Math.min(L / 2 - 0.18, L * 0.24)), yBelt - hullBevel * 0.4);
+  cockpitHullShape.lineTo(zCutFront, yBelt - hullBevel * 0.4);
+  cockpitHullShape.lineTo(zCutFront - 0.05, yWell);
+  cockpitHullShape.lineTo(zCutRear + 0.05, yWell);
+  cockpitHullShape.lineTo(zCutRear, yBelt - hullBevel * 0.4);
+  cockpitHullShape.lineTo(-L / 2 + 0.04, yTail - 0.04);
+  cockpitHullShape.closePath();
+  const cockpitHullGeo = extrudeCarProfile(cockpitHullShape, W, hullBevel, 0.065);
 
   // 2. Sculpted upper cabin / greenhouse + inset glass core
   let roofGeo = null;
@@ -254,7 +320,7 @@ function getSculptedGeometries(modelId) {
     glassGeo = extrudeCarProfile(glassShape, cabW, 0.02, 0.025);
   }
 
-  const out = { hullGeo, roofGeo, glassGeo, yBot, yBelt, yNose, yTail };
+  const out = { hullGeo, cockpitHullGeo, roofGeo, glassGeo, yBot, yBelt, yNose, yTail, bounds };
   PROFILE_CACHE.set(modelId, out);
   return out;
 }
@@ -305,8 +371,24 @@ function buildAlloyWheel(wheelR, rimMat = MAT.rim) {
 
 const TORUS_WHEEL = new THREE.TorusGeometry(0.145, 0.02, 8, 28);
 const TORUS_VENT = new THREE.TorusGeometry(0.032, 0.006, 6, 16);
-const HAND_GEO = new THREE.CapsuleGeometry(0.028, 0.048, 4, 8);
-const CUFF_GEO = new THREE.CylinderGeometry(0.034, 0.04, 0.16, 8);
+const HAND_GEO = new THREE.CapsuleGeometry(0.024, 0.042, 4, 10);
+const THUMB_GEO = new THREE.CapsuleGeometry(0.011, 0.024, 4, 8);
+const FOREARM_GEO = new THREE.CylinderGeometry(0.028, 0.036, 0.21, 14);
+const SHORT_CUFF_GEO = new THREE.CylinderGeometry(0.039, 0.042, 0.065, 14);
+const THIGH_GEO = new THREE.CylinderGeometry(0.064, 0.076, 0.34, 14);
+const SHIN_GEO = new THREE.CylinderGeometry(0.046, 0.056, 0.31, 14);
+const JOINT_GEO = new THREE.SphereGeometry(1, 10, 8);
+const MIRROR_GLASS_GEO = (() => {
+  const g = new THREE.PlaneGeometry(1, 1);
+  const uv = g.attributes.uv;
+  // Flip U horizontally (u -> 1 - u) so a rear-facing camera produces true optical mirror reflections
+  uv.setXY(0, 1, 1);
+  uv.setXY(1, 0, 1);
+  uv.setXY(2, 1, 0);
+  uv.setXY(3, 0, 0);
+  uv.needsUpdate = true;
+  return g;
+})();
 
 function addStrutBetween(parent, mat, p1, p2, w = 0.055, d = 0.055) {
   const dx = p2.x - p1.x;
@@ -329,7 +411,7 @@ function addStrutBetween(parent, mat, p1, p2, w = 0.055, d = 0.055) {
  * Build a detailed, model-tailored 3D car interior & framed greenhouse for Cockpit View
  * (and always-visible open-air interior on roadsters).
  */
-function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
+function buildCockpitRig(m, { paint, yBot, yBelt, cabinTop, bounds, openTop = false }) {
   const L = m.len;
   const W = m.wid;
   const group = new THREE.Group();
@@ -337,47 +419,7 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
   const isLuxury = m.style === 'gwagen' || m.style === 'sedan';
   const isMuscle = m.style === 'muscle';
 
-  const cabW = m.style === 'van' ? W * 0.92
-    : m.style === 'gwagen' ? W * 0.88
-    : m.style === 'hyper' ? W * 0.75
-    : (m.style === 'sports' || m.style === 'roadster') ? W * 0.8
-    : W * 0.85;
-
-  let zWindBase;
-  let zWindTop;
-  let zRearCab;
-  let zSeat;
-  if (m.style === 'van') {
-    zWindBase = L / 2 - 0.28;
-    zWindTop = L / 2 - 0.76;
-    zRearCab = -L / 2 + 0.22;
-    zSeat = 0.88;
-  } else if (m.style === 'gwagen') {
-    zWindBase = L * 0.22;
-    zWindTop = L * 0.09;
-    zRearCab = -L / 2 + 0.22;
-    zSeat = -0.1;
-  } else if (m.style === 'roadster') {
-    zWindBase = 0.68;
-    zWindTop = 0.36;
-    zRearCab = -0.64;
-    zSeat = -0.24;
-  } else if (m.style === 'hyper') {
-    zWindBase = m.cabinZ + m.cabinLen * 0.62;
-    zWindTop = m.cabinZ + m.cabinLen * 0.16;
-    zRearCab = m.cabinZ - m.cabinLen * 0.66;
-    zSeat = -0.22;
-  } else if (m.style === 'pickup') {
-    zWindBase = m.cabinZ + m.cabinLen * 0.55;
-    zWindTop = m.cabinZ + m.cabinLen * 0.2;
-    zRearCab = m.cabinZ - m.cabinLen * 0.46;
-    zSeat = m.cabinZ - 0.18;
-  } else {
-    zWindBase = m.cabinZ + m.cabinLen * 0.55;
-    zWindTop = m.cabinZ + m.cabinLen * 0.2;
-    zRearCab = m.cabinZ - m.cabinLen * 0.58;
-    zSeat = m.cabinZ - 0.16;
-  }
+  const { cabW, zWindBase, zWindTop, zRearCab, zSeat, yFloor } = bounds || getCabinBounds(m, yBot, yBelt);
 
   const driverX = cabW * 0.255;
   const passX = -cabW * 0.255;
@@ -394,82 +436,150 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
     : '#60a5fa';
   const ambientMat = new THREE.MeshBasicMaterial({ color: defaultAmbientHex });
 
-  // 1. Cabin floor carpet tub + sculpted door cards + ambient door LEDs
-  const tubLen = Math.max(1.2, zWindBase - zRearCab - 0.08);
+  // 1. Deep Cabin Tub (down to yFloor!), Painted Outer Door Skins, Full-Height Door Cards & Sport Pedals
+  const tubLen = Math.max(1.25, zWindBase - zRearCab + 0.06);
   const tubMidZ = (zWindBase + zRearCab) * 0.5;
-  part(group, MAT.alcantara, 0, yBelt + 0.008, tubMidZ, cabW * 0.96, 0.02, tubLen, false);
+  const cabinWallH = Math.max(0.32, yBelt - yFloor + 0.02);
+  const wallMidY = (yFloor + yBelt) * 0.5;
 
-  const doorLen = Math.min(1.55, tubLen * 0.72);
-  const doorZ = zSeat + doorLen * 0.34;
+  // Deep dark Alcantara cabin floor + front firewall + rear cabin bulkhead
+  part(group, MAT.alcantara, 0, yFloor, tubMidZ, W * 0.88, 0.028, tubLen, false);
+  part(group, MAT.dashSoft, 0, wallMidY, zWindBase - 0.02, W * 0.88, cabinWallH, 0.05, false);
+  part(group, MAT.alcantara, 0, wallMidY, zRearCab + 0.02, W * 0.88, cabinWallH, 0.06, false);
+
+  // Stitched driver & passenger velour floor mats
+  const matLen = Math.max(0.46, (zWindBase - zSeat) * 0.56);
+  const matZ = zWindBase - matLen * 0.55 - 0.08;
   for (const sx of [-1, 1]) {
-    const dx = sx * (cabW * 0.475);
-    // Inner door leather card + padded armrest + chrome pull + speaker + ambient strip
-    part(group, MAT.dashSoft, dx, yBelt + 0.03, doorZ, 0.045, 0.11, doorLen, false);
-    part(group, seatMainMat, sx * (cabW * 0.445), yBelt + 0.035, doorZ - 0.04, 0.055, 0.038, doorLen * 0.58, false);
-    part(group, MAT.aluTrim, sx * (cabW * 0.44), yBelt + 0.055, doorZ + doorLen * 0.22, 0.022, 0.022, 0.12, false);
-    part(group, ambientMat, sx * (cabW * 0.448), yBelt + 0.068, doorZ, 0.012, 0.01, doorLen * 0.76, false);
+    part(group, MAT.leather, sx * Math.abs(driverX), yFloor + 0.017, matZ, 0.4, 0.01, matLen, false);
   }
 
-  // 2. Center transmission tunnel console + gear shifter + cupholders + stitched armrest
-  const consoleLen = Math.max(0.85, (zWindBase - zSeat) * 0.88);
-  const consoleZ = zSeat + consoleLen * 0.32;
-  part(group, MAT.dashSoft, 0, yBelt + 0.045, consoleZ, cabW * 0.19, 0.09, consoleLen, false);
-  part(group, trimMat, 0, yBelt + 0.094, consoleZ + 0.06, cabW * 0.165, 0.014, consoleLen * 0.72, false);
-  part(group, seatMainMat, 0, yBelt + 0.11, zSeat - 0.02, cabW * 0.175, 0.045, 0.32, false); // center armrest
+  // 3 Brushed-aluminium sport pedals in the driver's footwell (dead-pedal, brake, organ throttle)
+  const zPedal = zWindBase - 0.14;
+  const pFoot = part(group, MAT.aluTrim, driverX + 0.145, yFloor + 0.09, zPedal + 0.02, 0.052, 0.14, 0.014, false);
+  pFoot.rotation.x = -0.52;
+  const pBrake = part(group, MAT.aluTrim, driverX + 0.015, yFloor + 0.125, zPedal - 0.02, 0.078, 0.052, 0.016, false);
+  pBrake.rotation.x = -0.42;
+  part(group, MAT.trim, driverX + 0.015, yFloor + 0.19, zPedal + 0.02, 0.018, 0.12, 0.018, false);
+  const pGas = part(group, MAT.aluTrim, driverX - 0.1, yFloor + 0.105, zPedal, 0.044, 0.15, 0.014, false);
+  pGas.rotation.x = -0.48;
+
+  // Painted exterior door shells + full-height sculpted inner leather door panels
+  const doorLen = Math.max(1.15, zWindBase - zRearCab + 0.12);
+  const innerDoorLen = Math.min(1.65, tubLen * 0.84);
+  const doorZ = zSeat + innerDoorLen * 0.28;
+  for (const sx of [-1, 1]) {
+    // Solid painted outer door panel (seals exterior silhouette when cockpitHullGeo is active!)
+    part(group, paint, sx * (W * 0.5 - 0.034), wallMidY, tubMidZ, 0.068, cabinWallH + 0.03, doorLen, true);
+    // Full-height inner leather door card + quilted mid-insert + padded armrest + speaker + chrome pull + LED
+    part(group, MAT.dashSoft, sx * (W * 0.5 - 0.078), wallMidY + 0.01, doorZ, 0.036, cabinWallH + 0.04, innerDoorLen, false);
+    part(group, seatMainMat, sx * (W * 0.5 - 0.098), yFloor + cabinWallH * 0.52, doorZ - 0.02, 0.018, cabinWallH * 0.44, innerDoorLen * 0.68, false);
+    part(group, MAT.leather, sx * (W * 0.5 - 0.122), yFloor + cabinWallH * 0.56, doorZ - 0.03, 0.058, 0.046, innerDoorLen * 0.56, false);
+    part(group, MAT.aluTrim, sx * (W * 0.5 - 0.115), yBelt - 0.045, doorZ + innerDoorLen * 0.2, 0.022, 0.024, 0.13, false);
+    part(group, ambientMat, sx * (W * 0.5 - 0.1), yBelt - 0.01, doorZ, 0.012, 0.011, innerDoorLen * 0.78, false);
+    // Circular metallic Burmester-style door speaker grille
+    const spkRing = new THREE.Mesh(TORUS_VENT, MAT.aluTrim);
+    spkRing.position.set(sx * (W * 0.5 - 0.098), yFloor + cabinWallH * 0.27, doorZ + innerDoorLen * 0.27);
+    spkRing.rotation.y = Math.PI / 2;
+    spkRing.scale.setScalar(2.1);
+    group.add(spkRing);
+    const spkCore = new THREE.Mesh(CYL, MAT.grille);
+    spkCore.scale.set(0.062, 0.01, 0.062);
+    spkCore.rotation.z = Math.PI / 2;
+    spkCore.position.copy(spkRing.position);
+    group.add(spkCore);
+  }
+
+  // 2. Full-Height Center Transmission Console Tunnel + Cupholders + Drive-Mode Dial + Shifter
+  const consoleLen = Math.max(0.95, (zWindBase - zSeat) * 0.92);
+  const consoleZ = zSeat + consoleLen * 0.34;
+  const yConsoleTop = yBelt + 0.075;
+  const tunnelH = Math.max(0.28, yConsoleTop - yFloor);
+  part(group, MAT.dashSoft, 0, yFloor + tunnelH * 0.5, consoleZ, cabW * 0.21, tunnelH, consoleLen, false);
+  part(group, trimMat, 0, yConsoleTop + 0.008, consoleZ + 0.05, cabW * 0.185, 0.018, consoleLen * 0.76, false);
+  for (const sx of [-1, 1]) {
+    part(group, ambientMat, sx * (cabW * 0.096), yConsoleTop + 0.004, consoleZ + 0.05, 0.008, 0.009, consoleLen * 0.7, false);
+  }
+  part(group, seatMainMat, 0, yConsoleTop + 0.028, zSeat - 0.04, cabW * 0.19, 0.052, 0.34, false); // stitched center armrest
+
+  // Twin chrome-ringed cupholders + rotary drive-mode selector dial
+  for (const cx of [-0.042, 0.042]) {
+    const cup = new THREE.Mesh(TORUS_VENT, MAT.aluTrim);
+    cup.rotation.x = Math.PI / 2;
+    cup.scale.setScalar(1.05);
+    cup.position.set(cx, yConsoleTop + 0.02, zSeat + 0.2);
+    group.add(cup);
+  }
+  const dial = new THREE.Mesh(CYL, MAT.aluTrim);
+  dial.scale.set(0.024, 0.018, 0.024);
+  dial.position.set(0, yConsoleTop + 0.024, zSeat + 0.12);
+  group.add(dial);
 
   // Gear selector (classic chrome ball Hurst stick on muscle, sleek T-shifter on modern/exotics)
-  const shiftZ = zSeat + 0.34;
+  const shiftZ = zSeat + 0.35;
   if (isMuscle) {
     const stalk = new THREE.Mesh(CYL, MAT.chrome);
     stalk.scale.set(0.01, 0.13, 0.01);
     stalk.rotation.x = -0.18;
-    stalk.position.set(0, yBelt + 0.15, shiftZ);
+    stalk.position.set(0, yConsoleTop + 0.075, shiftZ);
     group.add(stalk);
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), MAT.plate);
-    ball.position.set(0, yBelt + 0.215, shiftZ - 0.02);
+    ball.position.set(0, yConsoleTop + 0.14, shiftZ - 0.02);
     group.add(ball);
   } else {
-    part(group, MAT.aluTrim, 0, yBelt + 0.125, shiftZ, 0.026, 0.065, 0.032, false);
-    part(group, MAT.leather, 0, yBelt + 0.16, shiftZ + 0.01, 0.085, 0.026, 0.048, false);
+    part(group, MAT.aluTrim, 0, yConsoleTop + 0.045, shiftZ, 0.026, 0.065, 0.032, false);
+    part(group, MAT.leather, 0, yConsoleTop + 0.08, shiftZ + 0.01, 0.088, 0.026, 0.05, false);
   }
   // Start/Stop red engine button on console
   const startBtn = new THREE.Mesh(CYL, MAT.redIntake);
   startBtn.scale.set(0.016, 0.008, 0.016);
-  startBtn.position.set(driverX * 0.32, yBelt + 0.103, shiftZ + 0.13);
+  startBtn.position.set(driverX * 0.32, yConsoleTop + 0.022, shiftZ + 0.12);
   group.add(startBtn);
 
-  // 3. Sculpted quilted bucket seats (cushion + side bolsters + backrest + integrated headrest)
+  // 3. Deep Sculpted Quilted Bucket Seats (anchored to yFloor with plush thigh & lumbar bolsters!)
+  const ySeatTop = yFloor + Math.max(0.19, (yBelt - yFloor) * 0.42);
+  const seatBaseH = Math.max(0.12, ySeatTop - yFloor - 0.04);
   for (const sx of [-1, 1]) {
     const seatX = sx * Math.abs(driverX);
-    part(group, seatMainMat, seatX, yBelt + 0.032, zSeat + 0.14, 0.42, 0.055, 0.42, false);
-    // Side thigh bolsters
+    // Steel frame riser + plush quilted cushion angled slightly upward under knees
+    part(group, MAT.trim, seatX, yFloor + seatBaseH * 0.5, zSeat + 0.08, 0.36, seatBaseH, 0.38, false);
+    const cush = part(group, seatMainMat, seatX, ySeatTop, zSeat + 0.11, 0.43, 0.075, 0.45, false);
+    cush.rotation.x = -0.08;
+    // Sculpted side thigh bolsters
     for (const bx of [-1, 1]) {
-      part(group, MAT.leather, seatX + bx * 0.19, yBelt + 0.052, zSeat + 0.14, 0.055, 0.065, 0.4, false);
+      const bol = part(group, MAT.leather, seatX + bx * 0.195, ySeatTop + 0.038, zSeat + 0.11, 0.058, 0.085, 0.43, false);
+      bol.rotation.x = -0.08;
     }
-    // Backrest + shoulder bolsters + headrest (positioned slightly behind eyeZ so never clips camera)
-    const back = part(group, seatMainMat, seatX, yBelt + 0.21, zSeat - 0.09, 0.4, 0.34, 0.085, false);
-    back.rotation.x = -0.14;
-    const hRest = part(group, MAT.leather, seatX, yBelt + 0.42, zSeat - 0.13, 0.22, 0.14, 0.075, false);
+    // Reclined backrest + lateral shoulder bolsters + integrated headrest (behind eyeZ so zero camera clipping)
+    const backH = Math.max(0.48, (yBelt + 0.34) - ySeatTop);
+    const back = part(group, seatMainMat, seatX, ySeatTop + backH * 0.5, zSeat - 0.11, 0.41, backH, 0.09, false);
+    back.rotation.x = -0.15;
+    for (const bx of [-1, 1]) {
+      const sBol = part(group, MAT.leather, seatX + bx * 0.19, ySeatTop + backH * 0.52, zSeat - 0.09, 0.055, backH * 0.86, 0.1, false);
+      sBol.rotation.x = -0.15;
+    }
+    const hRest = part(group, MAT.leather, seatX, ySeatTop + backH + 0.08, zSeat - 0.16, 0.22, 0.15, 0.078, false);
     hRest.rotation.x = -0.1;
   }
 
-  // 4. Multi-layered wrap-around dashboard + chrome turbine vents + ambient LED ribbon
+  // 4. Multi-layered wrap-around dashboard + lower knee bolster + chrome turbine vents + ambient LED ribbon
   const zDashFront = zWindBase - 0.03;
   const zDashFace = zSeat + (zWindBase - zSeat) * 0.55;
   const dashDepth = Math.max(0.24, zDashFront - zDashFace);
   const dashMidZ = (zDashFront + zDashFace) * 0.5;
   const yDashTop = Math.min(yBelt + 0.14, eyeY - 0.185);
-  const dashH = Math.max(0.12, yDashTop - yBelt + 0.02);
+  const yDashUnder = yFloor + Math.max(0.32, (yBelt - yFloor) * 0.68);
+  const fullDashH = Math.max(0.18, yDashTop - yDashUnder);
 
-  // Upper anti-glare soft-touch deck + trim fascia + glowing ambient ribbon
-  part(group, MAT.dashSoft, 0, yBelt + dashH * 0.5, dashMidZ, cabW * 0.94, dashH, dashDepth, false);
-  part(group, trimMat, 0, yDashTop - 0.042, zDashFace - 0.008, cabW * 0.9, 0.062, 0.024, false);
-  part(group, ambientMat, 0, yDashTop - 0.075, zDashFace - 0.016, cabW * 0.88, 0.011, 0.016, false);
+  // Sculpted wrap-around dash body (extends down above knees, leaving footwell & pedals open underneath!)
+  part(group, MAT.dashSoft, 0, yDashUnder + fullDashH * 0.5, dashMidZ, cabW * 0.96, fullDashH, dashDepth, false);
+  part(group, trimMat, 0, yDashTop - 0.042, zDashFace - 0.008, cabW * 0.92, 0.062, 0.024, false);
+  part(group, ambientMat, 0, yDashTop - 0.076, zDashFace - 0.016, cabW * 0.9, 0.011, 0.016, false);
 
-  // Sculpted curved driver instrument binnacle hood
-  part(group, MAT.leather, driverX, yDashTop + 0.055, zDashFace + 0.03, 0.37, 0.028, 0.16, false);
+  // Sculpted curved driver instrument binnacle hood (elevated cleanly into upper wheel arch!)
+  part(group, MAT.leather, driverX, yDashTop + 0.078, zDashFace + 0.025, 0.37, 0.026, 0.16, false);
   for (const bx of [-1, 1]) {
-    part(group, MAT.leather, driverX + bx * 0.175, yDashTop + 0.015, zDashFace + 0.03, 0.024, 0.08, 0.15, false);
+    part(group, MAT.leather, driverX + bx * 0.175, yDashTop + 0.032, zDashFace + 0.025, 0.024, 0.09, 0.15, false);
   }
 
   // 5 Mercedes-inspired chrome turbine AC vents (3 center + 2 outer)
@@ -501,20 +611,20 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
   const clusterMat = new THREE.MeshBasicMaterial({ color: 0x0ea5e9 });
   const infotainMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
 
-  // Driver gauge cluster (faces -Z toward the driver, tilted upward toward eye level)
+  // Driver gauge cluster (elevated cleanly into upper wheel arch, facing -Z toward driver)
   const clusterGroup = new THREE.Group();
-  clusterGroup.position.set(driverX, yDashTop + 0.008, zDashFace - 0.018);
+  clusterGroup.position.set(driverX, yDashTop + 0.028, zDashFace - 0.012);
   clusterGroup.rotation.y = Math.PI; // +Z normal -> -Z toward driver
   clusterGroup.rotation.x = 0.14;    // upward tilt toward driver's eyes
-  part(clusterGroup, MAT.pianoBlack, 0, 0, -0.006, 0.33, 0.118, 0.012, false);
-  const clusterPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.31, 0.102), clusterMat);
+  part(clusterGroup, MAT.pianoBlack, 0, 0, -0.006, 0.335, 0.12, 0.012, false);
+  const clusterPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.315, 0.104), clusterMat);
   clusterGroup.add(clusterPlane);
   group.add(clusterGroup);
 
   // Center widescreen infotainment tablet (angled toward left-hand driver & tilted upward)
   const infoGroup = new THREE.Group();
   const infoX = Math.min(0.0, driverX - 0.33);
-  infoGroup.position.set(infoX, yDashTop + 0.024, zDashFace - 0.022);
+  infoGroup.position.set(infoX, yDashTop + 0.028, zDashFace - 0.022);
   infoGroup.rotation.y = Math.PI - 0.16; // angled toward left-hand driver (+X)
   infoGroup.rotation.x = 0.12;
   part(infoGroup, MAT.aluTrim, 0, 0, -0.008, 0.335, 0.158, 0.014, false);
@@ -524,19 +634,19 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
   infoGroup.add(infoPlane);
   group.add(infoGroup);
 
-  // 6. Sculpted Steering Column, Rotating 3-Spoke Steering Wheel & Driver Hands
-  const zSteer = zDashFace - 0.165;
-  const ySteer = yDashTop - 0.015;
+  // 6. Sculpted Steering Column, Rotating 3-Spoke Steering Wheel, Driver Arms & Seated Legs
+  const zSteer = zDashFace - 0.168;
+  const ySteer = yDashTop - 0.026;
   const colStalk = new THREE.Mesh(CYL, MAT.trim);
   colStalk.scale.set(0.036, 0.18, 0.036);
   colStalk.rotation.x = Math.PI / 2 - 0.28;
-  colStalk.position.set(driverX, ySteer - 0.015, (zDashFace + zSteer) * 0.5);
+  colStalk.position.set(driverX, ySteer - 0.012, (zDashFace + zSteer) * 0.5);
   group.add(colStalk);
 
   // Outer tilt mount (tilts top of wheel slightly away so face points up at driver's eyes)
   const steerTilt = new THREE.Group();
   steerTilt.position.set(driverX, ySteer, zSteer);
-  steerTilt.rotation.x = 0.28;
+  steerTilt.rotation.x = 0.26;
   group.add(steerTilt);
 
   // Inner rotating wheel group (rotates around local Z with `steer`)
@@ -551,24 +661,24 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
     const markerMat = m.style === 'gwagen' ? MAT.goldMetal : MAT.redIntake;
     part(steerWheel, markerMat, 0, 0.145, 0, 0.024, 0.044, 0.044, false);
   }
-  // Center airbag boss + chrome emblem ring + 3-pointed star spokes
+  // Compact center airbag boss + chrome emblem ring + 3-pointed star spokes (leaves upper arch wide open!)
   const hub = new THREE.Mesh(CYL, MAT.leather);
-  hub.scale.set(0.052, 0.034, 0.052);
+  hub.scale.set(0.044, 0.032, 0.044);
   hub.rotation.x = Math.PI / 2;
   steerWheel.add(hub);
-  const emblemRing = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.0035, 6, 16), MAT.chrome);
-  emblemRing.position.z = -0.019;
+  const emblemRing = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.0032, 6, 16), MAT.chrome);
+  emblemRing.position.z = -0.018;
   steerWheel.add(emblemRing);
   for (let k = 0; k < 3; k++) {
     const a = (k / 3) * Math.PI * 2 + Math.PI / 2;
-    const ray = part(steerWheel, MAT.chrome, Math.cos(a) * 0.012, Math.sin(a) * 0.012, -0.019, 0.004, 0.024, 0.004, false);
+    const ray = part(steerWheel, MAT.chrome, Math.cos(a) * 0.01, Math.sin(a) * 0.01, -0.018, 0.0038, 0.02, 0.004, false);
     ray.rotation.z = a - Math.PI / 2;
   }
-  // 3 sculpted spokes at 9 o'clock (+X), 3 o'clock (-X), and 6 o'clock (-Y) — leaving upper arc open for gauges!
-  part(steerWheel, MAT.aluTrim, 0.094, -0.008, -0.004, 0.088, 0.024, 0.016, false);
-  part(steerWheel, MAT.aluTrim, -0.094, -0.008, -0.004, 0.088, 0.024, 0.016, false);
-  part(steerWheel, MAT.aluTrim, -0.016, -0.092, -0.004, 0.018, 0.088, 0.016, false);
-  part(steerWheel, MAT.aluTrim, 0.016, -0.092, -0.004, 0.018, 0.088, 0.016, false);
+  // 3 sculpted spokes at 9 o'clock (+X), 3 o'clock (-X), and 6 o'clock (-Y)
+  part(steerWheel, MAT.aluTrim, 0.092, -0.014, -0.004, 0.092, 0.022, 0.016, false);
+  part(steerWheel, MAT.aluTrim, -0.092, -0.014, -0.004, 0.092, 0.022, 0.016, false);
+  part(steerWheel, MAT.aluTrim, -0.015, -0.092, -0.004, 0.017, 0.088, 0.016, false);
+  part(steerWheel, MAT.aluTrim, 0.015, -0.092, -0.004, 0.017, 0.088, 0.016, false);
 
   // Shift paddles on performance & luxury models
   if (isExotic || m.style === 'gwagen') {
@@ -577,24 +687,107 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
     }
   }
 
-  // Articulated 3D driver hands & forearm cuffs gripping 9-and-3 (visible in Cockpit View)
+  // Sculpted 3D driver hands, downward-tapered forearms & seated legs/shoes (visible in Cockpit View)
   const handSkinMat = new THREE.MeshStandardMaterial({ color: 0x8d5524, roughness: 0.58 });
   const handSleeveMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.72 });
+  const legPantsMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.78 });
+  const legShoeMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.45 });
+  const driverForearmMeshes = [];
+  const driverShortCuffs = [];
+  const driverShinMeshes = [];
+
   const driverHands = new THREE.Group();
   driverHands.visible = false;
   for (const sx of [-1, 1]) {
+    // Palm + wrapped thumb gripping 9-and-3 on the wheel
     const grip = new THREE.Mesh(HAND_GEO, handSkinMat);
-    grip.position.set(sx * 0.145, 0.005, -0.008);
-    grip.rotation.z = sx * 0.12;
+    grip.position.set(sx * 0.144, -0.004, -0.006);
+    grip.rotation.z = sx * 0.14;
     driverHands.add(grip);
 
-    const cuff = new THREE.Mesh(CUFF_GEO, handSleeveMat);
-    cuff.position.set(sx * 0.168, -0.055, -0.095);
-    cuff.rotation.x = Math.PI / 2 - 0.35;
-    cuff.rotation.z = sx * -0.22;
-    driverHands.add(cuff);
+    const thumb = new THREE.Mesh(THUMB_GEO, handSkinMat);
+    thumb.position.set(sx * 0.123, 0.018, -0.012);
+    thumb.rotation.z = sx * -0.62;
+    driverHands.add(thumb);
+
+    // Tapered forearm angling steeply downward toward the driver's lap/elbow (zero floating cut-offs!)
+    const armPivot = new THREE.Group();
+    armPivot.position.set(sx * 0.146, -0.022, -0.018);
+    armPivot.rotation.x = -0.82; // angles down & back toward seated waist
+    armPivot.rotation.z = sx * -0.18;
+
+    const wrist = new THREE.Mesh(JOINT_GEO, handSkinMat);
+    wrist.scale.setScalar(0.027);
+    armPivot.add(wrist);
+
+    const forearm = new THREE.Mesh(FOREARM_GEO, handSleeveMat);
+    forearm.position.set(0, -0.11, 0);
+    armPivot.add(forearm);
+    driverForearmMeshes.push(forearm);
+
+    const shortCuff = new THREE.Mesh(SHORT_CUFF_GEO, handSleeveMat);
+    shortCuff.position.set(0, -0.195, 0);
+    shortCuff.visible = false;
+    armPivot.add(shortCuff);
+    driverShortCuffs.push(shortCuff);
+
+    const elbowCap = new THREE.Mesh(JOINT_GEO, handSleeveMat);
+    elbowCap.scale.setScalar(0.036);
+    elbowCap.position.set(0, -0.215, 0);
+    armPivot.add(elbowCap);
+    driverForearmMeshes.push(elbowCap);
+
+    driverHands.add(armPivot);
   }
   steerWheel.add(driverHands);
+
+  // Seated 3D driver thighs, knees, calves & sneakers resting in the bucket seat & reaching to the pedals!
+  const driverLegs = new THREE.Group();
+  driverLegs.visible = false;
+  const thighLen = Math.max(0.28, Math.min(0.4, (zDashFace - zSeat) * 0.56));
+  for (const sx of [-1, 1]) {
+    const lx = driverX + sx * 0.092;
+    const hipPos = new THREE.Vector3(lx, ySeatTop + 0.062, zSeat + 0.02);
+    const kneePos = new THREE.Vector3(lx + sx * 0.014, ySeatTop + 0.082, zSeat + 0.04 + thighLen);
+    const anklePos = new THREE.Vector3(
+      driverX + (sx < 0 ? -0.095 : 0.035),
+      yFloor + 0.085,
+      Math.min(zPedal - 0.06, kneePos.z + 0.24),
+    );
+
+    // Seated thigh along cushion
+    const tDir = new THREE.Vector3().subVectors(kneePos, hipPos);
+    const tL = tDir.length();
+    const thigh = new THREE.Mesh(THIGH_GEO, legPantsMat);
+    thigh.scale.set(1, tL / 0.34, 1);
+    thigh.position.copy(hipPos).addScaledVector(tDir, 0.5);
+    thigh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tDir.clone().normalize());
+    driverLegs.add(thigh);
+
+    const knee = new THREE.Mesh(JOINT_GEO, legPantsMat);
+    knee.scale.setScalar(0.064);
+    knee.position.copy(kneePos);
+    driverLegs.add(knee);
+
+    // Lower shin/calf angling down toward the pedals
+    const sDir = new THREE.Vector3().subVectors(anklePos, kneePos);
+    const sL = sDir.length();
+    const shin = new THREE.Mesh(SHIN_GEO, legPantsMat);
+    shin.scale.set(1, sL / 0.31, 1);
+    shin.position.copy(kneePos).addScaledVector(sDir, 0.5);
+    shin.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), sDir.clone().normalize());
+    driverLegs.add(shin);
+    driverShinMeshes.push(shin);
+
+    // 3D sneaker / loafer + contrast sole at the pedal
+    const shoeGroup = new THREE.Group();
+    shoeGroup.position.copy(anklePos);
+    shoeGroup.rotation.x = -0.35;
+    part(shoeGroup, legShoeMat, 0, 0.015, 0.045, 0.092, 0.058, 0.19, false);
+    part(shoeGroup, MAT.plate, 0, -0.014, 0.045, 0.096, 0.018, 0.198, false);
+    driverLegs.add(shoeGroup);
+  }
+  group.add(driverLegs);
 
   // 7. Framed Cabin Greenhouse (A/B/C pillars, Alcantara headliner, sun visors, rearview mirror & clear glass)
   const yHeader = cabinTop - 0.025;
@@ -675,15 +868,21 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
     }
   }
 
-  // Hanging center rearview mirror (reflective mirror glass facing -Z toward driver)
-  const mirrorY = openTop ? yBelt + 0.37 : yHeader - 0.075;
+  // Hanging panoramic center rearview mirror (live 3D reflection in Cockpit View!)
+  const mirrorY = openTop ? yBelt + 0.38 : yHeader - 0.072;
   const mirrorZ = openTop ? 0.45 : zWindTop + 0.04;
-  part(group, MAT.trim, 0, mirrorY + 0.038, mirrorZ + 0.015, 0.016, 0.065, 0.016, false);
+  part(group, MAT.trim, 0, mirrorY + 0.04, mirrorZ + 0.015, 0.016, 0.068, 0.016, false);
   const mirrorHousing = new THREE.Group();
-  mirrorHousing.position.set(0, mirrorY, mirrorZ);
-  mirrorHousing.rotation.y = -0.12; // angled slightly toward driver
-  part(mirrorHousing, MAT.trim, 0, 0, 0.006, 0.19, 0.052, 0.016, false);
-  part(mirrorHousing, MAT.mirrorGlass, 0, 0, -0.003, 0.178, 0.042, 0.004, false);
+  mirrorHousing.position.set(-0.015, mirrorY, mirrorZ);
+  mirrorHousing.rotation.y = -0.15; // angled naturally toward left-hand driver
+  part(mirrorHousing, MAT.pianoBlack, 0, 0, 0.006, 0.242, 0.064, 0.016, false);
+  part(mirrorHousing, MAT.aluTrim, 0, 0, 0.008, 0.246, 0.068, 0.01, false);
+  const rearMirrorLiveMat = new THREE.MeshBasicMaterial({ color: 0xeef5fb });
+  const rearMirrorGlass = new THREE.Mesh(MIRROR_GLASS_GEO, MAT.mirrorGlass);
+  rearMirrorGlass.scale.set(0.228, 0.052, 1);
+  rearMirrorGlass.position.set(0, 0, -0.0035);
+  rearMirrorGlass.rotation.y = Math.PI; // faces -Z toward driver
+  mirrorHousing.add(rearMirrorGlass);
   group.add(mirrorHousing);
 
   // Lazy high-contrast digital OLED gauge & infotainment canvas textures
@@ -871,14 +1070,39 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
     driverEye,
     steerWheel,
     driverHands,
+    driverLegs,
+    rearMirrorGlass,
+    rearMirrorAnchor: { x: 0, y: eyeY + 0.03, z: zRearCab - 0.1 },
     ambientMat,
     setSteer(steerRad) {
       steerWheel.rotation.z = steerRad * 1.65;
     },
-    setDriverLook({ skin, shirt, showHands = true } = {}) {
+    setDriverLook({
+      skin, shirt, topStyle, pants, bottomStyle, shoeColor, showHands = true,
+    } = {}) {
       if (skin) handSkinMat.color.set(skin);
       if (shirt) handSleeveMat.color.set(shirt);
+      if (pants) legPantsMat.color.set(pants);
+      if (shoeColor) legShoeMat.color.set(shoeColor);
+
+      const shortSleeves = topStyle === 'tee' || topStyle === 'jersey';
+      for (const fm of driverForearmMeshes) fm.material = shortSleeves ? handSkinMat : handSleeveMat;
+      for (const sc of driverShortCuffs) sc.visible = topStyle === 'tee';
+
+      const wearShorts = bottomStyle === 'shorts';
+      for (const sm of driverShinMeshes) sm.material = wearShorts ? handSkinMat : legPantsMat;
+
       driverHands.visible = !!showHands;
+      driverLegs.visible = !!showHands;
+    },
+    setRearMirrorTexture(tex) {
+      if (tex) {
+        rearMirrorLiveMat.map = tex;
+        rearMirrorLiveMat.needsUpdate = true;
+        rearMirrorGlass.material = rearMirrorLiveMat;
+      } else {
+        rearMirrorGlass.material = MAT.mirrorGlass;
+      }
     },
     setAmbientColor(hex) {
       ambientMat.color.set(hex || defaultAmbientHex);
@@ -888,8 +1112,11 @@ function buildCockpitRig(m, { paint, yBelt, cabinTop, openTop = false }) {
       ambientMat.dispose();
       clusterMat.dispose();
       infotainMat.dispose();
+      rearMirrorLiveMat.dispose();
       handSkinMat.dispose();
       handSleeveMat.dispose();
+      legPantsMat.dispose();
+      legShoeMat.dispose();
       if (screens) {
         screens.t1.dispose();
         screens.t2.dispose();
@@ -930,18 +1157,57 @@ export function buildCarMesh(modelId, color, opts = {}) {
 
   const L = m.len;
   const W = m.wid;
-  const { hullGeo, roofGeo, glassGeo, yBot, yBelt } = getSculptedGeometries(m.id);
+  const { hullGeo, cockpitHullGeo, roofGeo, glassGeo, yBot, yBelt, bounds } = getSculptedGeometries(m.id);
   const cabinTop = yBelt + m.cabinH;
   const wz = L / 2 - m.wheelR - 0.38;
 
-  // Sculpted lower chassis + cabin
-  const hullMesh = new THREE.Mesh(hullGeo, paint);
+  // Sculpted lower chassis (swaps to deep hollowed cockpitHullGeo in Cockpit View & on open-top roadsters!)
+  const hullMesh = new THREE.Mesh(m.style === 'roadster' ? cockpitHullGeo : hullGeo, paint);
   hullMesh.castShadow = true;
   hullMesh.receiveShadow = true;
   body.add(hullMesh);
 
   const exteriorCabin = new THREE.Group();
   body.add(exteriorCabin);
+
+  // Sculpted aerodynamic Left (+X) & Right (-X) Wing Mirrors angled toward the driver (with live 3D reflection support!)
+  const leftMirrorLiveMat = new THREE.MeshBasicMaterial({ color: 0xeef5fb });
+  const rightMirrorLiveMat = new THREE.MeshBasicMaterial({ color: 0xeef5fb });
+  let leftMirrorGlass = null;
+  let rightMirrorGlass = null;
+  const wingMirZ = m.style === 'van'
+    ? L / 2 - 0.62
+    : bounds.zSeat + (bounds.zWindBase - bounds.zSeat) * 0.56;
+  const wingMirY = yBelt + (m.style === 'van' ? 0.17 : 0.088);
+  const wingMirHalfX = W * 0.5 + 0.072;
+
+  for (const sx of [-1, 1]) {
+    const mx = sx * wingMirHalfX;
+    // Aerodynamic mirror stalk connecting door skin to mirror housing
+    addStrutBetween(
+      body,
+      MAT.trim,
+      new THREE.Vector3(sx * (W * 0.5 - 0.02), yBelt + 0.025, wingMirZ + 0.03),
+      new THREE.Vector3(mx, wingMirY, wingMirZ),
+      0.026,
+      0.034,
+    );
+    const wingGroup = new THREE.Group();
+    wingGroup.position.set(mx, wingMirY, wingMirZ);
+    wingGroup.rotation.y = sx * -0.24; // angled inward so driver looks squarely into mirror face!
+    const mW = 0.165;
+    const mH = m.style === 'van' || m.style === 'gwagen' ? 0.125 : 0.096;
+    part(wingGroup, paint, 0, 0, 0.024, mW, mH, 0.068, false);
+    part(wingGroup, MAT.pianoBlack, 0, 0, -0.008, mW + 0.008, mH + 0.008, 0.018, false);
+    const glassPane = new THREE.Mesh(MIRROR_GLASS_GEO, MAT.mirrorGlass);
+    glassPane.scale.set(mW - 0.014, mH - 0.014, 1);
+    glassPane.position.set(0, 0, -0.019);
+    glassPane.rotation.y = Math.PI; // faces -Z toward driver with horizontally flipped UVs
+    wingGroup.add(glassPane);
+    body.add(wingGroup);
+    if (sx > 0) leftMirrorGlass = glassPane;
+    else rightMirrorGlass = glassPane;
+  }
 
   if (m.style === 'van') {
     const vanTop = new THREE.Mesh(roofGeo, paint);
@@ -952,14 +1218,9 @@ export function buildCarMesh(modelId, color, opts = {}) {
     for (const sx of [-1, 1]) {
       part(exteriorCabin, MAT.glass, sx * W * 0.48, yBelt + m.cabinH * 0.54, L * 0.18, 0.04, m.cabinH * 0.46, 1.05, false);
       part(body, MAT.checker, sx * W * 0.485, yBelt + 0.14, -0.45, 0.03, 0.12, L * 0.58, false);
-      part(body, paint, sx * (W * 0.48 + 0.07), yBelt + 0.18, L / 2 - 0.58, 0.13, 0.14, 0.1, false);
-      part(body, MAT.mirrorGlass, sx * (W * 0.48 + 0.07), yBelt + 0.18, L / 2 - 0.635, 0.11, 0.12, 0.01, false);
     }
   } else if (m.style === 'roadster') {
     for (const sx of [-1, 1]) {
-      const mx = sx * (W * 0.44 + 0.06);
-      part(body, paint, mx, yBelt + 0.06, 0.42, 0.14, 0.08, 0.12, false);
-      part(body, MAT.mirrorGlass, mx, yBelt + 0.06, 0.358, 0.12, 0.065, 0.01, false);
       part(body, MAT.chrome, sx * (W * 0.5 + 0.005), yBelt - 0.08, -0.18, 0.03, 0.04, 0.18, false);
     }
   } else {
@@ -972,13 +1233,7 @@ export function buildCarMesh(modelId, color, opts = {}) {
     const glassMesh = new THREE.Mesh(glassGeo, MAT.glass);
     exteriorCabin.add(glassMesh);
 
-    // Side mirrors (with reflective rear-facing glass) + chrome door handles stay on `body`
-    const cabW = m.style === 'hyper' ? W * 0.74 : m.style === 'sports' ? W * 0.8 : W * 0.86;
-    const mirZ = m.style === 'gwagen' ? L * 0.16 : m.cabinZ + m.cabinLen * 0.28;
     for (const sx of [-1, 1]) {
-      const mx = sx * (cabW * 0.5 + 0.08);
-      part(body, paint, mx, yBelt + 0.08, mirZ, 0.15, 0.09, 0.12, false);
-      part(body, MAT.mirrorGlass, mx, yBelt + 0.08, mirZ - 0.062, 0.13, 0.072, 0.01, false);
       part(body, MAT.chrome, sx * (W * 0.5 + 0.005), yBelt - 0.08, m.cabinZ - 0.08, 0.03, 0.04, 0.18, false);
     }
   }
@@ -987,8 +1242,10 @@ export function buildCarMesh(modelId, color, opts = {}) {
   if (m.style === 'roadster' || opts.withInterior) {
     cockpit = buildCockpitRig(m, {
       paint,
+      yBot,
       yBelt,
       cabinTop,
+      bounds,
       openTop: m.style === 'roadster',
     });
     cockpit.group.visible = m.style === 'roadster';
@@ -1022,6 +1279,12 @@ export function buildCarMesh(modelId, color, opts = {}) {
     body.add(pipe);
   }
 
+  // Hood geometry helper so scoops/stripes stay strictly on the hood forward of the windshield
+  const hoodStartZ = bounds.zWindBase + 0.05;
+  const hoodEndZ = L / 2 - 0.12;
+  const hoodSpan = Math.max(0.32, hoodEndZ - hoodStartZ);
+  const hoodMidZ = (hoodStartZ + hoodEndZ) * 0.5;
+
   // Model-specific styling
   if (m.style === 'pickup') {
     const bedLen = L / 2 - (m.cabinZ - m.cabinLen / 2) - 0.12;
@@ -1029,15 +1292,16 @@ export function buildCarMesh(modelId, color, opts = {}) {
     part(body, MAT.trim, 0, yBelt - 0.14, bedZ, W - 0.24, 0.04, bedLen - 0.14, false);
     part(body, MAT.chrome, 0, yBot + 0.1, L / 2 + 0.06, W * 0.92, 0.16, 0.08);
     // Muscular hood power dome
-    part(body, paint, 0, yBelt + 0.04, L * 0.26, W * 0.46, 0.08, L * 0.28);
+    part(body, paint, 0, yBelt + 0.04, hoodMidZ, W * 0.46, 0.08, hoodSpan * 0.78);
   }
 
   if (m.style === 'sports' || m.style === 'sedan') {
     // Sculpted hood power dome / muscle intake scoop
-    part(body, paint, 0, yBelt + 0.045, L * 0.24, W * 0.42, 0.085, L * 0.28);
+    part(body, paint, 0, yBelt + 0.045, hoodMidZ, W * 0.42, 0.085, hoodSpan * 0.78);
     if (m.style === 'sports') {
-      part(body, MAT.chrome, 0, yBelt + 0.11, L * 0.25, 0.36, 0.11, 0.52);
-      part(body, MAT.grille, 0, yBelt + 0.11, L * 0.51 - 0.01, 0.32, 0.08, 0.04, false);
+      const scoopLen = Math.min(0.52, hoodSpan * 0.56);
+      part(body, MAT.chrome, 0, yBelt + 0.11, hoodMidZ + 0.04, 0.36, 0.11, scoopLen);
+      part(body, MAT.grille, 0, yBelt + 0.11, hoodMidZ + 0.04 + scoopLen * 0.5, 0.32, 0.08, 0.04, false);
       // Rear GT wing spoiler
       part(body, paint, 0, yBelt + 0.28, -L / 2 + 0.24, W * 0.92, 0.05, 0.32);
       for (const sx of [-1, 1]) {
@@ -1048,9 +1312,10 @@ export function buildCarMesh(modelId, color, opts = {}) {
 
   if (m.style === 'muscle') {
     // '69 Stallion GT: towering chrome supercharger blower + red butterfly scoop + ducktail lip + louvers
-    part(body, MAT.trim, 0, yBelt + 0.03, L * 0.24, 0.58, 0.07, 0.72);
-    part(body, MAT.chrome, 0, yBelt + 0.14, L * 0.24, 0.44, 0.18, 0.54);
-    part(body, MAT.redIntake, 0, yBelt + 0.18, L * 0.515, 0.36, 0.09, 0.03, false);
+    const blowerZ = Math.max(hoodStartZ + 0.36, L * 0.24);
+    part(body, MAT.trim, 0, yBelt + 0.03, blowerZ, 0.58, 0.07, 0.68);
+    part(body, MAT.chrome, 0, yBelt + 0.14, blowerZ, 0.44, 0.18, 0.52);
+    part(body, MAT.redIntake, 0, yBelt + 0.18, blowerZ + 0.26, 0.36, 0.09, 0.03, false);
     // Deep shark-nose blackout grille + dual inner fog lamps
     part(body, MAT.grille, 0, frontY + 0.04, L / 2 + 0.025, W * 0.74, 0.24, 0.06, false);
     for (const sx of [-1, 1]) {
@@ -1110,9 +1375,12 @@ export function buildCarMesh(modelId, color, opts = {}) {
       part(body, MAT.carbon, sx * W * 0.26, yBelt + 0.22, -L / 2 + 0.28, 0.04, 0.32, 0.18);
       part(body, MAT.carbon, sx * W * 0.49, yBelt + 0.34, -L / 2 + 0.22, 0.03, 0.22, 0.38);
     }
-    // Wide carbon GT wing + louvered mid-engine spine
+    // Wide carbon GT wing + louvered mid-engine spine (kept strictly behind cabin rear bulkhead)
+    const spineRear = -L / 2 + 0.24;
+    const spineFront = Math.min(-0.62, bounds.zRearCab - 0.04);
+    const spineLen = Math.max(0.32, spineFront - spineRear);
     part(body, MAT.carbon, 0, yBelt + 0.37, -L / 2 + 0.22, W * 0.98, 0.045, 0.34);
-    part(body, MAT.carbon, 0, yBelt + 0.14, -1.05, 0.34, 0.12, 1.05);
+    part(body, MAT.carbon, 0, yBelt + 0.14, (spineRear + spineFront) * 0.5, 0.34, 0.12, spineLen);
     // High-mounted quad central exhaust cannons
     for (const ex of [-0.21, -0.07, 0.07, 0.21]) {
       const cannon = new THREE.Mesh(CYL, MAT.goldMetal);
@@ -1127,19 +1395,27 @@ export function buildCarMesh(modelId, color, opts = {}) {
   const liveryGroup = new THREE.Group();
   liveryGroup.visible = false;
   const twinStripes = new THREE.Group();
+  const rearDeckEnd = bounds.zRearCab - 0.05;
+  const rearDeckStart = -L / 2 + 0.16;
+  const rearDeckSpan = Math.max(0.22, rearDeckEnd - rearDeckStart);
+  const rearDeckMid = (rearDeckEnd + rearDeckStart) * 0.5;
   for (const sx of [-0.16, 0.16]) {
-    part(twinStripes, stripeMat, sx, yBelt + 0.025, L * 0.26, 0.13, 0.016, L * 0.38, false);
-    if (m.style !== 'roadster' && m.style !== 'pickup') {
-      part(twinStripes, stripeMat, sx, cabinTop + 0.012, m.cabinZ - 0.04, 0.13, 0.015, m.cabinLen * 0.56, false);
+    if (m.style !== 'van') {
+      part(twinStripes, stripeMat, sx, yBelt + 0.025, hoodMidZ, 0.13, 0.016, hoodSpan * 0.88, false);
     }
-    if (m.style !== 'gwagen' && m.style !== 'van') {
-      part(twinStripes, stripeMat, sx, yBelt + 0.03, -L * 0.34, 0.13, 0.016, L * 0.24, false);
+    if (m.style !== 'roadster' && m.style !== 'pickup') {
+      part(twinStripes, stripeMat, sx, cabinTop + 0.016, m.cabinZ - 0.04, 0.13, 0.015, m.cabinLen * 0.56, false);
+    }
+    if (m.style !== 'gwagen' && m.style !== 'van' && rearDeckEnd > rearDeckStart + 0.18) {
+      part(twinStripes, stripeMat, sx, yBelt + 0.03, rearDeckMid, 0.13, 0.016, rearDeckSpan * 0.82, false);
     }
   }
   const carbonHood = new THREE.Group();
-  part(carbonHood, MAT.carbon, 0, yBelt + 0.024, L * 0.25, W * 0.58, 0.018, L * 0.4, false);
+  if (m.style !== 'van') {
+    part(carbonHood, MAT.carbon, 0, yBelt + 0.024, hoodMidZ, W * 0.58, 0.018, hoodSpan * 0.9, false);
+  }
   if (m.style !== 'roadster' && m.style !== 'van' && m.style !== 'police') {
-    part(carbonHood, MAT.carbon, 0, cabinTop + 0.012, m.cabinZ - 0.04, W * 0.56, 0.016, m.cabinLen * 0.54, false);
+    part(carbonHood, MAT.carbon, 0, cabinTop + 0.016, m.cabinZ - 0.04, W * 0.56, 0.016, m.cabinLen * 0.54, false);
   }
   liveryGroup.add(twinStripes, carbonHood);
   body.add(liveryGroup);
@@ -1313,8 +1589,44 @@ export function buildCarMesh(modelId, color, opts = {}) {
     }
   }
 
+  const mirrorAnchors = {
+    rear: cockpit ? cockpit.rearMirrorAnchor : { x: 0, y: yBelt + m.cabinH * 0.58, z: bounds.zRearCab - 0.1 },
+    left: { x: wingMirHalfX + 0.02, y: wingMirY, z: wingMirZ - 0.06 },
+    right: { x: -wingMirHalfX - 0.02, y: wingMirY, z: wingMirZ - 0.06 },
+  };
+
+  function setMirrorTextures({ rear = null, left = null, right = null } = {}) {
+    cockpit?.setRearMirrorTexture(rear);
+    if (leftMirrorGlass) {
+      if (left) {
+        leftMirrorLiveMat.map = left;
+        leftMirrorLiveMat.needsUpdate = true;
+        leftMirrorGlass.material = leftMirrorLiveMat;
+      } else {
+        leftMirrorGlass.material = MAT.mirrorGlass;
+      }
+    }
+    if (rightMirrorGlass) {
+      if (right) {
+        rightMirrorLiveMat.map = right;
+        rightMirrorLiveMat.needsUpdate = true;
+        rightMirrorGlass.material = rightMirrorLiveMat;
+      } else {
+        rightMirrorGlass.material = MAT.mirrorGlass;
+      }
+    }
+  }
+
+  function setMirrorSurfacesVisible(vis) {
+    const v = !!vis;
+    if (cockpit?.rearMirrorGlass) cockpit.rearMirrorGlass.visible = v;
+    if (leftMirrorGlass) leftMirrorGlass.visible = v;
+    if (rightMirrorGlass) rightMirrorGlass.visible = v;
+  }
+
   function setCockpitMode(active, driverLook = null) {
     const inside = !!active;
+    hullMesh.geometry = (inside || m.style === 'roadster') ? cockpitHullGeo : hullGeo;
     if (m.style !== 'roadster') {
       exteriorCabin.visible = !inside;
       if (cockpit) cockpit.group.visible = inside;
@@ -1322,6 +1634,7 @@ export function buildCarMesh(modelId, color, opts = {}) {
     if (cockpit) {
       cockpit.setDriverLook({ ...(driverLook || {}), showHands: inside });
     }
+    if (!inside) setMirrorTextures({});
   }
 
   applyMods({
@@ -1334,8 +1647,18 @@ export function buildCarMesh(modelId, color, opts = {}) {
   return {
     group,
     body,
+    hullMesh,
+    hullGeo,
+    cockpitHullGeo,
     exteriorCabin,
     cockpit,
+    leftMirrorGlass,
+    rightMirrorGlass,
+    leftMirrorLiveMat,
+    rightMirrorLiveMat,
+    mirrorAnchors,
+    setMirrorTextures,
+    setMirrorSurfacesVisible,
     setCockpitMode,
     driverEye: cockpit ? cockpit.driverEye : new THREE.Vector3(W * 0.22, hipY + 0.56, seatZ + 0.04),
     wheels,
@@ -1460,6 +1783,14 @@ export class Vehicle {
         yaw: this.yaw,
       }, true);
     }
+  }
+
+  setMirrorTextures(textures) {
+    this.parts.setMirrorTextures(textures);
+  }
+
+  setMirrorSurfacesVisible(vis) {
+    this.parts.setMirrorSurfacesVisible(vis);
   }
 
   updateCockpit(dt, info = {}) {
@@ -1634,6 +1965,8 @@ export class Vehicle {
     this.scene.remove(this.mesh);
     this.parts.paint.dispose();
     this.parts.rimMat.dispose();
+    this.parts.leftMirrorLiveMat?.dispose?.();
+    this.parts.rightMirrorLiveMat?.dispose?.();
     this.parts.cockpit?.dispose?.();
     this.parts.headFlareMat.dispose();
     this.parts.tailFlareMat.dispose();

@@ -80,3 +80,29 @@ test('computeCockpitCameraPose transforms driver-side (+X) eye into world space 
   assert.ok(pEast.look.x > pEast.eye.x, 'looks forward along +X when carYaw = PI/2');
   assert.ok(pEast.eye.z < -0.4, 'left-hand driver seat sits on -Z side when facing +X');
 });
+
+test('computeMirrorCameraPose aims rear & side wing mirrors backward with outward lane splay', () => {
+  const base = {
+    vx: 0, vy: 0, vz: 0, carYaw: 0,
+    mirrorAnchors: {
+      rear:  { x: 0,    y: 1.25, z: -1.4 },
+      left:  { x: 1.02, y: 0.92, z: 0.32 },
+      right: { x: -1.02, y: 0.92, z: 0.32 },
+    },
+  };
+  const rear = Cam.computeMirrorCameraPose('rear', base);
+  const left = Cam.computeMirrorCameraPose('left', base);
+  const right = Cam.computeMirrorCameraPose('right', base);
+
+  assert.ok(rear.look.z < rear.pos.z - 20, 'rearview mirror looks straight behind car (-Z)');
+  assert.ok(Math.abs(rear.look.x) < 0.01, 'rearview mirror centered horizontally');
+
+  assert.ok(left.pos.x > 0.9, 'left wing mirror sits on driver (+X) side');
+  assert.ok(left.look.z < left.pos.z - 15, 'left wing mirror looks backward (-Z)');
+  assert.ok(left.look.x > left.pos.x, 'left wing mirror splays outward toward left lane (+X)');
+
+  assert.ok(right.pos.x < -0.9, 'right wing mirror sits on passenger (-X) side');
+  assert.ok(right.look.z < right.pos.z - 15, 'right wing mirror looks backward (-Z)');
+  assert.ok(right.look.x < right.pos.x, 'right wing mirror splays outward toward right lane (-X)');
+});
+

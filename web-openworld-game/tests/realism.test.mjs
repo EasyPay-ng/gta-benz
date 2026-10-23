@@ -239,19 +239,51 @@ test('First-Person Character Rig & Sleek 3D Car Cockpit Interiors across all 11 
 
     if (modelId === 'roadster') {
       assert.equal(v.parts.cockpit.group.visible, true, 'open-top roadster shows 3D interior even from outside');
+      assert.ok(v.parts.hullMesh.geometry === v.parts.cockpitHullGeo, 'open-top roadster always uses cabin-hollowed hull');
     } else {
       assert.equal(v.parts.cockpit.group.visible, false, `${modelId} hides heavy cockpit meshes while outside`);
       assert.equal(v.parts.exteriorCabin.visible, true, `${modelId} shows frosted exterior cabin while outside`);
+      assert.ok(v.parts.hullMesh.geometry === v.parts.hullGeo, `${modelId} uses closed exterior hull while outside`);
     }
 
-    // Switch into Inside Cockpit View
-    v.setCockpitView(true, { skin: '#8d5524', shirt: '#ec4899' });
+    // Switch into Inside Cockpit View with full wardrobe outfit
+    v.setCockpitView(true, {
+      skin: '#8d5524',
+      shirt: '#ec4899',
+      topStyle: 'tshirt',
+      pants: '#1d4ed8',
+      bottomStyle: 'shorts',
+      shoeColor: '#f59e0b',
+    });
     assert.equal(v.cockpitView, true);
+    assert.ok(v.parts.hullMesh.geometry === v.parts.cockpitHullGeo, `${modelId} swaps to cabin-hollowed hull in cockpit view so no body slab blocks looking down`);
     assert.equal(v.parts.cockpit.group.visible, true, `${modelId} 3D interior visible in cockpit view`);
-    assert.equal(v.parts.cockpit.driverHands.visible, true, `${modelId} 3D driver hands & cuffs visible on wheel`);
+    assert.equal(v.parts.cockpit.driverHands.visible, true, `${modelId} 3D driver hands & sleeves visible on wheel`);
+    assert.equal(v.parts.cockpit.driverLegs.visible, true, `${modelId} 3D seated driver legs & shoes visible in footwell`);
     if (modelId !== 'roadster') {
       assert.equal(v.parts.exteriorCabin.visible, false, `${modelId} frosted exterior cabin hidden in cockpit view`);
     }
+
+    // Verify center & side wing mirrors use horizontally UV-flipped planar glass and accept live textures
+    assert.ok(v.parts.mirrorAnchors?.rear && v.parts.mirrorAnchors?.left && v.parts.mirrorAnchors?.right, `${modelId} exposes rear/left/right mirror anchors`);
+    const rearUV = v.parts.cockpit.rearMirrorGlass.geometry.getAttribute('uv');
+    const leftUV = v.parts.leftMirrorGlass.geometry.getAttribute('uv');
+    assert.equal(rearUV.getX(0), 1, `${modelId} center mirror horizontally mirrors UV u0=1`);
+    assert.equal(rearUV.getX(1), 0, `${modelId} center mirror horizontally mirrors UV u1=0`);
+    assert.equal(leftUV.getX(0), 1, `${modelId} wing mirror horizontally mirrors UV u0=1`);
+    const dummyRearTex = new THREE.Texture();
+    const dummyLeftTex = new THREE.Texture();
+    const dummyRightTex = new THREE.Texture();
+    v.setMirrorTextures({ rear: dummyRearTex, left: dummyLeftTex, right: dummyRightTex });
+    assert.equal(v.parts.cockpit.rearMirrorGlass.material.map, dummyRearTex, `${modelId} center mirror binds live texture`);
+    assert.equal(v.parts.leftMirrorGlass.material.map, dummyLeftTex, `${modelId} left wing mirror binds live texture`);
+    assert.equal(v.parts.rightMirrorGlass.material.map, dummyRightTex, `${modelId} right wing mirror binds live texture`);
+    v.setMirrorSurfacesVisible(false);
+    assert.equal(v.parts.cockpit.rearMirrorGlass.visible, false, `${modelId} hides mirror surfaces during offscreen mirror pass`);
+    assert.equal(v.parts.leftMirrorGlass.visible, false);
+    assert.equal(v.parts.rightMirrorGlass.visible, false);
+    v.setMirrorSurfacesVisible(true);
+    assert.equal(v.parts.cockpit.rearMirrorGlass.visible, true);
 
     // Steering right (+steer) rotates steering wheel clockwise (+Z in local car frame)
     v.steer = 0.45;
@@ -282,11 +314,56 @@ test('First-Person Character Rig & Sleek 3D Car Cockpit Interiors across all 11 
     assert.ok(pose.eye.x > 0.25, `${modelId} driver eye sits on left-hand (+X) seat`);
     assert.ok(pose.eye.y > 0.7 && pose.eye.y < 2.2, `${modelId} driver eye height (${pose.eye.y.toFixed(2)}m) sits cleanly inside cabin`);
 
+    // 3D Raycast sightline check from driverEye:
+    // (a) Looking down toward lap/footwell hits 3D interior/legs, NEVER the exterior hullMesh slab!
+    // (b) Looking at center rearMirrorGlass & leftMirrorGlass has unobstructed line of sight!
+    v.steer = 0;
+    v.syncMesh(0, 0.01);
+    v.mesh.updateMatrixWorld(true);
+    const eyeVec = new THREE.Vector3(
+      v.parts.cockpit.driverEye.x,
+      v.parts.cockpit.driverEye.y,
+      v.parts.cockpit.driverEye.z,
+    );
+    v.parts.body.localToWorld(eyeVec);
+    const raycaster = new THREE.Raycaster();
+    raycaster.camera = new THREE.PerspectiveCamera();
+    raycaster.camera.updateMatrixWorld(true);
+
+    const lapTarget = new THREE.Vector3(v.parts.cockpit.driverEye.x, 0.25, v.parts.cockpit.driverEye.z + 0.28);
+    v.parts.body.localToWorld(lapTarget);
+    raycaster.set(eyeVec, lapTarget.clone().sub(eyeVec).normalize());
+    const downHits = raycaster.intersectObject(v.mesh, true).filter((h) => h.object.visible && h.object.isMesh);
+    assert.ok(downHits.length > 0, `${modelId} downward gaze hits interior cabin geometry`);
+    assert.ok(downHits[0].object !== v.parts.hullMesh, `${modelId} downward gaze NEVER hits exterior hullMesh slab`);
+
+    const rearMirCenter = new THREE.Vector3();
+    v.parts.cockpit.rearMirrorGlass.getWorldPosition(rearMirCenter);
+    raycaster.set(eyeVec, rearMirCenter.clone().sub(eyeVec).normalize());
+    const rearHits = raycaster.intersectObject(v.mesh, true).filter((h) => h.object.visible && h.object.isMesh);
+    assert.ok(
+      rearHits[0]?.object === v.parts.cockpit.rearMirrorGlass,
+      `${modelId} unobstructed sightline to center rearview mirror glass (first hit dist=${rearHits[0]?.distance?.toFixed(3)})`,
+    );
+
+    const leftMirCenter = new THREE.Vector3();
+    v.parts.leftMirrorGlass.getWorldPosition(leftMirCenter);
+    raycaster.set(eyeVec, leftMirCenter.clone().sub(eyeVec).normalize());
+    const leftHits = raycaster.intersectObject(v.mesh, true).filter(
+      (h) => h.object.visible && h.object.isMesh && (!h.object.material?.transparent || h.object === v.parts.leftMirrorGlass),
+    );
+    assert.ok(
+      leftHits[0]?.object === v.parts.leftMirrorGlass,
+      `${modelId} unobstructed sightline to left wing mirror glass (first hit dist=${leftHits[0]?.distance?.toFixed(3)})`,
+    );
+
     // Switch back to Outside Chase View
     v.setCockpitView(false);
     assert.equal(v.cockpitView, false);
     assert.equal(v.parts.cockpit.driverHands.visible, false);
+    assert.equal(v.parts.cockpit.driverLegs.visible, false);
     if (modelId !== 'roadster') {
+      assert.ok(v.parts.hullMesh.geometry === v.parts.hullGeo, `${modelId} restores closed exterior hull when leaving cockpit view`);
       assert.equal(v.parts.cockpit.group.visible, false);
       assert.equal(v.parts.exteriorCabin.visible, true);
     }
