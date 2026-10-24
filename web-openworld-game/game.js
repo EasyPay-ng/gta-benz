@@ -78,6 +78,10 @@ playerHeadlight.visible = false;
 let currentSunOffset = { x: 45, y: 90, z: 30 };
 let currentNightFactor = 0;
 
+window.addEventListener('error', (e) => {
+  if (e?.error) reportFrameError(e.error, 'runtime');
+});
+
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -5129,8 +5133,25 @@ function drawMinimap() {
 const clock = new THREE.Clock();
 let mmTimer = 0;
 
+// A throw anywhere in the frame stops the 3D view while the HUD (plain DOM) keeps
+// updating — the screen goes dark and nothing explains why. Catch it, say it once in
+// the console, and print the message on screen so a report contains the real cause.
+let frameErrorShown = false;
+function reportFrameError(err, where = 'frame') {
+  if (!frameErrorShown) {
+    frameErrorShown = true;
+    console.error(`[MetroVenture] ${where} threw — the world will stop updating:`, err);
+  }
+  const el = document.getElementById('hud-error');
+  if (el) {
+    el.textContent = `⚠ ${where}: ${err?.message || err}`;
+    el.classList.remove('hidden');
+  }
+}
+
 function frame() {
   requestAnimationFrame(frame);
+  try {
   const dt = Math.min(clock.getDelta(), 0.05);
   game.elapsed += dt;
   clockHudTimer -= dt;
@@ -5246,6 +5267,7 @@ function frame() {
   if (mmTimer <= 0) { mmTimer = 1 / 15; drawMinimap(); }
   renderCockpitMirrors();
   renderer.render(scene, camera);
+  } catch (err) { reportFrameError(err); }
 }
 
 // ===========================================================================

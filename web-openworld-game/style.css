@@ -660,3 +660,27 @@ body.build-mode #fp-reticle { border-color: #38bdf8; }
   .phone-app .app-icon { width: 46px; height: 46px; font-size: 21px; }
   .phone-shell { height: 92vh; }
 }
+
+/* ===== Runtime error strip =====
+   Shown only when the render loop throws. It exists so a black screen is never
+   silent: the message names the failure and can be screenshotted. */
+#hud-error {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: min(760px, 92vw);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(127, 29, 29, 0.92);
+  border: 1px solid #f87171;
+  color: #fee2e2;
+  font-size: 13px;
+  line-height: 1.45;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  z-index: 60;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+}
+#hud-error.hidden { display: none; }
