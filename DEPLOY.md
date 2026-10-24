@@ -28,9 +28,21 @@ with two values, stored as **secrets** (encrypted, never shown again).
 4. Click the copy icon next to it.
 5. Paste it somewhere safe for a minute — Notepad, Notes, anywhere. Label it **ACCOUNT ID**.
 
-> Can't find the box? Look at the address bar. It reads
-> `dash.cloudflare.com/<that-same-long-string>/...`. The long string after the first `/` is
-> your Account ID.
+> **The fastest way — it is already on screen.** Look at your browser's address bar while you
+> are anywhere in the Cloudflare dashboard. It reads:
+>
+> ```
+> dash.cloudflare.com/2ac2442acdfcd12169021b6402e3d06c/workers/services/view/...
+>                     └──────────── that is the Account ID ───────────┘
+> ```
+>
+> 32 characters, letters and numbers. Copy it straight from the address bar. The "Account ID"
+> box with the copy button is on the **Workers & Pages overview** page (right-hand side); it is
+> *not* shown once you have clicked into an individual Worker.
+
+> An Account ID is not a secret — it appears in dashboard URLs and is safe to share. The **API
+> token is a secret**: never paste it into a chat, an issue, or a screenshot. Only into the
+> GitHub secret box in Stage 2.
 
 ### 1b. Create an API token
 
@@ -126,6 +138,24 @@ tab. You should see something like:
 ```json
 {"ok":true,"service":"metroventure-city","rooms":"durable-objects","now":1792862547822}
 ```
+
+### A note about the Worker you may already have made
+
+If your Cloudflare dashboard already shows a Worker called **`gta-benz`** (created from the repo
+through Cloudflare's "Connect to Git" flow), it says **"No URLs enabled"** and **"Bindings 0"**.
+That Worker cannot work, and it is not the one this guide deploys:
+
+| | the `gta-benz` Worker | this workflow's Worker |
+|---|---|---|
+| built from | the repository **root** | **`server/`** |
+| reads `server/wrangler.jsonc` | ❌ | ✅ |
+| Durable Objects (`CITY_ROOM`, `ACCOUNTS`) | **0** | both |
+| public URL | none | `*.workers.dev` |
+
+Because it has no bindings, it has no rooms and no accounts — the game could not use it even if it
+had a URL. **Leave it alone for now.** It costs nothing and does not interfere with
+`metroventure-city`. Once the real one is live and working, delete it from
+Workers & Pages → `gta-benz` → Settings → Delete, to avoid confusion later.
 
 ### If it turns red ❌
 
