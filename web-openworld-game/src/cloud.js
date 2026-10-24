@@ -10,9 +10,6 @@
 // Everything here is injectable (`fetchImpl`, `token`) and free of DOM access,
 // so `tests/cloud.test.mjs` drives it against a fake fetch with no network.
 
-/** Where the last synced cloud save is mirrored locally (offline fallback only). */
-export const CLOUD_MIRROR_KEY = 'metroventure_cloud_mirror';
-
 /**
  * Turn a city-server WebSocket URL into the HTTP origin the REST API lives on.
  *   ws://127.0.0.1:8787/ws?room=metro-1  →  http://127.0.0.1:8787
@@ -77,7 +74,7 @@ export class CloudClient {
     return !!this.origin && typeof this.fetch === 'function';
   }
 
-  async request(path, { method = 'GET', body = null, auth = true } = {}) {
+  async request(path, { method = 'GET', body = null, auth = true, keepalive = false } = {}) {
     if (!this.available) return { ok: false, error: { code: 'offline', message: ERROR_MESSAGES.offline, quota: false } };
     const headers = { accept: 'application/json' };
     if (body !== null) headers['content-type'] = 'application/json';
@@ -91,6 +88,7 @@ export class CloudClient {
         headers,
         body: body === null ? undefined : JSON.stringify(body),
         signal: controller?.signal,
+        keepalive,
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || json?.ok === false) {
@@ -140,8 +138,8 @@ export class CloudClient {
    * Upload a save. `baseRevision` makes this safe against a second device:
    * the server answers 409 instead of overwriting newer progress.
    */
-  async save(save, { baseRevision = null } = {}) {
-    return this.request('/api/save', { method: 'PUT', body: { save, baseRevision } });
+  async save(save, { baseRevision = null, keepalive = false } = {}) {
+    return this.request('/api/save', { method: 'PUT', body: { save, baseRevision }, keepalive });
   }
 
   async deleteSave() {
@@ -162,11 +160,23 @@ export function saveEnvelope(state) {
   return persisted;
 }
 
-/** Should a freshly downloaded cloud save replace what is on this device? */
-export function shouldTakeCloudSave(cloudMeta, localSavedAt = 0) {
-  if (!cloudMeta) return false;
-  const cloudAt = Number(cloudMeta.updatedAt) || 0;
-  return cloudAt > (Number(localSavedAt) || 0);
+/**
+ * Boot policy — the whole point of the online rebuild.
+ *
+ * If the game can reach a city server, the server is the only save: local
+ * progress is not loaded, and any leftover offline save is deleted rather than
+ * migrated. Without a server (the `dev:offline` harness, GitHub Pages, ?offline=1)
+ * the old local save still works, because there is nowhere else to put it.
+ */
+export function bootPolicy(serverUrl, hasLocalSave = false) {
+  const online = !!httpOrigin(serverUrl);
+  return {
+    online,
+    serverUrl: online ? serverUrl : null,
+    useCloud: online,
+    purgeLocalSave: online && !!hasLocalSave,
+    showHelp: !online || !hasLocalSave,
+  };
 }
 
 /** Human line for the HUD / toast after a sync attempt. */

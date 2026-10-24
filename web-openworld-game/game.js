@@ -25,7 +25,7 @@ import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
 import * as Groceries from './src/groceries.js';
-import { CloudClient, saveEnvelope, shouldTakeCloudSave } from './src/cloud.js';
+import { CloudClient, saveEnvelope, bootPolicy } from './src/cloud.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -666,9 +666,18 @@ function snapshotState() {
 function saveGame(silent = false) {
   try {
     snapshotState();
-    localStorage.setItem(SAVE_KEY, JSON.stringify(game.state));
-    try { localStorage.setItem(SAVE_AT_KEY, String(Date.now())); } catch { /* private mode */ }
-    queueCloudSave();
+    if (cityServerUrl) {
+      // Online: never write a local save. A guest has no account to keep it, and
+      // an offline copy would only be deleted on the next boot anyway.
+      if (!net?.account) {
+        if (!silent) toast('👤 Guests start fresh next visit — sign in to keep this city.', 'warn');
+        return false;
+      }
+      queueCloudSave(0);
+    } else {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(game.state));
+      try { localStorage.setItem(SAVE_AT_KEY, String(Date.now())); } catch { /* private mode */ }
+    }
     if (!silent) toast('💾 Game saved', 'good');
     return true;
   } catch (err) {
@@ -678,6 +687,11 @@ function saveGame(silent = false) {
 }
 
 function loadGame(silent = false) {
+  if (cityServerUrl) {
+    // the cloud copy loads on sign-in; there is no local save to fall back on
+    if (!silent) toast('☁️ Your city loads from the server when you sign in.', '');
+    return false;
+  }
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) { if (!silent) toast('No save found yet. Press F5 to save.', 'bad'); return false; }
   try {
@@ -691,10 +705,17 @@ function loadGame(silent = false) {
   }
 }
 
+/** Delete whatever this device still holds from the offline era. */
+function clearLocalSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(SAVE_AT_KEY);
+  } catch { /* private mode */ }
+}
+
 function resetGame() {
   if (!window.confirm('Delete your save and start a brand new city?')) return;
-  localStorage.removeItem(SAVE_KEY);
-  try { localStorage.removeItem(SAVE_AT_KEY); } catch { /* private mode */ }
+  clearLocalSave();
   // the cloud copy is the real one now, so wipe it too when the player resets
   if (cloud) {
     cloud.deleteSave().then((res) => { if (res.ok) cloudRevision = 0; });
@@ -4644,13 +4665,15 @@ async function pullCloudSave() {
   const save = res.body.save;
   cloudRevision = Number(meta?.revision) || 0;
   cloudStatus(meta ? `☁️ Cloud save ready · revision ${meta.revision} · ${(meta.bytes / 1024).toFixed(1)} KB` : '☁️ Cloud save ready — nothing saved yet');
-  if (!save) { queueCloudSave(1200); return; } // first login on a fresh account: seed it
-  const localAt = Number(localStorage.getItem(SAVE_AT_KEY) || 0);
-  if (!shouldTakeCloudSave(meta, localAt)) {
-    // this device has the newer progress — send it up rather than lose it
-    if (localAt) queueCloudSave(1200);
+  if (!save) {
+    // Brand-new account: this city is the first one. Nothing is imported from
+    // whatever was played offline before the server existed.
+    cloudStatus('☁️ New account — this city starts here');
+    if (!game.state.seenHelp) showHelp();
+    queueCloudSave(1200); // seed revision 1 so the next device has something to load
     return;
   }
+  // The server always wins: there is no local save to compare against.
   try {
     game.state = Eco.migrateState(save);
     applyState();
@@ -4665,6 +4688,14 @@ function queueCloudSave(delayMs = 4000) {
   if (!cloud || cloudQuota) return;
   if (cloudTimer) clearTimeout(cloudTimer);
   cloudTimer = setTimeout(() => { cloudTimer = null; pushCloudSave(); }, delayMs);
+}
+
+/** Last-chance upload when the tab closes: keepalive survives the unload. */
+function flushCloudSave() {
+  if (!cloud || cloudBusy || cloudQuota || !net?.account) return;
+  if (cloudTimer) { clearTimeout(cloudTimer); cloudTimer = null; }
+  try { snapshotState(); } catch { return; }
+  cloud.save(saveEnvelope(game.state), { baseRevision: cloudRevision, keepalive: true });
 }
 
 async function pushCloudSave(retryOnConflict = true) {
@@ -4824,6 +4855,7 @@ $('login-form').addEventListener('submit', (e) => {
 $('login-guest').addEventListener('click', () => {
   const name = $('login-name').value.trim() || game.state.appearance.name || 'Guest';
   hideLogin();
+  if (!game.state.seenHelp) showHelp();   // guests start fresh every visit
   if (net) net.playAsGuest(name);
   else startNet({ mode: 'guest', name });
 });
@@ -4831,8 +4863,9 @@ $('login-offline').addEventListener('click', () => {
   hideLogin();
   if (net) net.disconnect();
   net = null;
+  cloud = null;
   cityServerUrl = null;
-  toast('Playing offline. Reload to sign in again.', '');
+  toast('Offline session — nothing here is saved. Reload to sign in again.', 'warn');
   updateHUD(true);
 });
 $('btn-account').addEventListener('click', () => {
@@ -5100,23 +5133,40 @@ function frame() {
 // ===========================================================================
 // Boot
 // ===========================================================================
-function boot() {
+async function boot() {
+  // Decide online-vs-offline *before* reading a save: if a city server answers,
+  // that server owns the save and anything this device played offline is dropped.
+  const serverUrl = await discoverServerUrl();
+  let hasLocal = false;
+  try { hasLocal = !!localStorage.getItem(SAVE_KEY); } catch { /* private mode */ }
+  const policy = bootPolicy(serverUrl, hasLocal);
+
   game.state = Eco.createInitialState();
-  const loaded = localStorage.getItem(SAVE_KEY) ? loadGame(true) : false;
-  if (!loaded) applyState();
-  if (!game.state.seenHelp) showHelp();
-  else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
-  discoverServerUrl().then((serverUrl) => {
-    if (!serverUrl) return;
-    cityServerUrl = serverUrl;
+  if (policy.online) {
+    cityServerUrl = policy.serverUrl;
+    if (policy.purgeLocalSave) clearLocalSave();
+    applyState();                       // a fresh city until the cloud copy arrives
+    if (policy.purgeLocalSave) {
+      toast('🌐 Online world — offline progress was cleared. Sign in to keep a city.', 'warn');
+    }
     const saved = loadIdentity();
     if (saved?.token) startNet({ mode: 'token', token: saved.token, name: saved.name });
     else if (game.helpOpen) pendingLogin = true; // ask once the welcome card is dismissed
     else showLogin();
-  });
+  } else {
+    const loaded = hasLocal ? loadGame(true) : false;
+    if (!loaded) applyState();
+    if (!game.state.seenHelp) showHelp();
+    else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
+  }
+
   camera.position.set(game.player.x - 6, 5, game.player.z - 6);
   frame();
 }
 
-window.addEventListener('beforeunload', () => { if (game.state) saveGame(true); });
+window.addEventListener('beforeunload', () => {
+  if (!game.state) return;
+  if (cityServerUrl) flushCloudSave();   // online: the cloud is the save
+  else saveGame(true);
+});
 boot();

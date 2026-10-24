@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  CloudClient, httpOrigin, mapCloudError, saveEnvelope, shouldTakeCloudSave, syncLabel, cloudMessageFor,
+  CloudClient, httpOrigin, mapCloudError, saveEnvelope, bootPolicy, syncLabel, cloudMessageFor,
 } from '../src/cloud.js';
 
 /** A fetch double that records requests and replays canned responses. */
@@ -159,11 +159,25 @@ test('Cloud: the uploaded envelope keeps the save and drops runtime-only flags',
   assert.equal(saveEnvelope(null), null);
 });
 
-test('Cloud: a newer cloud save wins over an older local one, and only then', () => {
-  assert.equal(shouldTakeCloudSave({ updatedAt: 500 }, 100), true);
-  assert.equal(shouldTakeCloudSave({ updatedAt: 100 }, 500), false);
-  assert.equal(shouldTakeCloudSave(null, 0), false);
-  assert.equal(shouldTakeCloudSave({ updatedAt: 0 }, 0), false);
+test('Cloud: a reachable server deletes the offline save instead of migrating it', () => {
+  const online = bootPolicy('ws://127.0.0.1:8787/ws?room=metro-1', true);
+  assert.equal(online.online, true);
+  assert.equal(online.useCloud, true);
+  assert.equal(online.purgeLocalSave, true, 'offline progress is wiped, not uploaded');
+
+  // nothing local to delete → nothing to purge, but the cloud is still the save
+  const clean = bootPolicy('wss://city.example.com/ws', false);
+  assert.equal(clean.purgeLocalSave, false);
+  assert.equal(clean.useCloud, true);
+
+  // no server anywhere: the dev/offline harness keeps its local save
+  const offline = bootPolicy(null, true);
+  assert.equal(offline.online, false);
+  assert.equal(offline.useCloud, false);
+  assert.equal(offline.purgeLocalSave, false);
+
+  // a URL that is not a server is not a server
+  assert.equal(bootPolicy('', true).online, false);
 });
 
 test('Cloud: sync status reads like a sentence, including the bad endings', () => {

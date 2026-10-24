@@ -25,7 +25,12 @@ npm run dev:offline  # game only
 Players sign in with a **display name and a PIN** (no email), so a name stays theirs
 across sessions and devices; guests can play without one. Accounts and cloud saves live
 in a single global **AccountHub** Durable Object, so your wallet, cars, pantry and builds
-follow you to any device — and will still find you once the world is split into districts. Open two tabs on the same
+follow you to any device — and will still find you once the world is split into districts.
+
+**Online is authoritative.** When the game can reach a server it does not read a local save
+at all: any offline city left on that device is deleted on boot, guests play without keeping
+progress, and the cloud copy is the only one that counts. Without a server (`npm run dev:offline`,
+GitHub Pages, `?offline=1`) the old local save still works, because there is nowhere else to put it. Open two tabs on the same
 machine — use two browsers or a private window, since one browser holds one session —
 and you will see each other walking, driving and on the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
 Workers free plan (no card, no bill); `npm run deploy`-style instructions, the protocol,

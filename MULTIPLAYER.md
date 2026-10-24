@@ -105,8 +105,16 @@ sends the revision it last saw; a second device writing from a stale revision ge
 **409** instead of silently losing the first device's progress.
 
 The browser half is `web-openworld-game/src/cloud.js`: it converts the WebSocket server
-URL into an HTTP origin, keeps the bearer token, mirrors the last synced save locally,
-and turns 401/409/429 into codes the UI can act on.
+URL into an HTTP origin, keeps the bearer token, debounces uploads after every save, flushes
+one last `keepalive` request when the tab closes, and turns 401/409/429 into codes the UI can
+state plainly.
+
+**Nothing offline survives.** `bootPolicy()` decides before a single byte of save is read:
+if a server answers, the local save is deleted (not migrated), the game starts on a fresh city
+until the cloud copy arrives, and `saveGame()` refuses to write `localStorage` at all. Guests
+can still walk around, but their progress is not kept and the save button says so. The only
+place a local save still exists is the `dev:offline` harness / GitHub Pages / `?offline=1`,
+where there is no server to hold it.
 
 ### Free-tier budget (the number that shapes the design)
 
