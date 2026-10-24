@@ -68,7 +68,7 @@ jobs:
 
       - name: Run the server's own tests first
         working-directory: server
-        run: node --test test/hub.test.mjs
+        run: node --test test/hub.test.mjs test/deploy-script.test.mjs
 
       # Plain `wrangler deploy`, no third-party action: fewer moving parts, and the
       # URL it prints is parsed below rather than trusted to an action's output name.
@@ -78,14 +78,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -o pipefail
-          npx wrangler deploy --outdir /tmp/worker-build 2>&1 | tee /tmp/deploy.log
-          URL="$(grep -oE 'https://[A-Za-z0-9._-]+\.workers\.dev' /tmp/deploy.log | head -1)"
-          if [ -z "$URL" ]; then
-            echo "::warning::Could not read the workers.dev URL from the deploy output. Check the log above."
-          fi
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+        # The very first deploy of a brand-new Worker can lose a race inside
+        # Cloudflare: the script uploads, then wrangler reads /workers/workers/<name>
+        # before the create is visible and gets `code: 10007`. Retrying is safe
+        # because the upload already happened. scripts/deploy.sh retries only that
+        # error — a bad token still fails on the first attempt.
+        run: bash scripts/deploy.sh
 
       - name: Prove the deployed server answers
         if: steps.deploy.outputs.url != ''
@@ -132,6 +130,7 @@ jobs:
             echo "|---|---|"
             echo "| \`Missing secret(s)\` | Add them in Settings → Secrets and variables → Actions |"
             echo "| \`Authentication error\` / \`10000\` | The API token is wrong, expired, or lacks **Workers Scripts: Edit** |"
+            echo "| \`code: 10007\` after 4 attempts | Cloudflare's first-deploy race, on their side. **Re-run all jobs** — nothing is wrong with the repo |"
             echo "| \`workers.dev subdomain\` | Open dash.cloudflare.com → Workers & Pages once and register a subdomain |"
             echo "| \`node --test\` failed | The server tests broke; the deploy was stopped on purpose |"
             echo ""

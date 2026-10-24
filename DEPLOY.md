@@ -210,6 +210,7 @@ Open the failing step and read the message. The run summary lists the four usual
 |---|---|
 | `Missing secret(s)` | Stage 2 did not save, or the name has a typo. Redo Stage 2. |
 | `Authentication error`, `10000`, `Invalid API Token` | The token is wrong, or was copied with a space. Make a new one in Stage 1b. |
+| `code: 10007` / *"This Worker does not exist on your account"* | A race inside Cloudflare on a brand-new Worker: the upload succeeds, then the very next API call arrives before Cloudflare can see it. The workflow now retries this automatically (10 s, 20 s, 40 s). If it still gives up, press **Re-run all jobs** — nothing is wrong with the repo, the token or the account. |
 | `workers.dev subdomain` | Your account has never had a Worker. In Cloudflare open **Workers & Pages**, click any **Create**/setup prompt once to claim a `*.workers.dev` subdomain, then run the workflow again. |
 | `node --test` failed | The server's own tests caught a problem. The deploy was stopped on purpose. Tell me and I will look. |
 
