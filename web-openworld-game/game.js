@@ -25,7 +25,7 @@ import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
 import * as Groceries from './src/groceries.js';
-import { CloudClient, saveEnvelope, bootPolicy, offlineAllowed, normalizeServerUrl } from './src/cloud.js';
+import { CloudClient, saveEnvelope, bootPolicy, offlineAllowed, normalizeServerUrl, probeServer } from './src/cloud.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -4751,9 +4751,35 @@ function showOfflineGate() {
   gate.classList.remove('hidden');
   let remembered = '';
   try { remembered = localStorage.getItem('metroventure_server') || ''; } catch { /* private mode */ }
-  $('offline-server').value = remembered;
-  $('offline-error').classList.add('hidden');
+  // Guess the page's own address: when a dev server is serving this page, that is
+  // almost always the right answer, and the probe below will confirm it either way.
+  const guess = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=metro-1`;
+  $('offline-server').value = remembered || guess;
+  const err = $('offline-error');
+  if (remembered) {
+    err.textContent = `The server saved on this device (${remembered}) did not answer. Retry, or point the game at another one.`;
+    err.classList.remove('hidden');
+  } else {
+    err.classList.add('hidden');
+  }
   updateHUD(true);
+}
+
+function gateSay(message, isError = true) {
+  const el = $('offline-error');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('hidden', !message);
+  el.classList.toggle('login-error', !!message && isError);
+}
+
+function gateBusy(busy, message = '') {
+  const connect = $('offline-connect');
+  const retry = $('offline-retry');
+  connect.disabled = busy;
+  retry.disabled = busy;
+  connect.textContent = busy ? 'Checking…' : 'Connect';
+  if (busy && message) gateSay(message, false);
 }
 
 function hideLogin() {
@@ -4871,20 +4897,48 @@ $('login-guest').addEventListener('click', () => {
   else startNet({ mode: 'guest', name });
 });
 // --- offline gate (online-only build) --------------------------------------
-function connectFromGate() {
-  const typed = $('offline-server').value;
+async function connectFromGate() {
+  const typed = $('offline-server').value.trim();
+  if (!typed) {
+    gateSay('Type a server address first — for example wss://your-worker.workers.dev/ws?room=metro-1');
+    $('offline-server').focus();
+    return;
+  }
   const url = normalizeServerUrl(typed);
-  const err = $('offline-error');
   if (!url) {
-    err.textContent = 'That is not a server address. Try wss://your-worker.workers.dev/ws?room=metro-1';
-    err.classList.remove('hidden');
+    gateSay('That is not a server address. It should look like wss://your-worker.workers.dev/ws?room=metro-1');
+    return;
+  }
+  gateBusy(true, 'Checking the server…');
+  const probe = await probeServer(url);
+  gateBusy(false);
+  if (!probe.ok) {
+    gateSay(probe.code === 'timeout'
+      ? 'That server did not answer in time. Check the address, and that the Worker is running.'
+      : 'Nothing answered at that address. Check it, and that the Worker is deployed and awake.');
     return;
   }
   try { localStorage.setItem('metroventure_server', url); } catch { /* private mode */ }
   location.reload();
 }
+
+async function retryFromGate() {
+  let stored = '';
+  try { stored = localStorage.getItem('metroventure_server') || ''; } catch { /* private mode */ }
+  gateBusy(true, 'Looking for a city server…');
+  if (stored) {
+    const probe = await probeServer(stored);
+    gateBusy(false);
+    if (probe.ok) { location.reload(); return; }
+    try { localStorage.removeItem('metroventure_server'); } catch { /* private mode */ }
+  }
+  const found = await discoverServerUrl();
+  gateBusy(false);
+  if (found) { location.reload(); return; }
+  gateSay(`No city server answered at ${location.host}. Start it, then Retry.`);
+}
 $('offline-connect').addEventListener('click', connectFromGate);
-$('offline-retry').addEventListener('click', () => location.reload());
+$('offline-retry').addEventListener('click', retryFromGate);
 $('offline-server').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); connectFromGate(); }
 });

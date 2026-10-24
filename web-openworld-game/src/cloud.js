@@ -199,6 +199,35 @@ export function normalizeServerUrl(raw) {
 }
 
 /**
+ * Try to open a WebSocket to the address before we store it. A wrong URL should
+ * be a clear message on the gate, not a silent reload into "reconnecting…".
+ * Injectable so the test suite can drive it without a network.
+ */
+export function probeServer(url, { timeoutMs = 4000, WebSocketImpl = globalThis.WebSocket } = {}) {
+  return new Promise((resolve) => {
+    if (!url || typeof WebSocketImpl !== 'function') return resolve({ ok: false, code: 'unsupported' });
+    let settled = false;
+    let socket = null;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket?.close(); } catch { /* already closing */ }
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ ok: false, code: 'timeout' }), timeoutMs);
+    try {
+      socket = new WebSocketImpl(url);
+      socket.onopen = () => finish({ ok: true, code: 'open' });
+      socket.onerror = () => finish({ ok: false, code: 'unreachable' });
+      socket.onclose = () => finish({ ok: false, code: 'unreachable' });
+    } catch {
+      finish({ ok: false, code: 'bad_url' });
+    }
+  });
+}
+
+/**
  * Boot policy — the whole point of the online rebuild.
  *
  * If the game can reach a city server, the server is the only save: local
