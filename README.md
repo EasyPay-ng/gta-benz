@@ -85,6 +85,7 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - **The district is a real place:** a new cross avenue with street lamps, a palm-lined promenade with benches, sun loungers, a lifeguard tower and a sea wall over the beach, all walk-in with openable doors and reception counters.
   - **Denser downtown:** every skyline block now packs a 3×3 parcel of towers, all street-facing, so the skyline and your lift directory grew with it.
 
+- **The city never ends — streamed districts (`src/streaming.js`, `src/world.js`).** Drive out past the old edge and the metropolis keeps building itself around you, forever and in every direction: the same 75 m street grid continues, and each 300 m cell is generated deterministically (name boards, themed shopfronts and office towers, trees, street lamps, and a walkable ground-floor interior with a working swing door for every building). A cell is only ever built when you get near it and is torn down — geometry, textures, colliders, doors, furniture and address labels — once you are two cells clear, so memory stays flat no matter how far you drive. The minimap scrolls with you and draws the generated streets and blocks.
 - **Realistic PBR visuals & atmospheric city.** Procedural diffuse, normal, roughness and emissive PBR maps (`src/textures.js`) with ACES Filmic tone mapping, PMREM environment reflections and a custom atmospheric `SkyDome` shader (dawn/sunset horizon scatter, drifting clouds and twinkling night stars). Features tyre-polished weathered asphalt, irregular flagstone sidewalks, curb storm drains, 6 brick/limestone/glass-curtain architectural facades, multi-cluster avenue trees and soft additive streetlamp & vehicle lens flares.
 - **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
 - **Sculpted 3D humanoids, Maison Verve Boutique, Personal Wardrobe, jumping & emotes.** Anatomically proportioned characters with 2-segment articulated arms and legs (elbows & knees), facial features, 5 hair styles, 3 body builds and automatic job uniforms/headgear.
@@ -132,11 +133,12 @@ web-openworld-game/
   src/textures.js     procedural PBR diffuse/normal/roughness/emissive maps, PMREM & SkyDome
   src/fx.js           pooled twin tyre skid marks, crash sparks, scorch decals & wreck fire/smoke
   src/character.js    sculpted 2-joint humanoid rig, outfits, jump physics & 8 procedural emotes
-  src/world.js        PBR procedural city, street lamps, night glow, nav graph, collisions
+  src/world.js        PBR procedural city, street lamps, night glow, nav graph, collisions, endless-world streamer
+  src/streaming.js    pure endless-city cells: deterministic block/road/building layouts & street names
   src/vehicles.js     sculpted clearcoat cars, 5-spoke rims, light flares, AI traffic & PoliceCar
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
   src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock & emote sync)
-  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism)
+  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism, streaming)
 server/               free multiplayer server (Cloudflare Worker + Durable Object)
 tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
@@ -155,9 +157,9 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
 
-- **93 client tests** — `npm test`
+- **101 client tests** — `npm test`
 - **89 server tests** — `npm --prefix server run test:all` (smoke, accounts & NetClient E2E)
 
 ## Deploy to GitHub Pages

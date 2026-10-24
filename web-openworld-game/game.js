@@ -12,6 +12,7 @@ import {
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
 import * as Time from './src/time.js';
+import * as Streaming from './src/streaming.js';
 import * as VCard from './src/vehCard.js';
 import * as Heat from './src/heat.js';
 import * as Cust from './src/customization.js';
@@ -3173,6 +3174,8 @@ function watchScreen(spot, def) {
 // ---------------------------------------------------------------------------
 const TV_SCAN_INTERVAL = 0.3;
 let tvScanT = 0;
+let streamT = 0;
+let streamWarm = true;
 const tvScratch = new THREE.Vector3();
 
 /** Every screen we could switch on: street-level props, the active tower floor
@@ -4651,14 +4654,42 @@ mmBase.width = mmBase.height = 200;
   for (const r of ROAD_LINES) g.fillRect(toMM(r - ROAD_HALF), toMM(157), ROAD_HALF * 2 * MM_SCALE, 70 * MM_SCALE);
   g.fillRect(toMM(-162), toMM(190 - ROAD_HALF), 324 * MM_SCALE, ROAD_HALF * 2 * MM_SCALE);
 }
+const mmView = { x: -MM_HALF, z: -MM_HALF };
 function drawMinimap() {
   const g = mmCtx;
-  const toMM = (v) => (v + MM_HALF) * MM_SCALE;
-  g.drawImage(mmBase, 0, 0);
-  const dot = (x, z, r, color) => { g.fillStyle = color; g.beginPath(); g.arc(toMM(x), toMM(z), r, 0, Math.PI * 2); g.fill(); };
+  const p = game.player;
+  mmView.x = p.x - MM_HALF;
+  mmView.z = p.z - MM_HALF;
+  const mx = (v) => (v - mmView.x) * MM_SCALE;
+  const mz = (v) => (v - mmView.z) * MM_SCALE;
+  const toMM = (v) => mx(v);
+  // parkland shows through wherever the authored map doesn't reach
+  g.fillStyle = '#3f6b33'; g.fillRect(0, 0, 200, 200);
+  const basePx = mmBase.width * MM_SCALE;
+  g.drawImage(mmBase, mx(-MM_HALF), mz(-MM_HALF), basePx, basePx);
+  // the grid continues forever: draw every street line inside the window
+  g.fillStyle = '#1f2937';
+  const step = Streaming.ROAD_STEP;
+  const half = Streaming.ROAD_HALF;
+  const roadPx = half * 2 * MM_SCALE;
+  const viewMax = MM_HALF * 2;
+  for (let x = Math.floor(mmView.x / step) * step; x <= mmView.x + viewMax + step; x += step) {
+    g.fillRect(mx(x - half), 0, roadPx, 200);
+  }
+  for (let z = Math.floor(mmView.z / step) * step; z <= mmView.z + viewMax + step; z += step) {
+    g.fillRect(0, mz(z - half), 200, roadPx);
+  }
+  // generated blocks, live from the streamer
+  g.fillStyle = '#4b5563';
+  for (const b of city.enterables) {
+    if (!b.streamed) continue;
+    if (Math.abs(b.x - p.x) > MM_HALF + 40 || Math.abs(b.z - p.z) > MM_HALF + 40) continue;
+    g.fillRect(mx(b.x - b.width / 2), mz(b.z - b.depth / 2), b.width * MM_SCALE, b.depth * MM_SCALE);
+  }
+  const dot = (x, z, r, color) => { g.fillStyle = color; g.beginPath(); g.arc(mx(x), mz(z), r, 0, Math.PI * 2); g.fill(); };
   const square = (x, z, s, color, label) => {
-    g.fillStyle = color; g.fillRect(toMM(x) - s / 2, toMM(z) - s / 2, s, s);
-    if (label) { g.fillStyle = '#fff'; g.font = 'bold 9px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, toMM(x), toMM(z) + 0.5); }
+    g.fillStyle = color; g.fillRect(mx(x) - s / 2, mz(z) - s / 2, s, s);
+    if (label) { g.fillStyle = '#fff'; g.font = 'bold 9px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, mx(x), mz(z) + 0.5); }
   };
   for (const [id, def] of Object.entries(BUSINESSES)) {
     const built = !!game.state.businesses[id];
@@ -4681,14 +4712,13 @@ function drawMinimap() {
     const st = game.task.steps[game.task.idx];
     const pulse = 3 + Math.sin(game.elapsed * 6) * 1.2;
     g.strokeStyle = '#f43f5e'; g.lineWidth = 2;
-    g.beginPath(); g.arc(toMM(st.x), toMM(st.z), pulse + 2, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.arc(mx(st.x), mz(st.z), pulse + 2, 0, Math.PI * 2); g.stroke();
     dot(st.x, st.z, 2.5, '#f43f5e');
   }
   if (net) for (const r of remotes.values()) if (net.peers.get(r.id)?.visible) dot(r.x, r.z, 2.4, '#38bdf8');
-  // player arrow
-  const p = game.player;
+  // player arrow (the map scrolls under it, so it sits dead centre)
   g.save();
-  g.translate(toMM(p.x), toMM(p.z));
+  g.translate(mx(p.x), mz(p.z));
   g.rotate(-p.yaw + Math.PI); // yaw 0 faces +z (down on the map)
   g.fillStyle = '#fff'; g.strokeStyle = '#111'; g.lineWidth = 1.5;
   g.beginPath(); g.moveTo(0, -6); g.lineTo(4.5, 5); g.lineTo(0, 2.5); g.lineTo(-4.5, 5); g.closePath();
@@ -4801,6 +4831,14 @@ function frame() {
   if (city.lectureBoard && Math.floor(game.elapsed * 2) !== Math.floor((game.elapsed - dt) * 2)) {
     const liveSchedule = Uni.getLiveCampusSchedule(nowInGame);
     if (liveSchedule.length) city.updateLectureBoard(liveSchedule[0]);
+  }
+  // endless city: pull in the districts around the player (a few cells a second)
+  streamT -= dt;
+  if (streamT <= 0) {
+    streamT = streamWarm ? 0.05 : 0.25;
+    const pp = game.player;
+    const res = city.updateStreaming(pp.x, pp.z, { budget: streamWarm ? 6 : 1 });
+    if (streamWarm && res.built === 0) streamWarm = false;
   }
   city.update(game.elapsed, dt);
   updateWatchingTv(dt);

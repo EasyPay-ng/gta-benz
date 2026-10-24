@@ -28,7 +28,7 @@ export const SIDEWALK_W = 3;         // sidewalk width
 export const BLOCK_HALF = 27.5;      // half the buildable interior of a block
 export const SIDEWALK_RING = 29;     // half-size of the walkable sidewalk ring around a block
 export const BLOCK_CENTERS = [-112.5, -37.5, 37.5, 112.5];
-export const WORLD_LIMIT = 242;
+export const WORLD_LIMIT = 4000;      // hard safety bound; the city itself streams forever
 
 // Roads along X (constant z) and along Z (constant x)
 export const STREET_NAMES_Z = ['1st St', '2nd St', 'Central St', '4th St', '5th St'];          // roads at z = ROAD_LINES[i]
