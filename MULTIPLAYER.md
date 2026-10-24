@@ -113,8 +113,15 @@ state plainly.
 if a server answers, the local save is deleted (not migrated), the game starts on a fresh city
 until the cloud copy arrives, and `saveGame()` refuses to write `localStorage` at all. Guests
 can still walk around, but their progress is not kept and the save button says so. The only
-place a local save still exists is the `dev:offline` harness / GitHub Pages / `?offline=1`,
-where there is no server to hold it.
+place a local save still exists is a development machine (`npm run dev:offline`, `?offline=1` on
+`localhost`) — and there it is the only option.
+
+**The public build cannot start without a server.** `offlineAllowed(href)` gates the fallback to
+`localhost`, `127.0.0.1`, `::1` and `file:`; anywhere else `bootPolicy()` returns `blocked`, the frame
+loop never starts, and the player gets the "city is offline" card with a server address field. The
+address is validated (`normalizeServerUrl` accepts `wss://`, `https://` and bare hosts) and stored in
+`localStorage.metroventure_server`, which `discoverServerUrl()` already reads on the next load. The old
+"Play without the server" button is gone.
 
 ### Free-tier budget (the number that shapes the design)
 

@@ -25,7 +25,7 @@ import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
 import * as Groceries from './src/groceries.js';
-import { CloudClient, saveEnvelope, bootPolicy } from './src/cloud.js';
+import { CloudClient, saveEnvelope, bootPolicy, offlineAllowed, normalizeServerUrl } from './src/cloud.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -4745,6 +4745,17 @@ function showLogin(message) {
   $('login').classList.remove('hidden');
   setTimeout(() => { ($('login-name').value ? $('login-pin') : $('login-name')).focus(); }, 30);
 }
+function showOfflineGate() {
+  const gate = $('offline-gate');
+  if (!gate) return;
+  gate.classList.remove('hidden');
+  let remembered = '';
+  try { remembered = localStorage.getItem('metroventure_server') || ''; } catch { /* private mode */ }
+  $('offline-server').value = remembered;
+  $('offline-error').classList.add('hidden');
+  updateHUD(true);
+}
+
 function hideLogin() {
   game.loginOpen = false;
   $('login').classList.add('hidden');
@@ -4859,14 +4870,23 @@ $('login-guest').addEventListener('click', () => {
   if (net) net.playAsGuest(name);
   else startNet({ mode: 'guest', name });
 });
-$('login-offline').addEventListener('click', () => {
-  hideLogin();
-  if (net) net.disconnect();
-  net = null;
-  cloud = null;
-  cityServerUrl = null;
-  toast('Offline session — nothing here is saved. Reload to sign in again.', 'warn');
-  updateHUD(true);
+// --- offline gate (online-only build) --------------------------------------
+function connectFromGate() {
+  const typed = $('offline-server').value;
+  const url = normalizeServerUrl(typed);
+  const err = $('offline-error');
+  if (!url) {
+    err.textContent = 'That is not a server address. Try wss://your-worker.workers.dev/ws?room=metro-1';
+    err.classList.remove('hidden');
+    return;
+  }
+  try { localStorage.setItem('metroventure_server', url); } catch { /* private mode */ }
+  location.reload();
+}
+$('offline-connect').addEventListener('click', connectFromGate);
+$('offline-retry').addEventListener('click', () => location.reload());
+$('offline-server').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); connectFromGate(); }
 });
 $('btn-account').addEventListener('click', () => {
   if (game.loginOpen) return hideLogin();
@@ -5139,9 +5159,15 @@ async function boot() {
   const serverUrl = await discoverServerUrl();
   let hasLocal = false;
   try { hasLocal = !!localStorage.getItem(SAVE_KEY); } catch { /* private mode */ }
-  const policy = bootPolicy(serverUrl, hasLocal);
+  const policy = bootPolicy(serverUrl, hasLocal, { allowOffline: offlineAllowed(location.href) });
 
   game.state = Eco.createInitialState();
+  if (policy.blocked) {
+    // The public build has no offline mode: no server, no city.
+    applyState();
+    showOfflineGate();
+    return;
+  }
   if (policy.online) {
     cityServerUrl = policy.serverUrl;
     if (policy.purgeLocalSave) clearLocalSave();

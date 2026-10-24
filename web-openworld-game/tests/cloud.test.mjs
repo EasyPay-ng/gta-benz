@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   CloudClient, httpOrigin, mapCloudError, saveEnvelope, bootPolicy, syncLabel, cloudMessageFor,
+  offlineAllowed, normalizeServerUrl,
 } from '../src/cloud.js';
 
 /** A fetch double that records requests and replays canned responses. */
@@ -171,13 +172,38 @@ test('Cloud: a reachable server deletes the offline save instead of migrating it
   assert.equal(clean.useCloud, true);
 
   // no server anywhere: the dev/offline harness keeps its local save
-  const offline = bootPolicy(null, true);
+  const offline = bootPolicy(null, true, { allowOffline: true });
   assert.equal(offline.online, false);
+  assert.equal(offline.blocked, false);
   assert.equal(offline.useCloud, false);
   assert.equal(offline.purgeLocalSave, false);
 
   // a URL that is not a server is not a server
   assert.equal(bootPolicy('', true).online, false);
+});
+
+test('Cloud: the public build is blocked without a server, localhost is not', () => {
+  assert.equal(offlineAllowed('https://easypay-ng.github.io/gta-benz/'), false);
+  assert.equal(offlineAllowed('https://gta-benz.example.com/?x=1'), false);
+  assert.equal(offlineAllowed('http://localhost:8080/'), true);
+  assert.equal(offlineAllowed('http://127.0.0.1:8080/?offline=1'), true);
+  assert.equal(offlineAllowed('file:///home/me/gta-benz/web-openworld-game/index.html'), true);
+
+  // GitHub Pages, no ?server= and no /net.json: there is no game to play
+  const blocked = bootPolicy(null, true, { allowOffline: offlineAllowed('https://easypay-ng.github.io/gta-benz/') });
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.online, false);
+  assert.equal(blocked.purgeLocalSave, false, 'nothing is deleted while the world is unreachable');
+});
+
+test('Cloud: a pasted server address becomes a dialable WebSocket URL', () => {
+  assert.equal(normalizeServerUrl('wss://city.example.com/ws'), 'wss://city.example.com/ws');
+  assert.equal(normalizeServerUrl('https://city.example.com/ws?room=metro-1'), 'wss://city.example.com/ws?room=metro-1');
+  assert.equal(normalizeServerUrl('city.example.com/ws'), 'ws://city.example.com/ws');
+  assert.equal(normalizeServerUrl('ws://127.0.0.1:8787/ws'), 'ws://127.0.0.1:8787/ws');
+  assert.equal(normalizeServerUrl('   '), null);
+  assert.equal(normalizeServerUrl('ftp://city.example.com/ws'), null);
+  assert.equal(normalizeServerUrl(null), null);
 });
 
 test('Cloud: sync status reads like a sentence, including the bad endings', () => {

@@ -160,6 +160,44 @@ export function saveEnvelope(state) {
   return persisted;
 }
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0']);
+
+/**
+ * Is this page allowed to fall back to single-player?
+ * Only on a developer machine (or opened from disk) — the public build is
+ * online-only, so `?offline=1` on GitHub Pages does nothing.
+ */
+export function offlineAllowed(href) {
+  try {
+    const url = new URL(href, 'http://localhost');
+    if (url.protocol === 'file:') return true;
+    return LOCAL_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Accept `wss://host/ws`, `https://host/ws`, `host/ws` or a full URL with a room
+ * query, and return something a WebSocket can dial. Null means "not a server".
+ */
+export function normalizeServerUrl(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  // "city.example.com/ws" gets ws:// so the host is not read as a path
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `ws://${text}`;
+  try {
+    const url = new URL(withScheme);
+    if (url.protocol === 'http:') url.protocol = 'ws:';
+    else if (url.protocol === 'https:') url.protocol = 'wss:';
+    else if (url.protocol !== 'ws:' && url.protocol !== 'wss:') return null;
+    if (!url.hostname) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Boot policy — the whole point of the online rebuild.
  *
@@ -168,10 +206,12 @@ export function saveEnvelope(state) {
  * migrated. Without a server (the `dev:offline` harness, GitHub Pages, ?offline=1)
  * the old local save still works, because there is nowhere else to put it.
  */
-export function bootPolicy(serverUrl, hasLocalSave = false) {
+export function bootPolicy(serverUrl, hasLocalSave = false, { allowOffline = false } = {}) {
   const online = !!httpOrigin(serverUrl);
   return {
     online,
+    // No server and no dev waiver: the public build does not start at all.
+    blocked: !online && !allowOffline,
     serverUrl: online ? serverUrl : null,
     useCloud: online,
     purgeLocalSave: online && !!hasLocalSave,

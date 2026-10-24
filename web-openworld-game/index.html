@@ -127,9 +127,23 @@
           </div>
         </form>
         <p class="hint">This city lives on the server. <b>Continue</b> creates your account with that PIN, and your wallet, cars, groceries and builds follow the name to any device. Guests can walk around, but nothing they do is kept — and a city started offline is replaced the moment the server is reachable.</p>
-        <div class="row login-alt">
-          <button id="login-offline" class="ghost" type="button">Play without the server (nothing is saved)</button>
+      </div>
+    </div>
+
+    <!-- ===== No server, no city (online-only build) ===== -->
+    <div id="offline-gate" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="offline-title">
+      <div class="modal-card glass login-card">
+        <h2 id="offline-title">The city is <span class="accent">offline</span></h2>
+        <p class="sub">MetroVenture has no offline copy any more — your wallet, cars and streets live on the city server. Point the game at one and it will remember it on this device.</p>
+        <label class="field">Server address
+          <input id="offline-server" spellcheck="false" autocomplete="off" placeholder="wss://your-worker.workers.dev/ws?room=metro-1" />
+        </label>
+        <p id="offline-error" class="login-error hidden"></p>
+        <div class="row">
+          <button id="offline-connect" class="primary" type="button">Connect</button>
+          <button id="offline-retry" class="ghost" type="button">Retry</button>
         </div>
+        <p class="hint">Running it yourself? <code>npm run dev</code> serves the game and the city server on one port. Deployed Worker? Use <code>wss://&lt;worker&gt;.workers.dev/ws?room=metro-1</code>.</p>
       </div>
     </div>
 

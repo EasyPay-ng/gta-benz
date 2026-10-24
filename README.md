@@ -1,21 +1,25 @@
 # MetroVenture 3D (gta-benz)
 
-A GTA-style **3D open-world occupation & startup tycoon** that runs in the browser. Built with Three.js and plain HTML/CSS/JS. There's no build step and no backend: progress is saved in `localStorage`, and the game deploys to GitHub Pages.
+A GTA-style **3D open-world occupation & startup tycoon** that runs in the browser. Built with Three.js and plain HTML/CSS/JS — no build step, no npm packages, no framework. It is an **online world**: accounts and saves live on a small free-tier Cloudflare Worker, and the game will not start without it.
 
 **Work jobs → buy vacant lots → launch startups → hire unemployed citizens → raise city employment → drive it all in your own cars.**
 
 ## Play locally
 
 ```bash
-npm start            # = python3 -m http.server 8080 --directory web-openworld-game
-# open http://localhost:8080
+npm run dev          # game + city server on http://localhost:8080
 ```
 
-Any static file server works. ES modules don't load from `file://`, so you can't just double-click `index.html`.
+`localhost` is the only place the game will run without a server (`npm run dev:offline`, or `?offline=1`),
+because that is the development harness. Anywhere else, opening the game without a reachable city server
+shows a single card: **the city is offline** — paste a `wss://…/ws?room=metro-1` address, and it is
+remembered on that device.
+
+ES modules don't load from `file://`, so you can't just double-click `index.html`.
 
 ## Multiplayer (optional, free)
 
-The game is single-player by default and stays that way unless it finds a server.
+The game is **online-only** when served anywhere but a development machine.
 
 ```bash
 npm run dev          # game + city server on http://localhost:8080
@@ -29,8 +33,8 @@ follow you to any device — and will still find you once the world is split int
 
 **Online is authoritative.** When the game can reach a server it does not read a local save
 at all: any offline city left on that device is deleted on boot, guests play without keeping
-progress, and the cloud copy is the only one that counts. Without a server (`npm run dev:offline`,
-GitHub Pages, `?offline=1`) the old local save still works, because there is nowhere else to put it. Open two tabs on the same
+progress, and the cloud copy is the only one that counts. On a public host there is no offline fallback:
+no server, no city. Open two tabs on the same
 machine — use two browsers or a private window, since one browser holds one session —
 and you will see each other walking, driving and on the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
 Workers free plan (no card, no bill); `npm run deploy`-style instructions, the protocol,
