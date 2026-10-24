@@ -119,8 +119,10 @@ place a local save still exists is a development machine (`npm run dev:offline`,
 **The public build cannot start without a server.** `offlineAllowed(href)` gates the fallback to
 `localhost`, `127.0.0.1`, `::1` and `file:`; anywhere else `bootPolicy()` returns `blocked`, the frame
 loop never starts, and the player gets the "city is offline" card with a server address field. The
-address is validated (`normalizeServerUrl` accepts `wss://`, `https://` and bare hosts) and stored in
-`localStorage.metroventure_server`, which `discoverServerUrl()` already reads on the next load. The old
+address is validated (`normalizeServerUrl` accepts `wss://`, `https://` and bare hosts) and **probed with a
+real WebSocket before it is stored** (`probeServer`, 4 s timeout), so a typo is a clear message on the card
+instead of a reload into "reconnecting…". The card pre-fills the address this page was served from, and
+Retry checks the saved server first, forgets it if it is dead, and then re-runs discovery. The old
 "Play without the server" button is gone.
 
 ### Free-tier budget (the number that shapes the design)

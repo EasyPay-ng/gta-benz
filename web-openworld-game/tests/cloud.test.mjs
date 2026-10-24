@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   CloudClient, httpOrigin, mapCloudError, saveEnvelope, bootPolicy, syncLabel, cloudMessageFor,
-  offlineAllowed, normalizeServerUrl,
+  offlineAllowed, normalizeServerUrl, probeServer,
 } from '../src/cloud.js';
 
 /** A fetch double that records requests and replays canned responses. */
@@ -212,4 +212,51 @@ test('Cloud: sync status reads like a sentence, including the bad endings', () =
   assert.equal(syncLabel({ ok: false, error: { quota: true } }), 'Cloud save: daily quota reached');
   assert.equal(syncLabel({ ok: false, error: { code: 'offline' } }), 'Cloud save: offline');
   assert.match(syncLabel({ ok: false, error: { code: 'bad_save', message: 'Nope.' } }), /Nope\./);
+});
+
+// ---------------------------------------------------------------------------
+// 5. The offline gate
+// ---------------------------------------------------------------------------
+/** A WebSocket stand-in that behaves however the test asks it to. */
+function fakeSocket(mode, log = []) {
+  return class {
+    constructor(url) {
+      log.push(url);
+      if (mode === 'throw') throw new Error('bad url');
+      this.onopen = null;
+      this.onerror = null;
+      this.onclose = null;
+      queueMicrotask(() => {
+        if (mode === 'open') this.onopen?.();
+        else if (mode === 'error') this.onerror?.();
+      });
+    }
+    close() { /* no-op */ }
+  };
+}
+
+test('Gate: a server is probed before it is saved, and a dead one is refused', async () => {
+  const good = await probeServer('ws://127.0.0.1:8787/ws', { WebSocketImpl: fakeSocket('open') });
+  assert.deepEqual(good, { ok: true, code: 'open' });
+
+  const dead = await probeServer('ws://127.0.0.1:9/ws', { WebSocketImpl: fakeSocket('error') });
+  assert.deepEqual(dead, { ok: false, code: 'unreachable' });
+
+  const broken = await probeServer('ws://nope', { WebSocketImpl: fakeSocket('throw') });
+  assert.deepEqual(broken, { ok: false, code: 'bad_url' });
+
+  assert.deepEqual(await probeServer('ws://x', { WebSocketImpl: null }), { ok: false, code: 'unsupported' });
+  assert.deepEqual(await probeServer('', { WebSocketImpl: fakeSocket('open') }), { ok: false, code: 'unsupported' });
+});
+
+test('Gate: a server that never answers times out instead of hanging the page', async () => {
+  class Silent {
+    constructor() { this.onopen = null; this.onerror = null; this.onclose = null; }
+    close() { /* no-op */ }
+  }
+  const started = Date.now();
+  const res = await probeServer('wss://silent.example.com/ws', { WebSocketImpl: Silent, timeoutMs: 60 });
+  assert.equal(res.ok, false);
+  assert.equal(res.code, 'timeout');
+  assert.ok(Date.now() - started < 1500, 'gave up quickly');
 });
