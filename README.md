@@ -41,6 +41,10 @@ Workers free plan (no card, no bill); `npm run deploy`-style instructions, the p
 the cost maths and the honest list of what is *not* synced yet are in
 [`MULTIPLAYER.md`](MULTIPLAYER.md).
 
+A deployed static build finds its server through `net.json` (the dev server serves one for you). To make
+the GitHub Pages build connect by itself, copy `web-openworld-game/net.example.json` to
+`web-openworld-game/net.json` and put your Worker's URL in it — then the gate never appears.
+
 Point a deployed game at a deployed server once:
 
 ```
