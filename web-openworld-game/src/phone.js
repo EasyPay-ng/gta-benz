@@ -375,12 +375,12 @@ export function nearbyPlaces(x, z, limit = 6) {
 /** Build app summary: what you own and what the palette holds. */
 export function buildCard(state) {
   const pieces = Array.isArray(state?.builds?.pieces) ? state.builds.pieces : [];
-  const blocks = pieces.filter((p) => BUILD_ITEMS.find((i) => i.id === p.item)?.cat === 'block').length;
+  const structure = pieces.filter((p) => BUILD_ITEMS.find((i) => i.id === p.item)?.cat === 'structure').length;
   return {
     pieces: pieces.length,
-    blocks,
-    structures: pieces.length - blocks,
-    blockTypes: BUILD_ITEMS.filter((i) => i.cat === 'block').length,
+    structures: structure,
+    furniture: pieces.length - structure,
+    itemTypes: BUILD_ITEMS.length,
   };
 }
 

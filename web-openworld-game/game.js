@@ -8,7 +8,6 @@ import {
   ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
   EMOTES, CAR_LIVERIES, RIM_FINISHES, UNDERGLOW_OPTIONS, RESPRAY_COST, CLOTHING_ITEMS, OUTFIT_BUNDLES,
   CAM_COCKPIT_YAW_MAX, BUILD_ITEMS, BUILD_COLORS, BUILD_STORY_H, MAX_CUSTOM_BUILDS,
-  BLOCK_ART, BLOCK_SIZE,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
@@ -19,7 +18,6 @@ import * as Cust from './src/customization.js';
 import * as Cam from './src/camera.js';
 import * as Uni from './src/university.js';
 import * as Build from './src/build.js';
-import * as Paint from './src/pixelart.js';
 import * as Phone from './src/phone.js';
 import * as PhoneView from './src/phoneview.js';
 import * as Interiors from './src/interiors.js';
@@ -3549,86 +3547,11 @@ function rideElevator(level) {
 // ===========================================================================
 const BUILD_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
 
-// ---------------------------------------------------------------------------
-// Minecraft-style pixel-art materials for Build Mode
-//
-// Every texture is painted into a 16×16 canvas from the palette in data.js and
-// sampled with NearestFilter, so blocks read as hand-pixelled cubes rather than
-// smooth PBR surfaces. Textures are generated once and cached.
-// ---------------------------------------------------------------------------
-const PIXEL_TEX_CACHE = new Map();
-
-/** Wrap a painted 16×16 canvas in a crisp NearestFilter texture. */
-function pixelTexture(spec, seed) {
-  const canvas = Paint.paintPixels(spec, seed);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
-
-/** One face texture for a Minecraft-style block (`kind` from BLOCK_ART, face top|side|bottom). */
-function blockFaceTexture(kind, face) {
-  const key = `block:${kind}:${face}`;
-  const hit = PIXEL_TEX_CACHE.get(key);
-  if (hit) return hit;
-  const art = BLOCK_ART[kind] || BLOCK_ART.stone;
-  const spec = art[face] || art.side || art.top;
-  const tex = pixelTexture(spec, `${kind}:${face}`);
-  PIXEL_TEX_CACHE.set(key, tex);
-  return tex;
-}
-
-const BLOCK_MAT_CACHE = new Map();
-/** Standard material for one block face — 6 materials per cube (top/bottom/sides). */
-function blockFaceMaterial(kind, face, ghost = false, transparent = false) {
-  const key = `${kind}:${face}:${ghost}`;
-  const hit = BLOCK_MAT_CACHE.get(key);
-  if (hit) return hit;
-  const glassy = transparent || kind === 'glass';
-  const mat = new THREE.MeshStandardMaterial({
-    map: blockFaceTexture(kind, face),
-    roughness: glassy ? 0.08 : 0.86,
-    metalness: kind === 'gold' ? 0.55 : glassy ? 0.1 : 0.02,
-    transparent: glassy || ghost,
-    opacity: ghost ? 0.5 : glassy ? 0.62 : 1,
-    depthWrite: !(glassy || ghost),
-    side: THREE.FrontSide,
-  });
-  BLOCK_MAT_CACHE.set(key, mat);
-  return mat;
-}
-
-/** Six-face material array for a block cube (BoxGeometry face order: +x, −x, +y, −y, +z, −z). */
-function blockMaterials(kind, ghost = false) {
-  const top = blockFaceMaterial(kind, 'top', ghost);
-  const side = blockFaceMaterial(kind, 'side', ghost);
-  const bottom = blockFaceMaterial(kind, 'bottom', ghost);
-  return [side, side, top, bottom, side, side];
-}
-
-/** Neutral grey pixel texture used to tint the architectural pieces. */
-const PIECE_TEX_CACHE = new Map();
-function pieceTexture(pattern) {
-  const hit = PIECE_TEX_CACHE.get(pattern);
-  if (hit) return hit;
-  const art = Paint.PIECE_ART[pattern] || Paint.PIECE_ART.stone;
-  const tex = pixelTexture(art, `piece:${pattern}`);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(4, 3);
-  PIECE_TEX_CACHE.set(pattern, tex);
-  return tex;
-}
-
 const BUILD_MAT_CACHE = new Map();
 
 function buildMaterial(color, opts = {}) {
-  const { glass = false, ghost = false, rough = 0.62, metal = 0.06, glow = false, pattern = null } = opts;
-  const key = `${color}|${glass}|${ghost}|${rough}|${metal}|${glow}|${pattern || ''}`;
+  const { glass = false, ghost = false, rough = 0.62, metal = 0.06, glow = false } = opts;
+  const key = `${color}|${glass}|${ghost}|${rough}|${metal}|${glow}`;
   const hit = BUILD_MAT_CACHE.get(key);
   if (hit) return hit;
   const mat = new THREE.MeshStandardMaterial({
@@ -3640,16 +3563,9 @@ function buildMaterial(color, opts = {}) {
     depthWrite: !(glass || ghost),
   });
   if (glow) { mat.emissive = new THREE.Color(color); mat.emissiveIntensity = 0.85; }
-  if (pattern) { mat.map = pieceTexture(pattern); mat.roughness = Math.max(0.55, rough); }
   BUILD_MAT_CACHE.set(key, mat);
   return mat;
 }
-
-/** Which Minecraft-style pixel texture each architectural piece wears. */
-const STRUCTURE_PATTERN = {
-  floor_stone: 'stone', floor_wood: 'planks', wall_solid: 'brick', wall_window: 'brick',
-  wall_door: 'brick', pillar: 'stone', stairs: 'planks', roof_gable: 'planks',
-};
 
 /** Build a 3D mesh for one placed piece (or its translucent ghost preview). */
 function makeBuildMesh(piece, ghost = false) {
@@ -3657,19 +3573,7 @@ function makeBuildMesh(piece, ghost = false) {
   const g = new THREE.Group();
   g.position.set(piece.x, piece.y, piece.z);
   g.rotation.y = piece.rot || 0;
-  // Minecraft-style voxel block: one textured 1 m cube with separate top/bottom faces
-  if (item && item.cat === 'block') {
-    const mesh = new THREE.Mesh(BUILD_BOX_GEO, blockMaterials(item.block, ghost));
-    mesh.scale.set(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-    mesh.position.set(0, BLOCK_SIZE / 2, 0);
-    mesh.castShadow = !ghost;
-    mesh.receiveShadow = !ghost;
-    g.add(mesh);
-    return g;
-  }
-  const color = piece.color || item?.defaultColor || '#f1f5f9';
-  const pattern = STRUCTURE_PATTERN[piece.item] || null;
-  const solid = buildMaterial(color, { ghost, pattern });
+  const solid = buildMaterial(piece.color || item?.defaultColor || '#f1f5f9', { ghost });
   const trim = buildMaterial('#334155', { ghost });
   const glass = buildMaterial('#bae6fd', { glass: true, ghost });
   const soft = buildMaterial('#94a3b8', { ghost, rough: 0.8 });
@@ -3882,13 +3786,12 @@ function renderBuildBar() {
   const stats = Build.summary(builds);
   const structures = BUILD_ITEMS.filter((i) => i.cat === 'structure');
   const furniture = BUILD_ITEMS.filter((i) => i.cat === 'furniture');
-  const blocks = BUILD_ITEMS.filter((i) => i.cat === 'block');
   const btn = (i) => `<button class="build-item ${i.id === game.buildItem ? 'active' : ''}" data-build-item="${i.id}" title="${i.name}"><span>${i.icon}</span><small>${i.name.replace(/ \(.*\)$/, '')}</small></button>`;
   const swatch = (c) => `<button class="build-swatch ${c === game.buildColor ? 'active' : ''}" style="background:${c}" data-build-color="${c}" aria-label="colour ${c}"></button>`;
   el.innerHTML = `
     <div class="build-row build-head">
       <b>🏗 Build &amp; Furnish</b>
-      <span class="build-meta">${stats.structure} structure · ${stats.furniture} furniture · ${stats.blocks} blocks / ${MAX_CUSTOM_BUILDS}</span>
+      <span class="build-meta">${stats.structure} structure · ${stats.furniture} furniture / ${MAX_CUSTOM_BUILDS}</span>
       <span class="build-tools">
         <span class="build-level">Height ${(game.player.y + game.buildLift).toFixed(1)} m</span>
         <button data-build-lift="1" title="Raise ghost one storey (PageUp)">▲ storey</button>
@@ -3900,21 +3803,15 @@ function renderBuildBar() {
       </span>
     </div>
     <div class="build-row"><span class="build-label">Structure</span>${structures.map(btn).join('')}</div>
-    <div class="build-row blocks"><span class="build-label">Blocks</span>${blocks.map(btn).join('')}</div>
     <div class="build-row"><span class="build-label">Furniture</span>${furniture.map(btn).join('')}</div>
     <div class="build-row"><span class="build-label">Colour</span>${BUILD_COLORS.map(swatch).join('')}
-      <span class="build-hint"><kbd>E</kbd> place · <kbd>X</kbd> demolish · <kbd>Q</kbd>/<kbd>R</kbd> rotate · <kbd>Tab</kbd> item · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> storey · <kbd>Y</kbd> exit<br>Blocks snap to a 1 m grid — stand on one and place the next to stack them like Minecraft.</span>
+      <span class="build-hint"><kbd>E</kbd> place · <kbd>X</kbd> demolish · <kbd>Q</kbd>/<kbd>R</kbd> rotate · <kbd>Tab</kbd> item · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> storey · <kbd>Y</kbd> exit</span>
     </div>`;
 }
 
 function setBuildLift(delta) {
-  const item = Build.itemById(game.buildItem);
-  // voxel blocks step one metre at a time; architectural pieces step a storey
-  const step = item?.cat === 'block' ? BLOCK_SIZE : BUILD_STORY_H;
-  game.buildLift = Math.max(-2 * BUILD_STORY_H, Math.min(10 * BUILD_STORY_H, game.buildLift + delta * step));
-  game.buildLift = +game.buildLift.toFixed(2);
+  game.buildLift = Math.max(-2 * BUILD_STORY_H, Math.min(10 * BUILD_STORY_H, game.buildLift + delta * BUILD_STORY_H));
   renderBuildBar();
-  updateBuildGhost();
 }
 
 function cycleBuildColor() {
@@ -3943,7 +3840,7 @@ function toggleBuildMode(on) {
     if (!game.buildGroup) rebuildBuildWorld();
     renderBuildBar();
     rebuildBuildGhost();
-    toast('🏗 Build Mode — E place · X demolish · Q/R rotate · C colour · Tab item · PgUp/PgDn storey · blocks stack 1 m at a time', 'good');
+    toast('🏗 Build Mode — E place · X demolish · Q/R rotate · C colour · Tab item · PgUp/PgDn storey · walls, floors, stairs & furniture', 'good');
   } else {
     if (game.buildGhost) { scene.remove(game.buildGhost); game.buildGhost = null; }
     renderBuildBar();

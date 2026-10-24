@@ -242,9 +242,9 @@ function phoneBuildHtml(vm) {
     <div class="pc">
       <h4>🏗 Your builds</h4>
       <div class="pc-row"><span class="pc-muted">Pieces placed</span><span>${b.pieces}</span></div>
-      <div class="pc-row"><span class="pc-muted">Voxel blocks</span><span>${b.blocks}</span></div>
-      <div class="pc-row"><span class="pc-muted">Structures</span><span>${b.structures}</span></div>
-      <p style="margin-top:8px">${b.blockTypes} hand-pixelled Minecraft blocks, walls, floors, stairs, roofs and furniture snap into place with the ghost preview.</p>
+      <div class="pc-row"><span class="pc-muted">Structure</span><span>${b.structures}</span></div>
+      <div class="pc-row"><span class="pc-muted">Furniture</span><span>${b.furniture}</span></div>
+      <p style="margin-top:8px">${b.itemTypes} pieces — walls, floors, stairs, roofs, pillars and furniture — snap into place with the ghost preview.</p>
       <div class="phone-btns"><button class="phone-btn primary" data-phone-act="openBuild">🏗 Enter Build Mode</button></div>
     </div>
     <div class="pc"><h4>🎮 Controls</h4><p><b>E</b> place · <b>X</b> demolish · <b>Q</b>/<b>R</b> rotate · <b>C</b> colour · <b>Tab</b> item · <b>PgUp</b>/<b>PgDn</b> storey</p></div>

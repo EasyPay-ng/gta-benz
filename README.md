@@ -46,7 +46,7 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 | `E`: interact · open/close doors · use furniture · ride lift · `Space`: jump | `Space`: handbrake (drift & twin tyre skids!) · `G`: horn · `E`: waypoints |
 | `B` or `1`–`8`: character actions, greetings & dances | `F`: exit · `T`: Garage & Roadside Assist |
 | `U` (or HUD `🎓`): **Metro Grand University** (1,105 courses) | High-speed hits & explosions raise **Police Heat (`★`–`★★★`)** |
-| `Y` (or HUD `🏗`): **3D Architect Build Mode** — structures, furniture & **Minecraft blocks** · `E` at a **Metro Lift** to ride floors | `E` place · `X` demolish · `Q`/`R` rotate · `C` colour · `Tab` item · `PgUp`/`PgDn` storey |
+| `Y` (or HUD `🏗`): **3D Architect Build Mode** — walls, floors, stairs, roofs & furniture · `E` at a **Metro Lift** to ride floors | `E` place · `X` demolish · `Q`/`R` rotate · `C` colour · `Tab` item · `PgUp`/`PgDn` storey |
 | `O` (or HUD `📱`): **MetroPhone** — garage, uni, jobs, messages, wallet, map, build, look, settings | Tap an app icon · `‹` back · `✕ Close` or `Esc` |
 | `F`: get in/out of your car · `V`: valet · `T`: Garage · `C`: look · `H`: help · `M`: mute | `F5` save / `F9` load |
 
@@ -73,7 +73,6 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
 - **3D Architect — Build & Furnish Mode (`Y` / `🏗`, `src/build.js`).** Raise your own multi-storey structures anywhere in the city, then furnish them:
   - **Structure on a 4 m grid:** marble & hardwood floor slabs, solid walls, window walls, doorway walls, glass curtain walls, **climbable 3D stairs (+1 storey)**, support pillars, glass balcony railings and pitched gable roofs.
   - **Furniture on a 0.5 m grid:** lounge sofas, king beds, executive desks with monitors, dining/conference tables, widescreen TVs, tall bookshelves, warm floor lamps and indoor palms.
-  - **Minecraft-style voxel blocks on a 1 m grid (`src/pixelart.js` + `BLOCK_ART`):** 18 hand-pixelled 1×1×1 blocks — grass, dirt, stone, cobblestone, oak planks, oak log (with real end-grain rings), brick, sand, glass (translucent panes), obsidian, gold and a full wool range (white, red, orange, yellow, green, blue, black). Every block is painted at runtime into a crisp 16×16 NearestFilter canvas with its own **top / side / bottom** faces, so a grass block has a green crown and a dirt body. Blocks snap to a 1 m grid, **stack in columns** (each top is a real walkable surface, each cube is solid), and step `PageUp`/`PageDown` one metre at a time instead of a storey. The architectural pieces (walls, floors, roofs, stairs, pillars) now wear matching tinted pixel textures too, so a castle built from blocks and a penthouse built from slabs share the same chunky hand-pixelled look.
   - **Sculpted 3D previews & controls:** a translucent snapping ghost follows your crosshair; `Q`/`R` rotate, `C` cycles 9 architectural colours, `Tab`/`1`–`9` switch pieces, `PageUp`/`PageDown` raise the build plane a storey at a time, `E` places and `X` demolishes. Everything you build is **solid** (walls & furniture collide), **walkable** (floors & stair risers are real surfaces) and **saved** with your game (`SAVE_VERSION = 8`, `state.builds`).
 
 - **Every Piece of Furniture Is Interactive — Wellbeing, Rest & Public Services (`src/props.js`, `src/publicPlaces.js`).** 27 prop types across the whole city respond to `E`: sofas, armchairs, chairs, park/promenade benches, king beds, sun loungers, hospital treatment beds, TV walls, bookshelves, desks, lab benches, kitchens, bars, pool tables, server racks, pianos, sculptures, planters, lamps, reception counters, treadmills, gym benches, dumbbell racks, cinema screens, art frames, dining tables and checkout counters — including **everything you place yourself in 3D Architect mode**.
@@ -156,9 +155,9 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, Minecraft block catalog & pixel-art painter, MetroPhone apps & screen markup) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
 
-- **96 client tests** — `npm test`
+- **93 client tests** — `npm test`
 - **89 server tests** — `npm --prefix server run test:all` (smoke, accounts & NetClient E2E)
 
 ## Deploy to GitHub Pages
