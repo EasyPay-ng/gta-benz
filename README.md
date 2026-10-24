@@ -1,21 +1,25 @@
 # MetroVenture 3D (gta-benz)
 
-A GTA-style **3D open-world occupation & startup tycoon** that runs in the browser. Built with Three.js and plain HTML/CSS/JS. There's no build step and no backend: progress is saved in `localStorage`, and the game deploys to GitHub Pages.
+A GTA-style **3D open-world occupation & startup tycoon** that runs in the browser. Built with Three.js and plain HTML/CSS/JS — no build step, no npm packages, no framework. It is an **online world**: accounts and saves live on a small free-tier Cloudflare Worker, and the game will not start without it.
 
 **Work jobs → buy vacant lots → launch startups → hire unemployed citizens → raise city employment → drive it all in your own cars.**
 
 ## Play locally
 
 ```bash
-npm start            # = python3 -m http.server 8080 --directory web-openworld-game
-# open http://localhost:8080
+npm run dev          # game + city server on http://localhost:8080
 ```
 
-Any static file server works. ES modules don't load from `file://`, so you can't just double-click `index.html`.
+`localhost` is the only place the game will run without a server (`npm run dev:offline`, or `?offline=1`),
+because that is the development harness. Anywhere else, opening the game without a reachable city server
+shows a single card: **the city is offline** — paste a `wss://…/ws?room=metro-1` address, and it is
+remembered on that device.
+
+ES modules don't load from `file://`, so you can't just double-click `index.html`.
 
 ## Multiplayer (optional, free)
 
-The game is single-player by default and stays that way unless it finds a server.
+The game is **online-only** when served anywhere but a development machine.
 
 ```bash
 npm run dev          # game + city server on http://localhost:8080
@@ -23,12 +27,23 @@ npm run dev:offline  # game only
 ```
 
 Players sign in with a **display name and a PIN** (no email), so a name stays theirs
-across sessions and devices; guests can play without one. Open two tabs on the same
+across sessions and devices; guests can play without one. Accounts and cloud saves live
+in a single global **AccountHub** Durable Object, so your wallet, cars, pantry and builds
+follow you to any device — and will still find you once the world is split into districts.
+
+**Online is authoritative.** When the game can reach a server it does not read a local save
+at all: any offline city left on that device is deleted on boot, guests play without keeping
+progress, and the cloud copy is the only one that counts. On a public host there is no offline fallback:
+no server, no city. Open two tabs on the same
 machine — use two browsers or a private window, since one browser holds one session —
 and you will see each other walking, driving and on the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
 Workers free plan (no card, no bill); `npm run deploy`-style instructions, the protocol,
 the cost maths and the honest list of what is *not* synced yet are in
 [`MULTIPLAYER.md`](MULTIPLAYER.md).
+
+A deployed static build finds its server through `net.json` (the dev server serves one for you). To make
+the GitHub Pages build connect by itself, copy `web-openworld-game/net.example.json` to
+`web-openworld-game/net.json` and put your Worker's URL in it — then the gate never appears.
 
 Point a deployed game at a deployed server once:
 
@@ -46,7 +61,7 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 | `E`: interact · open/close doors · use furniture · ride lift · `Space`: jump | `Space`: handbrake (drift & twin tyre skids!) · `G`: horn · `E`: waypoints |
 | `B` or `1`–`8`: character actions, greetings & dances | `F`: exit · `T`: Garage & Roadside Assist |
 | `U` (or HUD `🎓`): **Metro Grand University** (1,105 courses) | High-speed hits & explosions raise **Police Heat (`★`–`★★★`)** |
-| `Y` (or HUD `🏗`): **3D Architect Build Mode** — structures, furniture & **Minecraft blocks** · `E` at a **Metro Lift** to ride floors | `E` place · `X` demolish · `Q`/`R` rotate · `C` colour · `Tab` item · `PgUp`/`PgDn` storey |
+| `Y` (or HUD `🏗`): **3D Architect Build Mode** — walls, floors, stairs, roofs & furniture · `E` at a **Metro Lift** to ride floors | `E` place · `X` demolish · `Q`/`R` rotate · `C` colour · `Tab` item · `PgUp`/`PgDn` storey |
 | `O` (or HUD `📱`): **MetroPhone** — garage, uni, jobs, messages, wallet, map, build, look, settings | Tap an app icon · `‹` back · `✕ Close` or `Esc` |
 | `F`: get in/out of your car · `V`: valet · `T`: Garage · `C`: look · `H`: help · `M`: mute | `F5` save / `F9` load |
 
@@ -73,7 +88,6 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
 - **3D Architect — Build & Furnish Mode (`Y` / `🏗`, `src/build.js`).** Raise your own multi-storey structures anywhere in the city, then furnish them:
   - **Structure on a 4 m grid:** marble & hardwood floor slabs, solid walls, window walls, doorway walls, glass curtain walls, **climbable 3D stairs (+1 storey)**, support pillars, glass balcony railings and pitched gable roofs.
   - **Furniture on a 0.5 m grid:** lounge sofas, king beds, executive desks with monitors, dining/conference tables, widescreen TVs, tall bookshelves, warm floor lamps and indoor palms.
-  - **Minecraft-style voxel blocks on a 1 m grid (`src/pixelart.js` + `BLOCK_ART`):** 18 hand-pixelled 1×1×1 blocks — grass, dirt, stone, cobblestone, oak planks, oak log (with real end-grain rings), brick, sand, glass (translucent panes), obsidian, gold and a full wool range (white, red, orange, yellow, green, blue, black). Every block is painted at runtime into a crisp 16×16 NearestFilter canvas with its own **top / side / bottom** faces, so a grass block has a green crown and a dirt body. Blocks snap to a 1 m grid, **stack in columns** (each top is a real walkable surface, each cube is solid), and step `PageUp`/`PageDown` one metre at a time instead of a storey. The architectural pieces (walls, floors, roofs, stairs, pillars) now wear matching tinted pixel textures too, so a castle built from blocks and a penthouse built from slabs share the same chunky hand-pixelled look.
   - **Sculpted 3D previews & controls:** a translucent snapping ghost follows your crosshair; `Q`/`R` rotate, `C` cycles 9 architectural colours, `Tab`/`1`–`9` switch pieces, `PageUp`/`PageDown` raise the build plane a storey at a time, `E` places and `X` demolishes. Everything you build is **solid** (walls & furniture collide), **walkable** (floors & stair risers are real surfaces) and **saved** with your game (`SAVE_VERSION = 8`, `state.builds`).
 
 - **Every Piece of Furniture Is Interactive — Wellbeing, Rest & Public Services (`src/props.js`, `src/publicPlaces.js`).** 27 prop types across the whole city respond to `E`: sofas, armchairs, chairs, park/promenade benches, king beds, sun loungers, hospital treatment beds, TV walls, bookshelves, desks, lab benches, kitchens, bars, pool tables, server racks, pianos, sculptures, planters, lamps, reception counters, treadmills, gym benches, dumbbell racks, cinema screens, art frames, dining tables and checkout counters — including **everything you place yourself in 3D Architect mode**.
@@ -82,10 +96,12 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - **Wellbeing:** the prop restores the right wellbeing stat and the camera follows. Live **Wellbeing** HUD row (energy · comfort · hotel key): energy drains as you walk and sprint, and low energy slows your sprint; comfort, health and fitness each have their own effects. Sitting regenerates energy & comfort, beds restore energy overnight, TV/bookshelf/desk hook into leisure & university study, the kitchen feeds you for $12, the bar pours a drink, the server rack pays a freelance bonus, the pool table, piano and gym equipment each have their own verb, and every prop has a cooldown so bonuses can't be farmed.
   - **Reception desks open their real menus:** clock in at the courier/security/cab desks, browse Maison Verve, run your startup, or check in at the hotel — all from inside the building.
 - **Every Building Walk-In with Standard Walls & Windows.** Metro Motors' showroom and a new **Fuel & Go** convenience store on each of the three forecourts are now enterable buildings with real doors, reception/counter service and stocking shelves — alongside the towers, job HQs, Maison Verve and university halls. Every walk-in interior is lined with **painted plaster walls, skirting boards, framed windows and a ceiling trim** so rooms look like real rooms from the inside instead of showing the exterior window texture.
+- **FreshMart Superstore — a supermarket you actually shop in (`src/groceries.js`, `src/world.js`).** A 34 m big-box grocery on the South Waterfront with five dry aisles of stocked shelving (dairy, pantry, drinks, household, chilled & frozen), a glowing chiller wall, a produce island, a bakery counter and **four self-checkout tills**. Walk up to any shelf and press `E` to open it: add and remove products, watch the trolley total, then pay at a till. What you buy is carried home to your **pantry** — eat it from the **Groceries** app on the MetroPhone to restore energy and comfort (a steak is +26, a cake is +18 and a lot of comfort). The phone also keeps a weekly **shopping list** that ticks itself off as you stock up and rolls over to a fresh list once it is complete.
 - **South Waterfront — Hotel, Hospital, Museum, Mall, Gym & Library District (`src/publicPlaces.js`, `src/world.js`).** A brand-new civic district runs south of `3rd St` (map labels **H A C G L**): the **13-storey Grand Meridian Hotel** (standard $120 / deluxe $260 / penthouse $640 a night — book a room, ride the lift, sleep in a real hotel bed, check out), **Metro General Hospital** (checkup $45, emergency $120, full treatment $260 plus interactive treatment beds), the **Museum of Art** (3 ticket tiers, three galleries and a sculpture court), **Metro Central Mall & Cineplex** (fashion boutiques, a food court of 6 meals & a six-screen cinema), **Metro Iron Fitness Club** (day pass, PT session, protein bar) and **Metro Public Library** (free borrowing, quiet study desks, borrowable books that boost study).
   - **The district is a real place:** a new cross avenue with street lamps, a palm-lined promenade with benches, sun loungers, a lifeguard tower and a sea wall over the beach, all walk-in with openable doors and reception counters.
   - **Denser downtown:** every skyline block now packs a 3×3 parcel of towers, all street-facing, so the skyline and your lift directory grew with it.
 
+- **The city never ends — streamed districts (`src/streaming.js`, `src/world.js`).** Drive out past the old edge and the metropolis keeps building itself around you, forever and in every direction: the same 75 m street grid continues, and each 300 m cell is generated deterministically (name boards, themed shopfronts and office towers, trees, street lamps, and a walkable ground-floor interior with a working swing door for every building). A cell is only ever built when you get near it and is torn down — geometry, textures, colliders, doors, furniture and address labels — once you are two cells clear, so memory stays flat no matter how far you drive. The minimap scrolls with you and draws the generated streets and blocks.
 - **Realistic PBR visuals & atmospheric city.** Procedural diffuse, normal, roughness and emissive PBR maps (`src/textures.js`) with ACES Filmic tone mapping, PMREM environment reflections and a custom atmospheric `SkyDome` shader (dawn/sunset horizon scatter, drifting clouds and twinkling night stars). Features tyre-polished weathered asphalt, irregular flagstone sidewalks, curb storm drains, 6 brick/limestone/glass-curtain architectural facades, multi-cluster avenue trees and soft additive streetlamp & vehicle lens flares.
 - **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
 - **Sculpted 3D humanoids, Maison Verve Boutique, Personal Wardrobe, jumping & emotes.** Anatomically proportioned characters with 2-segment articulated arms and legs (elbows & knees), facial features, 5 hair styles, 3 body builds and automatic job uniforms/headgear.
@@ -108,7 +124,7 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - At 0 HP the car is **wrecked** and smokes until towed or repaired.
   - **Shop & Roadside service:** visit **Metro Motors' mechanic** (+20% city rates) or your **Apex Auto Garage** (house rates), OR press **`T`** anywhere (or **`E`** beside a wrecked/stalled car) to open **Garage & Roadside Assist** and call a tow ($250), dispatch a mobile mechanic ($150 call-out + parts), or buy an emergency +35% fuel can ($95).
 - **AI traffic.** 12 cars drive right-hand lanes across the grid and brake for pedestrians, cars and you. They honk if you block them.
-- **Save system.** `localStorage` key `metroventure_openworld_save_v1` (v9). Stores cash, look, job XP, startups, employees, vehicles, positions, every 3D piece you have built (`state.builds`) and your **wellbeing & hotel stay** (`state.leisure`). Old v2–v8 saves migrate automatically with an empty build plot, a fresh wellbeing meter and no booked room.
+- **Save system.** `localStorage` key `metroventure_openworld_save_v1` (v10). Stores cash, look, job XP, startups, employees, vehicles, positions, every 3D piece you have built (`state.builds`), your **wellbeing & hotel stay** (`state.leisure`) and your **groceries** — pantry, trolley and shopping list (`state.groceries`). Old v2–v9 saves migrate automatically with an empty build plot, a fresh wellbeing meter, no booked room and a brand-new pantry.
 
 ## Project layout
 
@@ -124,6 +140,7 @@ web-openworld-game/
   src/props.js        pure interactive-furniture catalogue, wellbeing/energy model, cooldowns, swing-door state
   src/publicPlaces.js pure South Waterfront places, hotel booking, hospital, museum, mall, gym & library services
   src/build.js        pure 3D Architect catalog, grid snapping, placement/collision, stairs & save migration
+  src/groceries.js    pure FreshMart catalogue, trolley, self-checkout, pantry & shopping list
   src/time.js         pure 24× city clock, day/night lighting & shift boundaries
   src/economy.js      pure game-state logic & save migrations (unit-tested, no DOM)
   src/customization.js pure Boutique wardrobe, outfit bundles, vehicle mods & multiplayer vehicle codec
@@ -133,11 +150,13 @@ web-openworld-game/
   src/textures.js     procedural PBR diffuse/normal/roughness/emissive maps, PMREM & SkyDome
   src/fx.js           pooled twin tyre skid marks, crash sparks, scorch decals & wreck fire/smoke
   src/character.js    sculpted 2-joint humanoid rig, outfits, jump physics & 8 procedural emotes
-  src/world.js        PBR procedural city, street lamps, night glow, nav graph, collisions
+  src/world.js        PBR procedural city, street lamps, night glow, nav graph, collisions, endless-world streamer
+  src/streaming.js    pure endless-city cells: deterministic block/road/building layouts & street names
   src/vehicles.js     sculpted clearcoat cars, 5-spoke rims, light flares, AI traffic & PoliceCar
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
   src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock & emote sync)
-  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism)
+  src/cloud.js        accounts & cloud saves client: HTTP origin, bearer token, revisions, offline mirror
+  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism, streaming, groceries, cloud)
 server/               free multiplayer server (Cloudflare Worker + Durable Object)
 tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
@@ -156,10 +175,11 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, Minecraft block catalog & pixel-art painter, MetroPhone apps & screen markup) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming, FreshMart shopping & pantry, cloud-save client & revision rules) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
 
-- **96 client tests** — `npm test`
-- **89 server tests** — `npm --prefix server run test:all` (smoke, accounts & NetClient E2E)
+- **127 client tests** — `npm test`
+- **100 server tests** — `npm --prefix server run test:all` (smoke, accounts, NetClient E2E, AccountHub),
+  where the AccountHub tests run without wrangler against an in-memory storage stub
 
 ## Deploy to GitHub Pages
 

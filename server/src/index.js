@@ -8,6 +8,7 @@
 //   GET /                -> plain-text help
 
 export { CityRoom } from './city-room.js';
+export { AccountHub } from './account-hub-do.js';
 
 const DEFAULT_ROOM = 'metro-1';
 
@@ -17,6 +18,24 @@ export default {
 
     if (url.pathname === '/health') {
       return json({ ok: true, service: 'metroventure-city', rooms: 'durable-objects', now: Date.now() });
+    }
+
+    // Global identity + cloud saves. One object owns every account, so a player
+    // keeps their wallet and save no matter which district room they are in.
+    if (url.pathname.startsWith('/api/')) {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            'access-control-allow-origin': '*',
+            'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
+            'access-control-allow-headers': 'authorization, content-type',
+            'access-control-max-age': '86400',
+          },
+        });
+      }
+      const id = env.ACCOUNTS.idFromName('global');
+      return env.ACCOUNTS.get(id).fetch(request);
     }
 
     if (url.pathname === '/ws') {
@@ -32,7 +51,7 @@ export default {
     }
 
     return new Response(
-      'MetroVenture city server\n\nConnect a WebSocket to /ws?room=<room>\nHealth check: /health\n',
+      'MetroVenture city server\n\nConnect a WebSocket to /ws?room=<room>\nAccounts & cloud saves: /api/*\nHealth check: /health\n',
       { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } },
     );
   },

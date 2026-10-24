@@ -12,6 +12,7 @@ import {
   DEALERSHIP, BOUTIQUE, UNIVERSITY, BUILD_ITEMS,
 } from './data.js';
 import { PUBLIC_PLACES } from './publicPlaces.js';
+import * as Grocery from './groceries.js';
 import { COURSE_BY_ID } from './university.js';
 import { roadsideRepairQuote, canEmergencyRefuel } from './vehicleCond.js';
 
@@ -27,6 +28,7 @@ export const PHONE_APPS = [
   { id: 'university', name: 'Uni', icon: '🎓', tone: '#6366f1', hint: 'Courses & GPA' },
   { id: 'jobs', name: 'Jobs', icon: '💼', tone: '#10b981', hint: 'Shifts & XP' },
   { id: 'messages', name: 'Messages', icon: '💬', tone: '#38bdf8', hint: 'Inbox' },
+  { id: 'groceries', name: 'Groceries', icon: '🛒', tone: '#22c55e', hint: 'List & pantry' },
   { id: 'wallet', name: 'Wallet', icon: '💳', tone: '#f59e0b', hint: 'Cash & assets' },
   { id: 'map', name: 'Map', icon: '🗺', tone: '#22c55e', hint: 'Nearby places' },
   { id: 'build', name: 'Build', icon: '🏗', tone: '#eab308', hint: '3D Architect' },
@@ -375,12 +377,12 @@ export function nearbyPlaces(x, z, limit = 6) {
 /** Build app summary: what you own and what the palette holds. */
 export function buildCard(state) {
   const pieces = Array.isArray(state?.builds?.pieces) ? state.builds.pieces : [];
-  const blocks = pieces.filter((p) => BUILD_ITEMS.find((i) => i.id === p.item)?.cat === 'block').length;
+  const structure = pieces.filter((p) => BUILD_ITEMS.find((i) => i.id === p.item)?.cat === 'structure').length;
   return {
     pieces: pieces.length,
-    blocks,
-    structures: pieces.length - blocks,
-    blockTypes: BUILD_ITEMS.filter((i) => i.cat === 'block').length,
+    structures: structure,
+    furniture: pieces.length - structure,
+    itemTypes: BUILD_ITEMS.length,
   };
 }
 
@@ -390,6 +392,22 @@ export function appBadges(state, seen = new Set()) {
     messages: unreadCount(state, seen),
     university: state?.academic?.activeCourseId ? 1 : 0,
     jobs: state?.activeJob ? 1 : 0,
+    groceries: Grocery.basketCount(state),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Groceries (FreshMart) — the shopping list, the trolley & the pantry
+// ---------------------------------------------------------------------------
+export function groceryCard(state) {
+  const summary = Grocery.grocerySummary(state);
+  const progress = Grocery.listProgress(state);
+  return {
+    ...summary,
+    list: progress.items,
+    basket: Grocery.basketLines(state),
+    pantry: Grocery.pantryLines(state),
+    listLabel: `${progress.done}/${progress.total}`,
   };
 }
 

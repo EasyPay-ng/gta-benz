@@ -8,7 +8,7 @@
 // boxes and walkable surfaces — all unit-tested and free of DOM/WebGL.
 
 import {
-  BUILD_ITEMS, BUILD_COLORS, BUILD_STORY_H, BLOCK_SIZE, MAX_CUSTOM_BUILDS, WORLD_LIMIT,
+  BUILD_ITEMS, BUILD_COLORS, BUILD_STORY_H, MAX_CUSTOM_BUILDS, WORLD_LIMIT,
 } from './data.js';
 
 export const STRUCTURE_GRID = 4.0;   // walls/floors tile on a 4 m architectural grid
@@ -27,11 +27,6 @@ const TALL_TYPES = new Set(['pillar', 'wall_solid', 'wall_window', 'wall_door', 
 
 export function itemById(id) {
   return ITEM_BY_ID[id] || null;
-}
-
-export function isBlock(itemOrId) {
-  const it = typeof itemOrId === 'string' ? itemById(itemOrId) : itemOrId;
-  return !!it && it.cat === 'block';
 }
 
 export function isStructure(itemOrId) {
@@ -116,20 +111,14 @@ export function pieceCount(build) {
 }
 
 export function summary(build) {
-  let structure = 0; let furniture = 0; let blocks = 0;
+  let structure = 0; let furniture = 0;
   for (const p of build?.pieces || []) {
     const it = itemById(p.item);
     if (!it) continue;
-    if (it.cat === 'block') blocks += 1;
-    else if (it.cat === 'structure') structure += 1;
-    else furniture += 1;
+    if (it.cat === 'structure') structure += 1; else furniture += 1;
   }
   const levels = new Set((build?.pieces || []).map((p) => Math.round(p.y / WALL_HEIGHT)));
-  return {
-    structure, furniture, blocks,
-    total: structure + furniture + blocks,
-    levels: Math.max(1, levels.size),
-  };
+  return { structure, furniture, total: structure + furniture, levels: Math.max(1, levels.size) };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,9 +179,7 @@ export function pieceAabb(piece) {
   if (!it) return null;
   const quarter = rotQuarter(piece.rot) % 2 === 1;
   let w = WALL_LENGTH; let d = WALL_LENGTH;
-  if (it.cat === 'block') {
-    w = BLOCK_SIZE; d = BLOCK_SIZE;
-  } else if (it.cat === 'furniture') {
+  if (it.cat === 'furniture') {
     const spec = FURNITURE_SIZE[piece.item] || { w: 1, d: 1 };
     w = quarter ? spec.d : spec.w;
     d = quarter ? spec.w : spec.d;
@@ -230,10 +217,7 @@ export function collidersNear(build, feetY) {
     if (!it) continue;
     const aabb = pieceAabb(p);
     if (!aabb) continue;
-    if (it.cat === 'block') {
-      // solid 1 m cube — you can stand on top but not walk through it
-      if (feetY < p.y - 0.3 || feetY > p.y + BLOCK_SIZE - 0.06) continue;
-    } else if (it.cat === 'furniture') {
+    if (it.cat === 'furniture') {
       const spec = FURNITURE_SIZE[p.item];
       if (!spec) continue;
       if (feetY < p.y - 0.3 || feetY > p.y + spec.h) continue;
@@ -285,10 +269,6 @@ export function walkSurfaces(build) {
     if (FLOOR_TYPES.has(p.item)) {
       const aabb = pieceAabb(p);
       out.push({ ...aabb, y: p.y, kind: 'floor' });
-    } else if (isBlock(p.item)) {
-      // every block top is a surface you can stand (and stack) on
-      const aabb = pieceAabb(p);
-      out.push({ ...aabb, y: +(p.y + BLOCK_SIZE).toFixed(2), kind: 'block' });
     } else if (p.item === 'stairs') {
       out.push(...stairSteps(p));
     }

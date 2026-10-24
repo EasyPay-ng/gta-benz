@@ -88,6 +88,18 @@ export const PUBLIC_PLACES = [
     blurb: 'Treadmills, free weights and a boxing ring. Training raises your fitness — and fitness makes you sprint faster.',
   },
   {
+    id: 'freshmart',
+    name: 'FreshMart Superstore',
+    short: 'FreshMart',
+    type: 'supermarket',
+    icon: '🛒',
+    color: '#22c55e',
+    x: -37.5, z: 170, width: 34, depth: 20, height: 8.6,
+    yaw: 0, kind: 'hall', themeId: 'corporate', mapLabel: 'S',
+    services: ['supermarket'],
+    blurb: 'Aisles of groceries, a chiller wall, a bakery counter and self-checkout tills. Fill a trolley, pay, and eat what you buy.',
+  },
+  {
     id: 'metro_library',
     name: 'Metro Public Library',
     short: 'Public Library',
@@ -366,6 +378,7 @@ export const SERVICE_DEFS = {
   mall: { icon: '🛍', title: 'Mall concierge', placeId: 'metro_mall' },
   gym: { icon: '🏋', title: 'Gym front desk', placeId: 'metro_gym' },
   library: { icon: '📚', title: 'Library desk', placeId: 'metro_library' },
+  supermarket: { icon: '🛒', title: 'FreshMart checkout', placeId: 'freshmart' },
 };
 
 export function servicesForPlace(placeId) {

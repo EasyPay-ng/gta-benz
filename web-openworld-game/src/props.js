@@ -261,6 +261,40 @@ export const PROP_INTERACTIONS = {
     effects: {}, stat: 'visits', service: true,
     msg: '🛎 The receptionist looks up and smiles.',
   },
+
+  // ---- FreshMart Superstore ------------------------------------------------
+  // The supermarket props open the shopping UI instead of applying effects on
+  // the spot (see `usePropSpot` in game.js); `shop` marks that family.
+  shelf: {
+    verb: 'Shop the aisle', icon: '🛒', pose: 'stand', cooldown: 0.2, action: 'shop',
+    effects: {}, stat: 'visits', shop: true,
+    msg: '🛒 You browse the shelf.',
+  },
+  fridge: {
+    verb: 'Open the chiller', icon: '🧊', pose: 'stand', cooldown: 0.2, action: 'shop',
+    effects: {}, stat: 'visits', shop: true,
+    msg: '🧊 Cold air rolls out of the chiller.',
+  },
+  produce: {
+    verb: 'Pick fresh produce', icon: '🥬', pose: 'stand', cooldown: 0.2, action: 'shop',
+    effects: {}, stat: 'visits', shop: true,
+    msg: '🥬 You turn a tomato over in your hand.',
+  },
+  bakery: {
+    verb: 'Look in the bakery case', icon: '🥖', pose: 'stand', cooldown: 0.2, action: 'shop',
+    effects: {}, stat: 'visits', shop: true,
+    msg: '🥖 Warm bread, still steaming.',
+  },
+  till: {
+    verb: 'Pay at the till', icon: '💳', pose: 'stand', cooldown: 0.2, action: 'pay',
+    effects: {}, stat: 'visits', shop: true,
+    msg: '💳 The self-checkout screen wakes up.',
+  },
+  trolley: {
+    verb: 'Take a trolley', icon: '🛒', pose: 'stand', cooldown: 0.2, action: 'cart',
+    effects: {}, stat: 'visits', shop: true,
+    msg: '🛒 You pull a trolley free of the stack.',
+  },
 };
 
 /**
@@ -339,7 +373,21 @@ export function isInteractable(propType) {
   return !!PROP_INTERACTIONS[propType];
 }
 
+/** Supermarket props open the shopping UI rather than applying effects. */
+export function isShopProp(propType) {
+  return !!(PROP_INTERACTIONS[propType] && PROP_INTERACTIONS[propType].shop);
+}
+
+// Screens use the seated pose to watch from, but they are not seats themselves.
+const SCREEN_TYPES = new Set(['tvwall', 'cinema_screen']);
+
+/** A television, media wall or cinema screen: pressing E shows a picture. */
+export function isScreen(propType) {
+  return SCREEN_TYPES.has(propType);
+}
+
 export function isSeating(propType) {
+  if (SCREEN_TYPES.has(propType)) return false;
   const def = interactionFor(propType);
   return !!def && (def.pose === 'sit' || def.pose === 'lie');
 }

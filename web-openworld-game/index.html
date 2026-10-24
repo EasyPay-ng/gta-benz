@@ -25,6 +25,7 @@
       <div class="stat"><span class="label">University</span><span id="hud-uni">Open Enrollment</span></div>
       <div class="stat"><span class="label">Wellbeing</span><span id="hud-well">Rested · 100%</span></div>
       <div class="stat"><span class="label">Garage</span><span id="hud-vehicles">1 vehicle</span></div>
+      <div class="stat hidden" id="hud-tv-row"><span class="label">Screen</span><span id="hud-tv">📺 Off</span></div>
       <div class="stat heat-stat hidden" id="hud-heat-row"><span class="label">Police Heat</span><span id="hud-heat">★☆☆</span></div>
       <div class="stat small"><span class="label" id="hud-day">Day 1 · 08:00</span><span id="hud-payday">Shift in 30s</span></div>
       <div class="stat small"><span class="label">Network</span><span id="hud-net">Single-player</span></div>
@@ -39,20 +40,13 @@
     <div id="side" >
       <canvas id="minimap" width="200" height="200" class="glass"></canvas>
       <div class="side-buttons">
+        <!-- Everything else lives in the phone (O). Only in-the-moment controls stay here. -->
         <button id="btn-account" class="hidden" title="Sign in / switch player">🪪 Account</button>
-        <button id="btn-phone" title="MetroPhone — garage, uni, jobs, messages, wallet &amp; settings (O)">📱 Phone</button>
+        <button id="btn-phone" title="MetroPhone — garage, uni, jobs, messages, wallet, save &amp; settings (O)">📱 Phone</button>
         <button id="btn-camera" title="Toggle 1st / 3rd person &amp; car cockpit view (X / P)">🎥 3rd View</button>
-        <button id="btn-uni" title="Metro Grand University — 1,105 courses, lectures &amp; degrees (U)">🎓 Uni</button>
-        <button id="btn-build" title="3D Architect — build walls, floors, stairs, roofs, furniture &amp; Minecraft blocks (Y)">🏗 Build</button>
-        <button id="btn-garage" title="Garage, telemetry &amp; roadside assist (T)">🛠 Garage</button>
-        <button id="btn-creator" title="Character creator (C)">👤 Look</button>
+        <button id="btn-build" title="3D Architect — build walls, floors, stairs, roofs &amp; furniture (Y)">🏗 Build</button>
         <button id="btn-emotes" title="Character actions &amp; emotes (B / 1–8)">✋ Actions</button>
         <button id="btn-clockout" class="hidden" title="Clock out of your current job">⏹ Clock out</button>
-        <button id="btn-save" title="Save (F5)">💾 Save</button>
-        <button id="btn-load" title="Load (F9)">📂 Load</button>
-        <button id="btn-help" title="Controls (H)">❔ Help</button>
-        <button id="btn-mute" title="Toggle sound (M)">🔊</button>
-        <button id="btn-reset" class="danger" title="Delete save and restart">↺ Reset</button>
       </div>
     </div>
 
@@ -108,7 +102,6 @@
         <button data-key="horn">📯</button>
         <button id="t-phone" type="button" title="MetroPhone">📱</button>
         <button id="t-camera" type="button" title="Toggle 1st / 3rd person camera">🎥</button>
-        <button id="t-uni" type="button" title="Metro Grand University">🎓</button>
         <button id="t-build" type="button" title="Build mode">🏗</button>
         <button id="t-emote" type="button">✋</button>
       </div>
@@ -127,15 +120,30 @@
             <input id="login-pin" name="pin" type="password" maxlength="32" autocomplete="current-password" placeholder="4–32 letters or numbers" />
           </label>
           <p id="login-error" class="login-error hidden"></p>
+          <p id="cloud-status" class="hint hidden"></p>
           <div class="row">
             <button id="login-go" class="primary" type="submit">Continue</button>
             <button id="login-guest" type="button">Play as guest</button>
           </div>
         </form>
-        <p class="hint">First time? <b>Continue</b> creates your account with that PIN. Guests can play, but their name isn't reserved and they won't keep their spot.</p>
-        <div class="row login-alt">
-          <button id="login-offline" class="ghost" type="button">Play offline (no city server)</button>
+        <p class="hint">This city lives on the server. <b>Continue</b> creates your account with that PIN, and your wallet, cars, groceries and builds follow the name to any device. Guests can walk around, but nothing they do is kept — and a city started offline is replaced the moment the server is reachable.</p>
+      </div>
+    </div>
+
+    <!-- ===== No server, no city (online-only build) ===== -->
+    <div id="offline-gate" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="offline-title">
+      <div class="modal-card glass login-card">
+        <h2 id="offline-title">The city is <span class="accent">offline</span></h2>
+        <p class="sub">MetroVenture has no offline copy any more — your wallet, cars and streets live on the city server. Point the game at one and it will remember it on this device.</p>
+        <label class="field">Server address
+          <input id="offline-server" spellcheck="false" autocomplete="off" placeholder="wss://your-worker.workers.dev/ws?room=metro-1" />
+        </label>
+        <p id="offline-error" class="login-error hidden"></p>
+        <div class="row">
+          <button id="offline-connect" class="primary" type="button">Connect</button>
+          <button id="offline-retry" class="ghost" type="button">Retry</button>
         </div>
+        <p class="hint">Running it yourself? <code>npm run dev</code> serves the game and the city server on one port. Deployed Worker? Use <code>wss://&lt;worker&gt;.workers.dev/ws?room=metro-1</code>.</p>
       </div>
     </div>
 
@@ -197,8 +205,8 @@
               <li><kbd>B</kbd> / <kbd>1–8</kbd>: emotes &amp; dances</li>
               <li><kbd>V</kbd>: valet · <kbd>T</kbd>: garage &amp; roadside assist</li>
               <li><kbd>U</kbd>: Metro Grand University (1,105 courses)</li>
-              <li><kbd>O</kbd>: MetroPhone — garage, uni, jobs, messages, wallet, map, build, look &amp; settings in one phone UI</li>
-              <li><kbd>Y</kbd>: 3D Architect — build &amp; furnish walls, floors, stairs, roofs &amp; furniture, plus a full <b>Minecraft block</b> palette (18 blocks on a 1 m grid — stack them like voxels)</li>
+              <li><kbd>O</kbd>: MetroPhone — garage, uni, jobs, messages, wallet, map, build, look, save/load &amp; settings all live here. The side buttons are only for things you reach for mid-action.</li>
+              <li><kbd>Y</kbd>: 3D Architect — build &amp; furnish walls, floors, stairs, roofs, pillars &amp; furniture anywhere in the city</li>
               <li><kbd>E</kbd> at a door: open / close it · at a sofa, bed, TV, desk, gym machine or shop counter: use it (with a full animation — drink, eat, play the piano, take a pool shot…)</li>
               <li><kbd>E</kbd> at a TV or the cinema screen: the screen switches on and plays a channel; you take a seat facing it</li>
               <li><kbd>E</kbd> at a glowing <b>Metro Lift</b>: ride to any floor or the Sky Deck</li>

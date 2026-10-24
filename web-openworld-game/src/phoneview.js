@@ -86,6 +86,7 @@ export function screenHtml(vm, appId) {
   if (appId === 'messages') return phoneMessagesHtml(vm);
   if (appId === 'wallet') return phoneHead(app, 'Cash & assets') + phoneWalletHtml(vm);
   if (appId === 'map') return phoneHead(app, 'Nearby places') + phoneMapHtml(vm);
+  if (appId === 'groceries') return phoneHead(app, 'FreshMart · list & pantry') + phoneGroceriesHtml(vm);
   if (appId === 'build') return phoneHead(app, '3D Architect') + phoneBuildHtml(vm);
   if (appId === 'wardrobe') return phoneHead(app, 'Look & wardrobe') + phoneLookHtml(vm);
   if (appId === 'settings') return phoneHead(app, 'Game options') + phoneSettingsHtml(vm);
@@ -236,15 +237,56 @@ function phoneMapHtml(vm) {
   </div>`;
 }
 
+function phoneGroceriesHtml(vm) {
+  const c = Phone.groceryCard(vm.state);
+  const listRows = c.list.map((i) => `<div class="pc-row">
+      <span class="pc-muted">${i.icon} ${i.name}</span>
+      <span>${i.got ? '✅ in pantry' : '—'}</span>
+    </div>`).join('');
+  const basketRows = c.basket.length
+    ? c.basket.map((l) => `<div class="pc-row">
+        <span class="pc-muted">${l.icon} ${l.name} ×${l.qty}</span>
+        <span>$${l.line.toFixed(2)}</span>
+      </div>`).join('')
+    : '<p>Empty — walk into FreshMart on the waterfront and fill it.</p>';
+  const pantryRows = c.pantry.length
+    ? c.pantry.map((p) => `<div class="pc-row" style="gap:8px">
+        <span class="pc-muted">${p.icon} ${p.name} ×${p.qty}</span>
+        ${p.edible ? `<button class="phone-btn" data-phone-act="eatGood" data-good="${p.id}">Eat</button>` : '<span class="pc-muted">household</span>'}
+      </div>`).join('')
+    : '<p>Nothing in the cupboards yet — a full trolley at FreshMart fixes that.</p>';
+  return `<div class="phone-scroll">
+    <div class="pc">
+      <h4>🧾 This week’s list — ${c.listLabel}</h4>
+      ${listRows}
+      <div class="pc-row"><span class="pc-muted">Wallet</span><span>${money(vm.state.cash)}</span></div>
+    </div>
+    <div class="pc">
+      <h4>🧺 Trolley ${c.basketCount ? `(${c.basketCount})` : ''}</h4>
+      ${basketRows}
+      ${c.basketCount ? `<div class="pc-row"><span class="pc-muted">Total at the till</span><span><b>$${c.basketTotal.toFixed(2)}</b></span></div>` : ''}
+    </div>
+    <div class="pc">
+      <h4>🥫 Pantry (${c.pantryCount})</h4>
+      ${pantryRows}
+    </div>
+    <div class="pc">
+      <h4>📊 Shopping habits</h4>
+      <div class="pc-row"><span class="pc-muted">Trips to FreshMart</span><span>${c.shops}</span></div>
+      <div class="pc-row"><span class="pc-muted">Spent on groceries</span><span>$${Number(c.spent).toFixed(2)}</span></div>
+    </div>
+  </div>`;
+}
+
 function phoneBuildHtml(vm) {
   const b = Phone.buildCard(vm.state);
   return `<div class="phone-scroll">
     <div class="pc">
       <h4>🏗 Your builds</h4>
       <div class="pc-row"><span class="pc-muted">Pieces placed</span><span>${b.pieces}</span></div>
-      <div class="pc-row"><span class="pc-muted">Voxel blocks</span><span>${b.blocks}</span></div>
-      <div class="pc-row"><span class="pc-muted">Structures</span><span>${b.structures}</span></div>
-      <p style="margin-top:8px">${b.blockTypes} hand-pixelled Minecraft blocks, walls, floors, stairs, roofs and furniture snap into place with the ghost preview.</p>
+      <div class="pc-row"><span class="pc-muted">Structure</span><span>${b.structures}</span></div>
+      <div class="pc-row"><span class="pc-muted">Furniture</span><span>${b.furniture}</span></div>
+      <p style="margin-top:8px">${b.itemTypes} pieces — walls, floors, stairs, roofs, pillars and furniture — snap into place with the ghost preview.</p>
       <div class="phone-btns"><button class="phone-btn primary" data-phone-act="openBuild">🏗 Enter Build Mode</button></div>
     </div>
     <div class="pc"><h4>🎮 Controls</h4><p><b>E</b> place · <b>X</b> demolish · <b>Q</b>/<b>R</b> rotate · <b>C</b> colour · <b>Tab</b> item · <b>PgUp</b>/<b>PgDn</b> storey</p></div>

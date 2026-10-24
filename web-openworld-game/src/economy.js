@@ -19,6 +19,7 @@ import {
 } from './university.js';
 import { normalizeBuildState } from './build.js';
 import { createLeisureState, normalizeLeisureState } from './props.js';
+import { createGroceryState, normalizeGroceryState } from './groceries.js';
 
 // Small deterministic PRNG so citizens look the same for every new game.
 export function mulberry32(seed) {
@@ -93,6 +94,7 @@ export function createInitialState(wallNow = Date.now()) {
     academic: createAcademicState(),
     builds: { pieces: [] },
     leisure: createLeisureState(),
+    groceries: createGroceryState(dayOf(nowInGame)),
     activeJob: null,
     jobXP,
     businesses,
@@ -130,6 +132,7 @@ export function migrateState(raw, wallNow = Date.now()) {
   s.academic = normalizeAcademicState(raw.academic);
   s.builds = normalizeBuildState(raw.builds);
   s.leisure = normalizeLeisureState(raw.leisure);
+  s.groceries = normalizeGroceryState(raw.groceries, dayOf(inGameNowMs(s.clock || base.clock, wallNow)));
   s.jobXP = { ...base.jobXP, ...(raw.jobXP || {}) };
   s.businesses = { ...base.businesses, ...(raw.businesses || {}) };
   for (const id of Object.keys(s.businesses)) {

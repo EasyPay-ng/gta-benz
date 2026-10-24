@@ -7,8 +7,10 @@ import {
 } from './data.js';
 import { mulberry32 } from './economy.js';
 import * as Interiors from './interiors.js';
+import * as Streaming from './streaming.js';
 import * as Props from './props.js';
 import { PUBLIC_PLACES, DISTRICT } from './publicPlaces.js';
+import { AISLES, CAT_COLORS, GOODS, goodsIn, goodsInAisle } from './groceries.js';
 import {
   makeAsphaltPBR,
   makeFlagstonePBR,
@@ -258,6 +260,15 @@ export class City {
     this._buildStreetLamps();
     this._buildSidewalkGraph();
     this._buildOutskirts();
+
+    // ---- endless city: procedural district cells around the player --------
+    this.streamRoot = new THREE.Group();
+    this.streamRoot.name = 'streamed-districts';
+    this.root.add(this.streamRoot);
+    this.streamCells = new Map();
+    this.streamStats = { cells: 0, buildings: 0 };
+    this._streamPlaneGeo = new THREE.PlaneGeometry(1, 1);
+    this._streamAcc = 0;
   }
 
   // ----- helpers -----------------------------------------------------------
@@ -361,6 +372,19 @@ export class City {
 
   isTVOn(mesh) {
     return !!this._tv && this._tv.active.has(mesh);
+  }
+
+  /** Label of the channel currently airing (visible in the HUD). */
+  channelName() {
+    const tv = this._tv;
+    if (!tv || !tv.active.size) return '';
+    const names = ['Metro News', 'Metro Sports', 'Benny & the Metro Crew', 'The Long Road'];
+    return names[tv.channel % names.length];
+  }
+
+  /** Count of screens currently switched on. */
+  tvCount() {
+    return this._tv ? this._tv.active.size : 0;
   }
 
   _drawScreen(target, mode, t) {
@@ -950,6 +974,8 @@ export class City {
     const inside = this.buildingAt(x, z);
     if (!inside) return this.ceilingY(x, z);
     const b = inside.building;
+    // generated shopfronts are a single 4.2 m room under a solid upper mass
+    if (b.streamed) return b.baseY + (b.shellH || 4.2) - 0.12;
     if (b.kind !== 'tower') return b.baseY + Math.max(2.6, (b.height || 4) - 0.35);
     const level = Math.max(0, Math.min(b.floors, Math.round((feetY - b.baseY) / Interiors.FLOOR_HEIGHT)));
     if (level >= b.floors) return null;
@@ -1157,25 +1183,28 @@ export class City {
   // =========================================================================
   // Interactable furniture spots
   // =========================================================================
-  _registerPropSpot({ buildingId = null, level = 0, type, x, z, y = CURB_Y, rot = 0, name = '', screen = null }) {
+  _registerPropSpot({ buildingId = null, level = 0, type, x, z, y = CURB_Y, rot = 0, name = '', screen = null, extra = null }) {
     if (!Props.isInteractable(type)) return null;
     const def = Props.interactionFor(type);
     const spot = {
       type, x: +x.toFixed(2), z: +z.toFixed(2), y: +y.toFixed(2), rot: +rot.toFixed(3),
       buildingId, level, name: name || def.verb, icon: def.icon, screen,
     };
+    if (extra && typeof extra === 'object') Object.assign(spot, extra);
     this.propSpots.push(spot);
     return spot;
   }
 
   /** Register every prop of a frame-local interior and return the persisted list. */
-  _registerFrameProps(building, frame, props, level = 0) {
+  _registerFrameProps(building, frame, props, level = 0, groups = null) {
     const list = [];
-    for (const prop of props) {
+    for (let i = 0; i < props.length; i++) {
+      const prop = props[i];
       const world = this.toWorld(frame, prop.x, prop.z);
       const spot = this._registerPropSpot({
         buildingId: building.id, level, type: prop.type,
         x: world.x, z: world.z, y: building.baseY + 0.1, rot: prop.rot + (frame.face === 1 ? 0 : Math.PI),
+        screen: groups?.[i]?.userData?.screen || null,
       });
       if (spot) list.push(spot);
     }
@@ -1254,6 +1283,229 @@ export class City {
     this.addCollider(x - 0.32, x + 0.32, z - 0.32, z + 0.32);
     this.palms.push({ x, z });
     return g;
+  }
+
+  /**
+   * FreshMart Superstore — a big-box grocery you actually shop in: five dry
+   * aisles of shelving, a chiller wall, a produce island, a bakery counter and
+   * four self-checkout tills. Every one of them is an interactive prop spot.
+   */
+  _buildSupermarket(place) {
+    const { id, name, width: w, depth: d, height: h, yaw, color } = place;
+    const m = this._propMaterials();
+    const g = new THREE.Group();
+    g.position.set(place.x, CURB_Y, place.z);
+    g.rotation.y = yaw;
+    this.root.add(g);
+
+    const building = {
+      id, kind: 'hall', name, x: place.x, z: place.z, width: w, depth: d, height: h,
+      baseY: CURB_Y, floors: 0, themeId: place.themeId, seed: 4711, yaw, shop: 'supermarket',
+    };
+    this.enterables.push(building);
+    this.interiorFurniture[id] = [];
+
+    const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.4, metalness: 0.35 });
+    const cream = m.white;
+    const t = 0.6;
+    const doorW = 8.0; const doorH = 4.6;
+    const front = d / 2;
+
+    // ---- shell -------------------------------------------------------------
+    this.box(g, 0, 0.07, 0, w - 1.2, 0.14, d - 1.2, m.marble, { cast: false });
+    this.box(g, 0, h - 0.3, 0, w - 0.4, 0.4, d - 0.4, cream);
+    this.box(g, 0, h + 0.35, 0, w + 0.8, 0.5, d + 0.8, accent);
+    this.box(g, 0, h + 0.75, 0, w + 1.2, 0.22, d + 1.2, this.mats.darkMetal);
+    // back + side walls
+    this.box(g, 0, h / 2, -d / 2, w, h, t, cream);
+    this.frameWorldCollider(building, 0, -d / 2, w, t);
+    for (const sx of [-w / 2, w / 2]) {
+      this.box(g, sx, h / 2, 0, t, h, d, cream);
+      this.frameWorldCollider(building, sx, 0, t, d);
+    }
+    // glazed shopfront either side of the sliding entrance
+    const segW = (w - doorW) / 2;
+    for (const sgn of [-1, 1]) {
+      const x = sgn * (doorW / 2 + segW / 2);
+      this.box(g, x, h / 2, front, segW, h, t, cream);
+      this.frameWorldCollider(building, x, front, segW, t);
+      this.box(g, x, 2.55, front + t / 2 + 0.02, Math.max(1, segW - 2.4), 3.9, 0.12, this.mats.glass, { cast: false });
+      this.box(g, x, 0.6, front + t / 2 + 0.02, Math.max(1, segW - 2.4), 1.2, 0.14, cream, { cast: false });
+      this.box(g, x, 4.6, front + t / 2 + 0.02, Math.max(1, segW - 2.4), 0.22, t + 0.12, accent, { cast: false });
+    }
+    this.box(g, 0, doorH + (h - doorH) / 2, front, doorW + 0.5, h - doorH, t + 0.1, cream);
+    // entrance canopy + trolley bay
+    this.box(g, 0, 4.9, front + 1.5, doorW + 5.0, 0.32, 3.2, accent);
+    for (const sgn of [-1, 1]) {
+      this.box(g, sgn * (doorW / 2 + 2.0), 2.45, front + 2.8, 0.36, 4.9, 0.36, cream);
+      this.box(g, sgn * (doorW / 2 + 2.0), 0.1, front + 2.8, 0.9, 0.2, 0.9, m.dark);
+    }
+    this.sign(g, ['FRESHMART', 'SUPERSTORE · OPEN 24/7'], 0, h + 1.5, front + 0.1, Math.min(w - 4, 20), 2.2, {
+      bg: '#052e16', fg: '#f0fdf4', border: color,
+    });
+    this.sign(g, ['🛒 FRESH EVERY DAY'], 0, 4.55, front + 0.42, 7.4, 0.9, {
+      bg: '#16a34a', fg: '#f0fdf4',
+    });
+
+    // interior lining: painted walls, skirting and high clerestory windows
+    this._interiorWalls(g, {
+      w: w - 1.0, d: d - 1.0, h: h - 0.45,
+      sill: 4.9, head: Math.min(h - 1.4, 7.2),
+      doorW: 8.2, doorH: 4.6, warm: false,
+    });
+
+    // ceiling light panels down the shop
+    for (let lz = -7; lz <= 7; lz += 3.5) {
+      for (const lx of [-9, 0, 9]) this.box(g, lx, h - 0.42, lz, 5.0, 0.1, 0.6, m.glow, { cast: false, receive: false });
+    }
+
+    // ---- aisles ------------------------------------------------------------
+    const shelfH = 1.85;
+    const shelfD = 1.5;
+    const shelfL = 10;
+    const aisleZ = -2;
+    AISLES.forEach((aisle, i) => {
+      const lx = -12 + i * 6;
+      this.box(g, lx, shelfH / 2, aisleZ, shelfD, shelfH, shelfL, m.metal);
+      // three shelf decks, both faces, stocked with coloured product blocks
+      const goods = goodsInAisle(aisle.id);
+      for (const side of [-1, 1]) {
+        for (let level = 0; level < 3; level++) {
+          const y = 0.28 + level * 0.58;
+          this.box(g, lx + side * (shelfD / 2 + 0.02), y, aisleZ, 0.06, 0.06, shelfL - 0.2, m.white, { cast: false });
+          this.box(g, lx + side * (shelfD / 2 - 0.02), y + 0.42, aisleZ, 0.05, 0.05, shelfL - 0.2, m.white, { cast: false });
+        }
+      }
+      // product cartons stand in for stock on the front face
+      for (let k = 0; k < 12; k++) {
+        const good = GOODS[goods[k % goods.length]];
+        if (!good) continue;
+        const pz = aisleZ - shelfL / 2 + 0.7 + k * 0.78;
+        const side = k % 2 === 0 ? 1 : -1;
+        const tone = new THREE.Color(good.icon === '🕯' ? '#fde68a' : CAT_COLORS[good.cat] || '#e5e7eb');
+        const box = new THREE.Mesh(this.boxGeo, this._stockMat(tone));
+        box.scale.set(0.5, 0.34, 0.5);
+        box.position.set(lx + side * (shelfD / 2 + 0.22), 0.22 + (k % 3) * 0.58, pz);
+        box.castShadow = true;
+        g.add(box);
+      }
+      this.frameWorldCollider(building, lx, aisleZ, shelfD, shelfL);
+      // hanging aisle sign
+      this.sign(g, [aisle.id, aisle.label.toUpperCase()], lx, 4.35, aisleZ + shelfL / 2 + 0.4, 3.0, 1.15, {
+        bg: '#0b1220', fg: '#f8fafc', border: aisle.color,
+      });
+      this._registerPropSpot({
+        buildingId: id, type: 'shelf', x: place.x + lx, z: place.z + aisleZ + shelfL / 2 - 0.9, y: CURB_Y,
+        rot: yaw, name: `${aisle.id} · ${aisle.label}`, extra: { aisle: aisle.id, goods: goodsInAisle(aisle.id) },
+      });
+    });
+
+    // ---- chiller wall ------------------------------------------------------
+    const chZ = -d / 2 + 0.9;
+    this.box(g, 0, 1.35, chZ, w - 4, 2.7, 1.1, m.metal);
+    for (const cx of [-9, 0, 9]) {
+      this.box(g, cx, 1.35, chZ + 0.58, 7.4, 2.5, 0.08, this.mats.glass, { cast: false });
+      for (let k = 0; k < 3; k++) {
+        this.box(g, cx, 0.42 + k * 0.78, chZ + 0.5, 7.2, 0.07, 0.5, m.white, { cast: false });
+        this.box(g, cx, 0.78 + k * 0.78, chZ + 0.3, 7.0, 0.06, 0.06, m.glow, { cast: false });
+      }
+      this.box(g, cx, 2.72, chZ + 0.6, 7.4, 0.14, 0.2, accent, { cast: false });
+    }
+    this.frameWorldCollider(building, 0, chZ, w - 4, 1.1);
+    this.sign(g, ['CHILLED & FROZEN'], 0, 3.0, chZ + 0.75, 8.0, 1.0, { bg: '#0c4a6e', fg: '#e0f2fe' });
+    this._registerPropSpot({
+      buildingId: id, type: 'fridge', x: place.x, z: place.z + chZ + 1.6, y: CURB_Y,
+      rot: yaw, name: 'Chiller wall',
+      extra: { goods: [...goodsIn('chilled'), ...goodsIn('frozen')] },
+    });
+
+    // ---- produce island ----------------------------------------------------
+    const prX = -w / 2 + 2.0;
+    this.box(g, prX, 0.45, -1, 2.6, 0.9, 7.2, m.wood);
+    this.box(g, prX, 0.95, -1, 2.7, 0.12, 7.3, m.woodDark);
+    for (let k = 0; k < 6; k++) {
+      const zz = -3.6 + k * 1.05;
+      this.box(g, prX - 0.5, 1.12, zz, 0.9, 0.34, 0.8, this._stockMat(CAT_COLORS.produce), { cast: false });
+      this.box(g, prX + 0.58, 1.12, zz + 0.2, 0.9, 0.34, 0.8, this._stockMat(CAT_COLORS.bakery), { cast: false });
+    }
+    this.frameWorldCollider(building, prX, -1, 2.7, 7.4);
+    this.sign(g, ['FRESH PRODUCE'], prX, 2.3, 2.9, 4.2, 0.9, { bg: '#14532d', fg: '#dcfce7' });
+    this._registerPropSpot({
+      buildingId: id, type: 'produce', x: place.x + prX, z: place.z + 3.4, y: CURB_Y,
+      rot: yaw, name: 'Fresh produce', extra: { goods: goodsIn('produce') },
+    });
+
+    // ---- bakery counter ----------------------------------------------------
+    const bkX = w / 2 - 2.0;
+    this.box(g, bkX, 0.5, -1, 2.6, 1.0, 7.2, m.woodDark);
+    this.box(g, bkX, 1.25, -1, 2.7, 1.4, 7.3, this.mats.glass, { cast: false });
+    for (let k = 0; k < 5; k++) {
+      const zz = -3.4 + k * 1.3;
+      this.box(g, bkX, 1.12, zz, 2.2, 0.14, 0.9, this._stockMat(CAT_COLORS.bakery), { cast: false });
+    }
+    this.box(g, bkX, 2.05, -1, 2.8, 0.16, 7.4, m.wood);
+    this.frameWorldCollider(building, bkX, -1, 2.7, 7.4);
+    this.sign(g, ['BAKERY'], bkX, 2.55, 2.9, 3.4, 0.85, { bg: '#78350f', fg: '#fef3c7' });
+    this._registerPropSpot({
+      buildingId: id, type: 'bakery', x: place.x + bkX, z: place.z + 3.4, y: CURB_Y,
+      rot: yaw, name: 'Bakery counter', extra: { goods: goodsIn('bakery') },
+    });
+
+    // ---- self-checkout tills ----------------------------------------------
+    const laneX = [-10.5, -3.5, 3.5, 10.5];
+    laneX.forEach((lx, i) => {
+      this.box(g, lx, 0.5, 6.5, 3.2, 1.0, 1.3, m.white);
+      this.box(g, lx, 1.05, 6.5, 3.3, 0.12, 1.4, m.dark, { cast: false });
+      this.box(g, lx - 0.9, 1.5, 6.15, 0.8, 0.8, 0.24, m.black);        // belt screen
+      this.box(g, lx - 0.9, 1.55, 6.0, 0.66, 0.5, 0.05, m.screen, { cast: false });
+      this.box(g, lx + 1.2, 1.2, 6.5, 0.15, 1.5, 0.15, m.metal);
+      this.box(g, lx + 1.2, 1.95, 6.5, 0.5, 0.34, 0.3, m.led, { cast: false });
+      this.box(g, lx, 2.7, 6.5, 1.2, 0.5, 0.1, accent, { cast: false });
+      this.sign(g, [`TILL ${i + 1}`], lx, 3.15, 6.4, 1.6, 0.5, { bg: '#052e16', fg: '#bbf7d0' });
+      this.frameWorldCollider(building, lx, 6.5, 3.2, 1.3);
+      this._registerPropSpot({
+        buildingId: id, type: 'till', x: place.x + lx, z: place.z + 7.35, y: CURB_Y,
+        rot: yaw, name: `Self-checkout · till ${i + 1}`, extra: { till: i + 1 },
+      });
+    });
+
+    // ---- trolley bay -------------------------------------------------------
+    for (let k = 0; k < 6; k++) {
+      const tx = -6.2 + k * 0.42;
+      this.box(g, tx, 0.52, 8.4, 0.5, 0.9, 1.4, m.metal, { cast: false });
+      this.box(g, tx, 1.0, 8.4, 0.5, 0.1, 1.4, accent, { cast: false });
+    }
+    this.frameWorldCollider(building, -5.2, 8.4, 3.2, 1.4);
+    this._registerPropSpot({
+      buildingId: id, type: 'trolley', x: place.x - 5.2, z: place.z + 9.0, y: CURB_Y,
+      rot: yaw, name: 'Trolley bay',
+    });
+
+    // a checkout desk prompt so the store is listed with the other services
+    this._registerServiceSpot({
+      placeId: id,
+      serviceId: 'supermarket',
+      name,
+      prompt: 'FreshMart Superstore — self-checkout & groceries',
+      x: place.x, z: place.z + 7.9, y: CURB_Y,
+    });
+
+    // ---- entrance marker, doors & map pin ----------------------------------
+    this._addSwingDoor({
+      x: place.x + Math.sin(yaw) * front,
+      z: place.z + Math.cos(yaw) * front,
+      yaw, width: doorW, height: doorH, leaves: 2,
+      label: `${name} entrance`, buildingId: id,
+    });
+    const marker = this._marker(new THREE.Color(color));
+    const mx = place.x + Math.sin(yaw) * (front + 7.5);
+    const mz = place.z + Math.cos(yaw) * (front + 7.5);
+    marker.position.set(mx, CURB_Y + 0.04, mz);
+    this.root.add(marker);
+    this.stationMarkers.push(marker);
+    this.districtSpots.push({ x: mx, z: mz, id, name, icon: place.icon, place });
+
+    return building;
   }
 
   _buildCivicHall(place) {
@@ -1436,6 +1688,13 @@ export class City {
           { type: 'planter', x: -hw + 2.0, z: hd - 2.4, rot: 0 },
           { type: 'planter', x: hw - 2.0, z: hd - 2.4, rot: 0 },
           { type: 'cinema_screen', x: 0, z: -hd + 0.9, rot: 0 },
+          // cinema seating facing the screen (E seats you facing the picture)
+          { type: 'bench', x: -3.6, z: -hd + 5.2, rot: Math.PI },
+          { type: 'bench', x: 0, z: -hd + 5.2, rot: Math.PI },
+          { type: 'bench', x: 3.6, z: -hd + 5.2, rot: Math.PI },
+          { type: 'bench', x: -3.6, z: -hd + 7.4, rot: Math.PI },
+          { type: 'bench', x: 0, z: -hd + 7.4, rot: Math.PI },
+          { type: 'bench', x: 3.6, z: -hd + 7.4, rot: Math.PI },
         ].filter((p, i, arr) => {
           // the cinema screen lives on the east wing; keep it clear of the counters
           if (p.type === 'cinema_screen') return true;
@@ -1607,6 +1866,8 @@ export class City {
         this.root.add(marker);
         this.stationMarkers.push(marker);
         this.districtSpots.push({ x: marker.position.x, z: marker.position.z, id: place.id, name: place.name, icon: place.icon, place });
+      } else if (place.type === 'supermarket') {
+        this._buildSupermarket(place);
       } else {
         this._buildCivicHall(place);
       }
@@ -1700,6 +1961,7 @@ export class City {
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.root.add(ground);
+    this.groundMesh = ground; // follows the player so the horizon never ends
   }
 
   _buildRoads() {
@@ -2122,8 +2384,9 @@ export class City {
       this.frameCollider(frame, 6.4, -9.2, 1.2, 2.8);
       for (const x of [-12, -6, 6, 12]) this.box(g, x, 0.02, 8, 0.2, 0.02, 5, this.mats.white, { cast: false });
     }
+    const propGroups = [];
     for (const prop of props) {
-      this._addProp(g, prop);
+      propGroups.push(this._addProp(g, prop));
       const spec = Interiors.PROP_SPECS[prop.type];
       if (spec && spec.collide) {
         const world = this.toWorld(frame, prop.x, prop.z);
@@ -2133,7 +2396,7 @@ export class City {
         });
       }
     }
-    this._registerFrameProps(building, frame, props);
+    this._registerFrameProps(building, frame, props, 0, propGroups);
     this.box(g, 0, 0.06, -9, 3.4, 0.06, 12.4, m.cream, { cast: false }); // entry runner rug
 
     // interior reception pad (press E at the desk)
@@ -2212,6 +2475,8 @@ export class City {
       { type: 'planter', x: -9.2, z: -5.2, rot: 0 },
       { type: 'planter', x: 9.2, z: -5.2, rot: 0 },
       { type: 'tvwall', x: -6.0, z: -7.6, rot: 0 },
+      { type: 'armchair', x: -6.0, z: -4.4, rot: Math.PI },
+      { type: 'armchair', x: -3.4, z: -4.9, rot: Math.PI },
     ];
     const dealerGroups = dealerProps.map((prop) => this._addProp(showroom, prop));
     this._registerWorldProps(showroomBuilding, dealerProps, 0, dealerGroups);
@@ -2329,8 +2594,9 @@ export class City {
       { type: 'sofa', x: 6.2, z: -5.2, rot: 0 },
       { type: 'sculpture', x: 0, z: -8.4, rot: 0 },
     ];
+    const shopGroups = [];
     for (const prop of props) {
-      this._addProp(g, prop);
+      shopGroups.push(this._addProp(g, prop));
       const spec = Interiors.PROP_SPECS[prop.type];
       if (spec && spec.collide) {
         const world = this.toWorld(frame, prop.x, prop.z);
@@ -2340,7 +2606,7 @@ export class City {
         });
       }
     }
-    this._registerFrameProps(shop, frame, props);
+    this._registerFrameProps(shop, frame, props, 0, shopGroups);
     // fitting rooms (velvet booths with mirrors)
     for (const sx of [-9.4, 9.4]) {
       this.box(g, sx, 1.4, -12.6, 2.4, 2.8, 2.4, velvetMat);
@@ -2537,13 +2803,14 @@ export class City {
         { type: 'deskpair', x: bw / 2 - 3.8, z: cz - 2.2, rot: -Math.PI / 2 },
         { type: 'planter', x: bw / 2 - 2.2, z: cz + 4.6, rot: 0 },
       ];
+      const lobbyGroups = [];
       for (const prop of lobbyProps) {
-        this._addProp(g, prop);
+        lobbyGroups.push(this._addProp(g, prop));
         const spec = Interiors.PROP_SPECS[prop.type];
         if (spec && spec.collide) this.frameCollider(frame, prop.x, prop.z, spec.w, spec.d, list);
       }
       const techBuilding = this.buildingById(lotId);
-      if (techBuilding) this._registerFrameProps(techBuilding, frame, lobbyProps);
+      if (techBuilding) this._registerFrameProps(techBuilding, frame, lobbyProps, 0, lobbyGroups);
       const techDoor = this.toWorld(frame, 0, front);
       this._addSwingDoor({
         x: techDoor.x, z: techDoor.z, y: CURB_Y,
@@ -2655,8 +2922,9 @@ export class City {
           this.frameCollider(frame, x, z, 1.6, 1.6, list);
         }
       }
+      const lotGroups = [];
       for (const prop of props) {
-        this._addProp(g, prop);
+        lotGroups.push(this._addProp(g, prop));
         const spec = Interiors.PROP_SPECS[prop.type];
         if (spec && spec.collide) {
           this.frameCollider(frame, prop.x, prop.z, spec.w, spec.d, list);
@@ -2667,7 +2935,7 @@ export class City {
           });
         }
       }
-      this._registerFrameProps({ id: lotId, baseY: CURB_Y }, frame, props);
+      this._registerFrameProps({ id: lotId, baseY: CURB_Y }, frame, props, 0, lotGroups);
       const lotDoor = this.toWorld(frame, 0, front);
       this._addSwingDoor({
         x: lotDoor.x, z: lotDoor.z, y: CURB_Y,
@@ -3255,7 +3523,10 @@ export class City {
       if (z < DISTRICT.promenadeZ - 1 && ROAD_LINES.some((r) => Math.abs(x - r) < ROAD_HALF + 0.6)) return true;
       return false;
     }
-    if (Math.abs(x) > MAP_EDGE || Math.abs(z) > MAP_EDGE) return false;
+    if (Math.abs(x) > MAP_EDGE || Math.abs(z) > MAP_EDGE) {
+      // beyond the authored centre the street grid repeats forever
+      return Streaming.isGridRoad(x, z);
+    }
     for (const r of ROAD_LINES) if (Math.abs(x - r) < ROAD_HALF || Math.abs(z - r) < ROAD_HALF) return true;
     return false;
   }
@@ -3268,7 +3539,6 @@ export class City {
     }
     // South Waterfront civic district (hotel, hospital, museum, mall, gym, library)
     if (this.inDistrict(x, z)) return this.isOnRoad(x, z) ? 0 : CURB_Y;
-    if (Math.abs(x) > MAP_EDGE || Math.abs(z) > MAP_EDGE) return 0;
     return this.isOnRoad(x, z) ? 0 : CURB_Y;
   }
 
@@ -3334,9 +3604,428 @@ export class City {
       return 'Metro Grand University Quad';
     }
     let bi = 0; let bj = 0;
+    if (Math.abs(x) > MAP_EDGE || Math.abs(z) > MAP_EDGE) return Streaming.streetName(x, z);
     ROAD_LINES.forEach((r, i) => { if (Math.abs(x - r) < Math.abs(x - ROAD_LINES[bi])) bi = i; });
     ROAD_LINES.forEach((r, j) => { if (Math.abs(z - r) < Math.abs(z - ROAD_LINES[bj])) bj = j; });
     return `${STREET_NAMES_X[bi]} & ${STREET_NAMES_Z[bj]}`;
+  }
+
+  // =========================================================================
+  // Endless city — procedural districts streamed in around the player
+  // =========================================================================
+  /** Shared materials for streamed buildings (created once). */
+  /** Cheapest possible way to give shelf stock a colour: one material per hex. */
+  _stockMat(color) {
+    if (!this._stockMats) this._stockMats = new Map();
+    let mat = this._stockMats.get(color);
+    if (!mat) {
+      mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.75, metalness: 0.05 });
+      this._stockMats.set(color, mat);
+    }
+    return mat;
+  }
+
+  _streamMats() {
+    if (this._streamMat) return this._streamMat;
+    const mk = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05, ...extra });
+    this._streamMat = {
+      walls: [0xe7e2d9, 0xded3c4, 0xd5dde6, 0xe6dccb, 0xd9d5e6].map((c) => mk(c, { side: THREE.DoubleSide })),
+      trim: mk(0x6b7280, { roughness: 0.5, metalness: 0.3 }),
+      roof: mk(0x4b5563),
+      floor: mk(0xb8bec8),
+      glass: new THREE.MeshStandardMaterial({
+        color: 0x9fd0e8, transparent: true, opacity: 0.34, roughness: 0.12,
+        metalness: 0.2, depthWrite: false, side: THREE.DoubleSide,
+      }),
+      door: mk(0x6b4b2a, { roughness: 0.7 }),
+    };
+    return this._streamMat;
+  }
+
+  /** Flat quad helper for streamed cell ground, roads & pavements. */
+  _streamPlane(group, x, z, w, d, mat, y = 0.02) {
+    const p = new THREE.Mesh(this._streamPlaneGeo, mat);
+    p.scale.set(w, d, 1);
+    p.rotation.x = -Math.PI / 2;
+    p.position.set(x, y, z);
+    p.receiveShadow = true;
+    group.add(p);
+    return p;
+  }
+
+  _streamTree(group, x, z, scale = 1) {
+    const g = new THREE.Group();
+    g.position.set(x, CURB_Y, z);
+    const trunk = new THREE.Mesh(this.trunkGeo, this.mats.trunk);
+    trunk.scale.setScalar(scale);
+    trunk.position.y = 1.25 * scale;
+    trunk.castShadow = true;
+    g.add(trunk);
+    // same leafy puffs as the hand-planted trees downtown
+    const clusters = [[0, 3.3, 0, 1.15], [-0.7, 2.75, 0.3, 0.85], [0.72, 2.8, -0.28, 0.88]];
+    for (const [cx, cy, cz, cr] of clusters) {
+      const puff = new THREE.Mesh(this.foliageGeo, this.mats.leaf);
+      puff.scale.set(cr * scale, cr * 0.84 * scale, cr * scale);
+      puff.position.set(cx * scale, cy * scale, cz * scale);
+      puff.castShadow = true;
+      puff.receiveShadow = true;
+      g.add(puff);
+    }
+    group.add(g);
+    this.addCollider(x - 0.3, x + 0.3, z - 0.3, z + 0.3);
+  }
+
+  _streamLamp(group, x, z) {
+    const m = this._streamMats();
+    this.box(group, x, CURB_Y + 2.6, z, 0.16, 5.2, 0.16, m.trim);
+    this.box(group, x, CURB_Y + 5.2, z, 0.9, 0.16, 0.3, m.trim);
+    this.box(group, x + 0.34, CURB_Y + 5.05, z, 0.36, 0.14, 0.24, this.mats.glow || m.trim, { cast: false });
+  }
+
+  /**
+   * Build one streamed building: a walk-in ground-floor room with a glazed
+   * shopfront, a working door, a name board and a couple of props, plus a
+   * solid upper mass with window bands when the building is tall.
+   */
+  _buildStreamBuilding(spec, group, rec = null) {
+    const m = this._streamMats();
+    const w = spec.width;
+    const d = spec.depth;
+    const tower = spec.height > 12;
+    const shellH = tower ? 4.2 : spec.height;
+    const t = 0.45;
+    const wallMat = m.walls[Math.abs(spec.seed) % m.walls.length];
+
+    const building = {
+      id: spec.id, kind: 'shop', name: spec.name,
+      x: spec.x, z: spec.z, width: w, depth: d, height: spec.height,
+      baseY: CURB_Y, floors: 0, yaw: spec.yaw, themeId: spec.themeId,
+      seed: spec.seed, streamed: true, shellH,
+    };
+    this.enterables.push(building);
+    this.interiorFurniture[building.id] = [];
+
+    const g = new THREE.Group();
+    g.position.set(spec.x, CURB_Y, spec.z);
+    g.rotation.y = spec.yaw;
+    group.add(g);
+
+    const front = d / 2;
+    const doorW = Math.max(2.6, Math.min(w - 4, spec.doorWidth));
+    const doorH = spec.doorHeight;
+    const segW = Math.max(0.4, (w - doorW) / 2);
+
+    // floor, ceiling, walls
+    this.box(g, 0, 0.03, 0, w - 0.3, 0.05, d - 0.3, m.floor, { cast: false });
+    this.box(g, 0, shellH - 0.14, 0, w, 0.28, d, m.roof);
+    this.box(g, 0, shellH / 2, -d / 2, w, shellH, t, wallMat);
+    this.frameWorldCollider(building, 0, -d / 2, w, t);
+    for (const sx of [-w / 2, w / 2]) {
+      this.box(g, sx, shellH / 2, 0, t, shellH, d, wallMat);
+      this.frameWorldCollider(building, sx, 0, t, d);
+    }
+    for (const sgn of [-1, 1]) {
+      const x = sgn * (doorW / 2 + segW / 2);
+      this.box(g, x, shellH / 2, front, segW, shellH, t, wallMat);
+      this.frameWorldCollider(building, x, front, segW, t);
+      if (segW > 3.2) {
+        this.box(g, x, 2.15, front + 0.02, segW - 1.1, 2.4, 0.1, m.glass, { cast: false });
+        this.box(g, x, 0.9, front + 0.02, segW - 1.1, 0.16, 0.26, m.trim, { cast: false });
+        this.box(g, x, 3.42, front + 0.02, segW - 1.1, 0.14, 0.26, m.trim, { cast: false });
+      }
+    }
+    // lintel above the doorway (walk underneath it)
+    this.box(g, 0, doorH + (shellH - doorH) / 2, front, doorW + 0.5, Math.max(0.2, shellH - doorH), t, wallMat);
+
+    // name board (its texture + plane are created just for this building)
+    const board = this.sign(g, [spec.name.toUpperCase(), tower ? 'OFFICES' : 'OPEN'], 0, 4.15,
+      front + 0.26, Math.min(w - 2.4, 9), 1.4, { bg: spec.color, fg: '#111827' });
+    board.userData.ownedMat = true;
+    board.userData.ownedGeo = true;
+
+    if (tower) {
+      // solid upper mass with window bands
+      const upH = spec.height - shellH;
+      this.box(g, 0, shellH + upH / 2, 0, w - 0.5, upH, d - 0.5, wallMat);
+      for (let y = shellH + 1.6; y < spec.height - 1.2; y += 3.4) {
+        this.box(g, 0, y, 0, w - 0.02, 1.15, d - 0.02, m.glass, { cast: false });
+      }
+      this.box(g, 0, spec.height + 0.2, 0, w * 0.45, 0.4, d * 0.45, m.trim);
+    }
+
+    // roof edge trim
+    this.box(g, 0, shellH + 0.12, 0, w + 0.3, 0.2, d + 0.3, m.trim);
+
+    // street door
+    const dx = Math.sin(spec.yaw) * front;
+    const dz = Math.cos(spec.yaw) * front;
+    const door = this._addSwingDoor({
+      x: spec.x + dx, z: spec.z + dz, y: CURB_Y, yaw: spec.yaw,
+      width: doorW, height: doorH, label: `${spec.name} doors`, buildingId: building.id,
+    });
+    // the swing door lives in this.root, so the cell has to remember to take it away
+    door.root.traverse((o) => {
+      if (!o.isMesh) return;
+      o.userData.ownedMat = true;
+      if (!door.root.userData.cellDoors) door.root.userData.cellDoors = [];
+    });
+    if (rec) rec.doors.push(door);
+
+    // interior props so the room is worth walking into
+    const rand = Streaming.randFrom(spec.seed);
+    const catalog = ['reception', 'sofa', 'bookshelf', 'counter', 'planter', 'dinetable', 'desk', 'lamp'];
+    const props = [];
+    const count = w > 18 ? 3 : 2;
+    for (let k = 0; k < count; k++) {
+      const type = catalog[Math.floor(rand() * catalog.length) % catalog.length];
+      props.push({
+        type,
+        x: +((rand() - 0.5) * Math.max(1, w - 8)).toFixed(2),
+        z: +(-d / 2 + 2.4 + rand() * Math.max(1, d - 6)).toFixed(2),
+        rot: rand() < 0.5 ? 0 : Math.PI,
+      });
+    }
+    const propGroups = props.map((prop) => this._addProp(g, prop));
+    this._registerWorldProps(building, props, 0, propGroups);
+
+    // camera/clamping zone for the single room
+    this.interiorZones.push({
+      minX: spec.x - w / 2, maxX: spec.x + w / 2,
+      minZ: spec.z - d / 2, maxZ: spec.z + d / 2,
+      ceilingY: CURB_Y + shellH,
+    });
+
+    return building;
+  }
+
+  /**
+   * Bake every plain box in a streamed cell into one mesh per material.
+   * A cell is built from hundreds of boxes; without this a few loaded cells
+   * would cost thousands of draw calls.
+   */
+  _mergeStreamCell(group) {
+    group.updateMatrixWorld(true);
+    const buckets = new Map();
+    const victims = [];
+    group.traverse((o) => {
+      if (!o.isMesh || o.geometry !== this.boxGeo) return;
+      if (o.userData.keepMesh) return;
+      const key = `${o.material.uuid}|${o.castShadow ? 1 : 0}|${o.receiveShadow ? 1 : 0}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = { material: o.material, cast: o.castShadow, receive: o.receiveShadow, meshes: [] };
+        buckets.set(key, bucket);
+      }
+      bucket.meshes.push(o);
+      victims.push(o);
+    });
+    if (!victims.length) return 0;
+
+    const box = this.boxGeo;
+    const bp = box.attributes.position;
+    const bn = box.attributes.normal;
+    const bu = box.attributes.uv;
+    const bi = box.index;
+    const m4 = new THREE.Matrix4();
+    const nm = new THREE.Matrix3();
+    const v = new THREE.Vector3();
+
+    for (const bucket of buckets.values()) {
+      const count = bucket.meshes.length;
+      const vCount = count * bp.count;
+      const iCount = count * bi.count;
+      const pos = new Float32Array(vCount * 3);
+      const nor = new Float32Array(vCount * 3);
+      const uvs = new Float32Array(vCount * 2);
+      const idx = vCount > 65535 ? new Uint32Array(iCount) : new Uint16Array(iCount);
+      let vo = 0;
+      let io = 0;
+      for (const mesh of bucket.meshes) {
+        m4.copy(mesh.matrixWorld);
+        nm.getNormalMatrix(m4);
+        for (let k = 0; k < bp.count; k++) {
+          v.fromBufferAttribute(bp, k).applyMatrix4(m4);
+          pos[(vo + k) * 3] = v.x; pos[(vo + k) * 3 + 1] = v.y; pos[(vo + k) * 3 + 2] = v.z;
+          v.fromBufferAttribute(bn, k).applyMatrix3(nm).normalize();
+          nor[(vo + k) * 3] = v.x; nor[(vo + k) * 3 + 1] = v.y; nor[(vo + k) * 3 + 2] = v.z;
+          uvs[(vo + k) * 2] = bu.getX(k); uvs[(vo + k) * 2 + 1] = bu.getY(k);
+        }
+        for (let k = 0; k < bi.count; k++) idx[io + k] = bi.getX(k) + vo;
+        vo += bp.count;
+        io += bi.count;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.computeBoundingSphere();
+      geo.computeBoundingBox();
+      const merged = new THREE.Mesh(geo, bucket.material);
+      merged.castShadow = bucket.cast;
+      merged.receiveShadow = bucket.receive;
+      merged.userData.ownedGeo = true;
+      group.add(merged);
+    }
+    for (const mesh of victims) if (mesh.parent) mesh.parent.remove(mesh);
+    return victims.length;
+  }
+
+  /** Tag every record this cell appended so it can be removed by identity. */
+  _tagStreamCell(rec, from) {
+    const tag = (arr, start) => {
+      for (let k = start; k < arr.length; k++) {
+        const o = arr[k];
+        if (o && typeof o === 'object' && !Object.prototype.hasOwnProperty.call(o, '__streamCell')) {
+          Object.defineProperty(o, '__streamCell', { value: rec.key, configurable: true, writable: true, enumerable: false });
+        }
+      }
+    };
+    tag(this.colliders, from.colliders0);
+    tag(this.enterables, from.enterables0);
+    tag(this.propSpots, from.propSpots0);
+    tag(this.doors, from.doors0);
+    tag(this.interiorZones, from.zones0);
+  }
+
+  /** Free the textures/geometries that only this cell owned. */
+  _disposeStreamCell(rec) {
+    const mats = new Set();
+    const geos = new Set();
+    const collect = (obj) => {
+      obj.traverse((o) => {
+        if (!o.isMesh) return;
+        if (o.userData.ownedMat && o.material && !mats.has(o.material)) mats.add(o.material);
+        if (o.userData.ownedGeo && o.geometry && !geos.has(o.geometry)) geos.add(o.geometry);
+      });
+    };
+    collect(rec.group);
+    for (const door of rec.doors) if (door.root) collect(door.root);
+    for (const m of mats) { if (m.map) m.map.dispose(); m.dispose(); }
+    for (const g of geos) g.dispose();
+    rec.doors.length = 0;
+  }
+
+  /** Strip records tagged to a cell out of one of the city registries. */
+  _stripStreamCell(arr, key) {
+    for (let k = arr.length - 1; k >= 0; k--) {
+      const o = arr[k];
+      if (o && o.__streamCell === key) arr.splice(k, 1);
+    }
+  }
+
+  /** Build everything inside one 300 m cell and remember what to remove. */
+  _loadStreamCell(i, j) {
+    const layout = Streaming.cellLayout(i, j);
+    const group = new THREE.Group();
+    group.name = `cell:${layout.key}`;
+    this.streamRoot.add(group);
+
+    const rec = {
+      i, j, key: layout.key, group,
+      colliders0: this.colliders.length,
+      enterables0: this.enterables.length,
+      propSpots0: this.propSpots.length,
+      doors0: this.doors.length,
+      zones0: this.interiorZones.length,
+      doors: [],
+      buildingIds: [],
+    };
+
+    const b = layout.bounds;
+    const midX = (b.minX + b.maxX) / 2;
+    const midZ = (b.minZ + b.maxZ) / 2;
+    const span = Streaming.CELL;
+
+    // pavement pads under every block so the districts are paved, not lawn
+    for (let bi = 0; bi < layout.padsX.length - 1; bi++) {
+      for (let bj = 0; bj < layout.padsZ.length - 1; bj++) {
+        const x0 = layout.padsX[bi] + Streaming.ROAD_HALF;
+        const x1 = layout.padsX[bi + 1] - Streaming.ROAD_HALF;
+        const z0 = layout.padsZ[bj] + Streaming.ROAD_HALF;
+        const z1 = layout.padsZ[bj + 1] - Streaming.ROAD_HALF;
+        this._streamPlane(group, (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0, this.mats.sidewalk, 0.08);
+      }
+    }
+
+    // roads (vertical slightly lower than horizontal to avoid z-fighting)
+    for (const x of layout.roadsX) {
+      this._streamPlane(group, x, midZ, Streaming.ROAD_HALF * 2, span, this.mats.roadZ, 0.02);
+    }
+    for (const z of layout.roadsZ) {
+      this._streamPlane(group, midX, z, span, Streaming.ROAD_HALF * 2, this.mats.roadX, 0.021);
+    }
+
+    for (const spec of layout.buildings) {
+      const building = this._buildStreamBuilding(spec, group, rec);
+      rec.buildingIds.push(building.id);
+    }
+    for (const t of layout.trees) this._streamTree(group, t.x, t.z, t.scale);
+    for (const lamp of layout.lamps) this._streamLamp(group, lamp.x, lamp.z);
+
+    this._mergeStreamCell(group);
+    this._tagStreamCell(rec, rec);
+    this.streamCells.set(layout.key, rec);
+    this.rebuildColliderCache();
+    return rec;
+  }
+
+  /** Drop a cell and everything it registered. */
+  _unloadStreamCell(key) {
+    const rec = this.streamCells.get(key);
+    if (!rec) return false;
+    for (const door of rec.doors) if (door.root) this.root.remove(door.root);
+    this.streamRoot.remove(rec.group);
+    this._disposeStreamCell(rec);
+    for (const id of rec.buildingIds) {
+      delete this.interiorFurniture[id];
+      delete this.indoorFurniture?.[id];
+    }
+    this._stripStreamCell(this.colliders, key);
+    this._stripStreamCell(this.enterables, key);
+    this._stripStreamCell(this.propSpots, key);
+    this._stripStreamCell(this.doors, key);
+    this._stripStreamCell(this.interiorZones, key);
+    this.streamCells.delete(key);
+    this.rebuildColliderCache();
+    return true;
+  }
+
+  /** Load the cells around (x, z), drop the ones left behind. Budgeted. */
+  updateStreaming(x, z, { radius = Streaming.STREAM_RADIUS, budget = 1 } = {}) {
+    let unloaded = 0;
+    for (const [key, rec] of this.streamCells) {
+      if (Streaming.shouldUnload(rec, x, z, radius + 1)) {
+        this._unloadStreamCell(key);
+        unloaded += 1;
+      }
+    }
+
+    let built = 0;
+    for (const cell of Streaming.cellsAround(x, z, radius)) {
+      if (built >= budget) break;
+      if (Streaming.isCoreCell(cell.i, cell.j)) continue;
+      if (this.streamCells.has(cell.key)) continue;
+      this._loadStreamCell(cell.i, cell.j);
+      built += 1;
+    }
+
+    this._followGround(x, z);
+    this.streamStats.cells = this.streamCells.size;
+    this.streamStats.buildings = this.streamCells.size
+      ? [...this.streamCells.values()].reduce((n, c) => n + c.buildingIds.length, 0)
+      : 0;
+    return { built, unloaded };
+  }
+
+  /** Keep the ground plane under the player so the horizon never runs out. */
+  _followGround(x, z) {
+    if (!this.groundMesh) return;
+    const snap = 200;
+    const gx = Math.round(x / snap) * snap;
+    const gz = Math.round(z / snap) * snap;
+    if (this.groundMesh.position.x !== gx) this.groundMesh.position.x = gx;
+    if (this.groundMesh.position.z !== gz) this.groundMesh.position.z = gz;
   }
 
   update(t, dt = 0) {

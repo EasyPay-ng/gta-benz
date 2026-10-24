@@ -178,15 +178,15 @@ test('Phone: wallet, build and map cards', async () => {
   assert.equal(w.vehicles, 1);
 
   s.builds.pieces = [
-    { id: 'a', item: 'block_stone', x: 0, y: 0, z: 0, rot: 0, color: '#ffffff' },
-    { id: 'b', item: 'block_glass', x: 1, y: 0, z: 0, rot: 0, color: '#ffffff' },
-    { id: 'c', item: 'wall_solid', x: 2, y: 0, z: 0, rot: 0, color: '#ffffff' },
+    { id: 'a', item: 'wall_solid', x: 0, y: 0, z: 0, rot: 0, color: '#ffffff' },
+    { id: 'b', item: 'floor_wood', x: 1, y: 0, z: 0, rot: 0, color: '#ffffff' },
+    { id: 'c', item: 'sofa', x: 2, y: 0, z: 0, rot: 0, color: '#ffffff' },
   ];
   const b = P.buildCard(s);
   assert.equal(b.pieces, 3);
-  assert.equal(b.blocks, 2);
-  assert.equal(b.structures, 1);
-  assert.ok(b.blockTypes >= 12);
+  assert.equal(b.structures, 2);
+  assert.equal(b.furniture, 1);
+  assert.ok(b.itemTypes >= 15);
 
   const near = P.nearbyPlaces(0, 0, 5);
   assert.equal(near.length, 5);

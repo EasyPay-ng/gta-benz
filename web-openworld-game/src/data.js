@@ -1,7 +1,7 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 9; // v9: interactive furniture & doors, rest/energy, hotel stays & the South Waterfront public district
+export const SAVE_VERSION = 10; // v10: FreshMart groceries, trolley, pantry & shopping list
 
 export const STARTING_CASH = 500;
 export const PAYROLL_INTERVAL = 30; // real seconds per 12-in-game-minute shift (30s * 24 = 720s = 12m)
@@ -28,7 +28,7 @@ export const SIDEWALK_W = 3;         // sidewalk width
 export const BLOCK_HALF = 27.5;      // half the buildable interior of a block
 export const SIDEWALK_RING = 29;     // half-size of the walkable sidewalk ring around a block
 export const BLOCK_CENTERS = [-112.5, -37.5, 37.5, 112.5];
-export const WORLD_LIMIT = 242;
+export const WORLD_LIMIT = 4000;      // hard safety bound; the city itself streams forever
 
 // Roads along X (constant z) and along Z (constant x)
 export const STREET_NAMES_Z = ['1st St', '2nd St', 'Central St', '4th St', '5th St'];          // roads at z = ROAD_LINES[i]
@@ -441,7 +441,7 @@ export const CITIZEN_NAMES = [
 // ---------------------------------------------------------------------------
 // Character Jump & Expressive Emotes (feature 2 — see UPGRADE_PLAN.md §2)
 // ---------------------------------------------------------------------------
-export const JUMP_VELOCITY = 4.6;    // m/s upward impulse (~1.04 m apex — clears a 1 m voxel block)
+export const JUMP_VELOCITY = 4.35;   // m/s upward impulse (~0.95 m apex)
 export const JUMP_GRAVITY = 10.2;    // m/s² downward acceleration
 
 export const EMOTES = [
@@ -512,104 +512,6 @@ export const BUILD_COLORS = [
 ];
 
 
-// ---------------------------------------------------------------------------
-// Minecraft-style voxel blocks (1 m cubes painted with 16×16 pixel-art textures)
-// Every block lists the colours for its top / side / bottom face; game.js turns
-// these into NearestFilter canvas textures so the build looks hand-pixelled.
-// ---------------------------------------------------------------------------
-export const BLOCK_SIZE = 1.0;
-
-export const BLOCK_ART = {
-  grass: {
-    top: { p: 'speckle', base: '#5ea83f', alt: '#4f9433' },
-    side: { p: 'grassSide', base: '#8b5a2b', alt: '#7a4a22', fringe: '#5ea83f', fringe2: '#4f9433' },
-    bottom: { p: 'noise', base: '#8b5a2b', alt: '#7a4a22' },
-  },
-  dirt: {
-    top: { p: 'noise', base: '#8b5a2b', alt: '#7a4a22' },
-    side: { p: 'noise', base: '#8b5a2b', alt: '#7a4a22' },
-    bottom: { p: 'noise', base: '#8b5a2b', alt: '#7a4a22' },
-  },
-  stone: {
-    top: { p: 'speckle', base: '#909090', alt: '#7d7d7d' },
-    side: { p: 'speckle', base: '#8e8e8e', alt: '#7b7b7b' },
-    bottom: { p: 'speckle', base: '#8a8a8a', alt: '#787878' },
-  },
-  cobble: {
-    top: { p: 'cobble', base: '#8c8c8c', alt: '#6f6f6f' },
-    side: { p: 'cobble', base: '#868686', alt: '#696969' },
-    bottom: { p: 'cobble', base: '#828282', alt: '#656565' },
-  },
-  planks: {
-    top: { p: 'planks', base: '#b5854b', alt: '#9c6f3c' },
-    side: { p: 'planks', base: '#ad7d45', alt: '#946838' },
-    bottom: { p: 'planks', base: '#a97a43', alt: '#906436' },
-  },
-  log: {
-    top: { p: 'logTop', base: '#b5854b', alt: '#8a6134' },
-    side: { p: 'log', base: '#6b4b2a', alt: '#5a3d22' },
-    bottom: { p: 'logTop', base: '#b5854b', alt: '#8a6134' },
-  },
-  brick: {
-    top: { p: 'brick', base: '#a34a3c', alt: '#8b3a2e', mortar: '#c9b8a8' },
-    side: { p: 'brick', base: '#a34a3c', alt: '#8b3a2e', mortar: '#c9b8a8' },
-    bottom: { p: 'brick', base: '#9b4437', alt: '#83352a', mortar: '#c9b8a8' },
-  },
-  sand: {
-    top: { p: 'speckle', base: '#dbcf9a', alt: '#cfc088' },
-    side: { p: 'speckle', base: '#d7ca93', alt: '#cbbc83' },
-    bottom: { p: 'speckle', base: '#d3c68f', alt: '#c7b87f' },
-  },
-  glass: {
-    top: { p: 'glass', base: '#cfe8f5', alt: '#eef8fd' },
-    side: { p: 'glass', base: '#cfe8f5', alt: '#eef8fd' },
-    bottom: { p: 'glass', base: '#cfe8f5', alt: '#eef8fd' },
-  },
-  obsidian: {
-    top: { p: 'speckle', base: '#2a1f3d', alt: '#1b1428' },
-    side: { p: 'speckle', base: '#271c39', alt: '#191224' },
-    bottom: { p: 'speckle', base: '#241a35', alt: '#171021' },
-  },
-  gold: {
-    top: { p: 'speckle', base: '#f2c94c', alt: '#d9ab2f' },
-    side: { p: 'speckle', base: '#eec445', alt: '#d4a62c' },
-    bottom: { p: 'speckle', base: '#e9bf42', alt: '#cfa129' },
-  },
-  wool_white: { top: { p: 'wool', base: '#e9ecef', alt: '#dfe3e6' }, side: { p: 'wool', base: '#e5e8eb', alt: '#dbdfe2' }, bottom: { p: 'wool', base: '#e1e4e7', alt: '#d7dbde' } },
-  wool_red: { top: { p: 'wool', base: '#c0392b', alt: '#a93226' }, side: { p: 'wool', base: '#bb3729', alt: '#a43024' }, bottom: { p: 'wool', base: '#b63426', alt: '#9f2d22' } },
-  wool_orange: { top: { p: 'wool', base: '#e08a2e', alt: '#c47826' }, side: { p: 'wool', base: '#db852c', alt: '#bf7324' }, bottom: { p: 'wool', base: '#d68028', alt: '#ba6f22' } },
-  wool_yellow: { top: { p: 'wool', base: '#e8c93a', alt: '#d4b52f' }, side: { p: 'wool', base: '#e4c437', alt: '#cfb02c' }, bottom: { p: 'wool', base: '#dfbf34', alt: '#caab2a' } },
-  wool_green: { top: { p: 'wool', base: '#3a9a4a', alt: '#2f803c' }, side: { p: 'wool', base: '#379547', alt: '#2c7b39' }, bottom: { p: 'wool', base: '#349045', alt: '#297637' } },
-  wool_blue: { top: { p: 'wool', base: '#2f6fd0', alt: '#275fae' }, side: { p: 'wool', base: '#2c6ac7', alt: '#245aa6' }, bottom: { p: 'wool', base: '#2965c0', alt: '#2255a0' } },
-  wool_black: { top: { p: 'wool', base: '#2b2b2b', alt: '#212121' }, side: { p: 'wool', base: '#292929', alt: '#1f1f1f' }, bottom: { p: 'wool', base: '#272727', alt: '#1d1d1d' } },
-};
-
-export const BLOCK_ITEMS = [
-  { id: 'block_grass',   block: 'grass',       icon: '🌱', name: 'Grass Block',   defaultColor: '#5ea83f' },
-  { id: 'block_dirt',    block: 'dirt',        icon: '🟫', name: 'Dirt Block',    defaultColor: '#8b5a2b' },
-  { id: 'block_stone',   block: 'stone',       icon: '⬜', name: 'Stone Block',   defaultColor: '#8e8e8e' },
-  { id: 'block_cobble',  block: 'cobble',      icon: '🪨', name: 'Cobblestone',   defaultColor: '#868686' },
-  { id: 'block_planks',  block: 'planks',      icon: '🪵', name: 'Oak Planks',    defaultColor: '#b5854b' },
-  { id: 'block_log',     block: 'log',         icon: '🪓', name: 'Oak Log',       defaultColor: '#6b4b2a' },
-  { id: 'block_brick',   block: 'brick',       icon: '🧱', name: 'Brick Block',   defaultColor: '#a34a3c' },
-  { id: 'block_sand',    block: 'sand',        icon: '🟨', name: 'Sand Block',    defaultColor: '#dbcf9a' },
-  { id: 'block_glass',   block: 'glass',       icon: '🪟', name: 'Glass Block',   defaultColor: '#cfe8f5' },
-  { id: 'block_obsidian',block: 'obsidian',    icon: '⬛', name: 'Obsidian',      defaultColor: '#2a1f3d' },
-  { id: 'block_gold',    block: 'gold',        icon: '🏅', name: 'Gold Block',    defaultColor: '#f2c94c' },
-  { id: 'block_wool_white',  block: 'wool_white',  icon: '🤍', name: 'White Wool',  defaultColor: '#e9ecef' },
-  { id: 'block_wool_red',    block: 'wool_red',    icon: '🟥', name: 'Red Wool',    defaultColor: '#c0392b' },
-  { id: 'block_wool_orange', block: 'wool_orange', icon: '🟧', name: 'Orange Wool', defaultColor: '#e08a2e' },
-  { id: 'block_wool_yellow', block: 'wool_yellow', icon: '🟨', name: 'Yellow Wool', defaultColor: '#e8c93a' },
-  { id: 'block_wool_green',  block: 'wool_green',  icon: '🟩', name: 'Green Wool',  defaultColor: '#3a9a4a' },
-  { id: 'block_wool_blue',   block: 'wool_blue',   icon: '🟦', name: 'Blue Wool',   defaultColor: '#2f6fd0' },
-  { id: 'block_wool_black',  block: 'wool_black',  icon: '⬛', name: 'Black Wool',  defaultColor: '#2b2b2b' },
-];
-
-const BLOCK_ITEM_DEFS = BLOCK_ITEMS.map((b) => ({
-  id: b.id, cat: 'block', icon: b.icon, name: b.name, grid: BLOCK_SIZE, dist: 3.4,
-  block: b.block, defaultColor: b.defaultColor,
-}));
-
 export const BUILD_ITEMS = [
   // --- Structure (snaps cleanly to a 4m architectural grid; supports multi-story stacking!) ---
   { id: 'floor_stone',  cat: 'structure', icon: '⬜', name: 'Marble Floor (4×4m)',   grid: 4.0, dist: 4.2, defaultColor: '#f1f5f9' },
@@ -632,9 +534,6 @@ export const BUILD_ITEMS = [
   { id: 'bookshelf',    cat: 'furniture', icon: '📚', name: 'Tall Bookshelf',        grid: 0.5, dist: 3.0, defaultColor: '#78350f' },
   { id: 'lamp',         cat: 'furniture', icon: '💡', name: 'Warm Floor Lamp',       grid: 0.5, dist: 2.8, defaultColor: '#f59e0b' },
   { id: 'plant',        cat: 'furniture', icon: '🪴', name: 'Indoor Palm Plant',     grid: 0.5, dist: 2.8, defaultColor: '#065f46' },
-
-  // --- Minecraft-style voxel blocks (1×1×1 m cubes on a 1 m grid) ----------
-  ...BLOCK_ITEM_DEFS,
 ];
 
 

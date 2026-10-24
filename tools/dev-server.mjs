@@ -48,6 +48,32 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Accounts & cloud saves live in the Worker; proxy them so the page can call
+  // them same-origin (no CORS surprises, one port for everything).
+  if (url.pathname.startsWith('/api/')) {
+    if (process.env.OFFLINE === '1') {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, code: 'offline', message: 'Cloud saves are off in offline mode.' }));
+      return;
+    }
+    const upstream = http.request({
+      host: WS_HOST,
+      port: WS_PORT,
+      path: req.url,
+      method: req.method,
+      headers: { ...req.headers, host: `${WS_HOST}:${WS_PORT}` },
+    }, (up) => {
+      res.writeHead(up.statusCode || 502, up.headers);
+      up.pipe(res);
+    });
+    upstream.on('error', () => {
+      res.writeHead(502, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, code: 'network', message: 'The city server is not running.' }));
+    });
+    req.pipe(upstream);
+    return;
+  }
+
   let rel = decodeURIComponent(url.pathname);
   if (rel === '/') rel = '/index.html';
   const file = path.join(WEB, rel);
@@ -82,5 +108,6 @@ server.on('upgrade', (req, socket, head) => {
 server.listen(PORT, HOST, () => {
   console.log(`\n  MetroVenture 3D     http://localhost:${PORT}`);
   console.log(`  WebSocket proxy     ws://localhost:${PORT}/ws?room=${ROOM}`);
+  console.log(`  Accounts & saves    http://localhost:${PORT}/api/*`);
   console.log(`  Upstream city server ${WS_HOST}:${WS_PORT} (start it with: npm --prefix server run dev)\n`);
 });

@@ -8,23 +8,24 @@ import {
   ROADSIDE_CALLOUT_FEE, ROADSIDE_FUEL_FEE, ROADSIDE_FUEL_AMOUNT, TELEMETRY_HZ,
   EMOTES, CAR_LIVERIES, RIM_FINISHES, UNDERGLOW_OPTIONS, RESPRAY_COST, CLOTHING_ITEMS, OUTFIT_BUNDLES,
   CAM_COCKPIT_YAW_MAX, BUILD_ITEMS, BUILD_COLORS, BUILD_STORY_H, MAX_CUSTOM_BUILDS,
-  BLOCK_ART, BLOCK_SIZE,
 } from './src/data.js';
 import * as Eco from './src/economy.js';
 import * as VCond from './src/vehicleCond.js';
 import * as Time from './src/time.js';
+import * as Streaming from './src/streaming.js';
 import * as VCard from './src/vehCard.js';
 import * as Heat from './src/heat.js';
 import * as Cust from './src/customization.js';
 import * as Cam from './src/camera.js';
 import * as Uni from './src/university.js';
 import * as Build from './src/build.js';
-import * as Paint from './src/pixelart.js';
 import * as Phone from './src/phone.js';
 import * as PhoneView from './src/phoneview.js';
 import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
+import * as Groceries from './src/groceries.js';
+import { CloudClient, saveEnvelope, bootPolicy, offlineAllowed, normalizeServerUrl } from './src/cloud.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -665,7 +666,18 @@ function snapshotState() {
 function saveGame(silent = false) {
   try {
     snapshotState();
-    localStorage.setItem(SAVE_KEY, JSON.stringify(game.state));
+    if (cityServerUrl) {
+      // Online: never write a local save. A guest has no account to keep it, and
+      // an offline copy would only be deleted on the next boot anyway.
+      if (!net?.account) {
+        if (!silent) toast('👤 Guests start fresh next visit — sign in to keep this city.', 'warn');
+        return false;
+      }
+      queueCloudSave(0);
+    } else {
+      localStorage.setItem(SAVE_KEY, JSON.stringify(game.state));
+      try { localStorage.setItem(SAVE_AT_KEY, String(Date.now())); } catch { /* private mode */ }
+    }
     if (!silent) toast('💾 Game saved', 'good');
     return true;
   } catch (err) {
@@ -675,6 +687,11 @@ function saveGame(silent = false) {
 }
 
 function loadGame(silent = false) {
+  if (cityServerUrl) {
+    // the cloud copy loads on sign-in; there is no local save to fall back on
+    if (!silent) toast('☁️ Your city loads from the server when you sign in.', '');
+    return false;
+  }
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) { if (!silent) toast('No save found yet. Press F5 to save.', 'bad'); return false; }
   try {
@@ -688,9 +705,21 @@ function loadGame(silent = false) {
   }
 }
 
+/** Delete whatever this device still holds from the offline era. */
+function clearLocalSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(SAVE_AT_KEY);
+  } catch { /* private mode */ }
+}
+
 function resetGame() {
   if (!window.confirm('Delete your save and start a brand new city?')) return;
-  localStorage.removeItem(SAVE_KEY);
+  clearLocalSave();
+  // the cloud copy is the real one now, so wipe it too when the player resets
+  if (cloud) {
+    cloud.deleteSave().then((res) => { if (res.ok) cloudRevision = 0; });
+  }
   game.state = Eco.createInitialState();
   applyState();
   closeModal();
@@ -1022,7 +1051,7 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
       e.preventDefault(); sfx.ensure();
       if (b.id === 't-emote') { openEmotesModal(); return; }
       if (b.id === 't-camera') { toggleCameraMode(); return; }
-      if (b.id === 't-uni') { openUniversity(); return; }
+      if (b.id === 't-phone') { if (game.phoneOpen) closePhone(); else phoneOpen(); return; }
       if (b.id === 't-build') { toggleBuildMode(); return; }
       if (anyOverlay()) return;
       if (key === 'interact') interact();
@@ -1073,6 +1102,17 @@ function updateHUD(force = false) {
     $('hud-job').textContent = 'Off duty';
     $('hud-xpwrap').classList.add('hidden');
     $('btn-clockout').classList.add('hidden');
+  }
+  // live TV / cinema state so you can see the picture is really on
+  const tvRow = $('hud-tv-row');
+  if (tvRow) {
+    const on = city.tvCount();
+    tvRow.classList.toggle('hidden', !on);
+    if (on) {
+      const ch = city.channelName();
+      const el = $('hud-tv');
+      if (el) el.textContent = `📺 ${ch || 'On air'}`;
+    }
   }
   $('hud-startups').textContent = `${Eco.builtCount(s)} / ${Object.keys(BUSINESSES).length}`;
   $('hud-employment').textContent = `${Eco.employedCount(s)} / ${TOTAL_CITIZENS} citizens hired`;
@@ -1222,6 +1262,13 @@ phoneEl?.addEventListener('click', (e) => {
     case 'openGarage': closePhone(); openGarageModal(); break;
     case 'openUni': closePhone(); openUniversity(); break;
     case 'clockOut': doClockOut(); renderPhone(); break;
+    case 'eatGood': {
+      const res = Groceries.eatFromPantry(game.state, act.dataset.good);
+      if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); } else { sfx.error(); toast(res.msg, 'warn'); }
+      renderPhone();
+      updateHUD(true);
+      break;
+    }
     case 'openBuild': closePhone(); toggleBuildMode(true); break;
     case 'openLook': closePhone(); openCreator(); break;
     case 'camera': toggleCameraMode(); renderPhone(); break;
@@ -1229,7 +1276,7 @@ phoneEl?.addEventListener('click', (e) => {
     case 'save': saveGame(true); toast('💾 Progress saved.', 'good'); renderPhone(); break;
     case 'load': closePhone(); loadGame(); break;
     case 'help': closePhone(); showHelp(); break;
-    case 'reset': closePhone(); $('btn-reset')?.click(); break;
+    case 'reset': closePhone(); resetGame(); break;
     default: break;
   }
 });
@@ -1964,6 +2011,36 @@ function dealerModal() {
 const modalActions = {
   close: () => closeModal(),
   rideLift: ({ level }) => rideElevator(Number(level)),
+
+  // FreshMart
+  addGood: ({ good }) => {
+    const res = Groceries.basketAdd(game.state, good);
+    if (res.ok) { sfx.click(); toast(res.msg, ''); } else { sfx.error(); toast(res.msg, 'warn'); }
+  },
+  takeGood: ({ good }) => {
+    const res = Groceries.basketRemove(game.state, good);
+    if (res.ok) { sfx.click(); toast(res.msg, ''); } else { sfx.error(); toast(res.msg, 'warn'); }
+  },
+  clearBasket: () => {
+    const res = Groceries.basketClear(game.state);
+    sfx.click();
+    toast(res.msg, '');
+  },
+  payBasket: () => {
+    const res = Groceries.checkout(game.state);
+    if (res.ok) {
+      sfx.cash();
+      toast(res.msg, 'good');
+      saveGame(true);
+      updateHUD(true);
+      closeModal();
+    } else {
+      sfx.error();
+      toast(res.msg, 'warn');
+    }
+  },
+  openTill: () => { openTillModal(null); },
+  openTrolley: () => { openTrolleyModal(); },
   openUni: () => { closeModal(); openUniversity(); },
   hotelBook: ({ room, nights }) => {
     const res = Places.bookHotelRoom(game.state, { roomType: room, nights: Number(nights) || 1, day: Time.dayOf(getClock()) });
@@ -2416,11 +2493,9 @@ function closeCreator() {
   saveGame(true);
   if (net) net.setAppearance(game.state.appearance);
 }
+// The side rail only carries in-the-moment controls; everything else is in the phone.
 $('btn-camera')?.addEventListener('click', () => toggleCameraMode());
-$('btn-uni')?.addEventListener('click', () => (game.modal ? closeModal() : openUniversity()));
 $('btn-build')?.addEventListener('click', () => toggleBuildMode());
-$('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
-$('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
 $('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : openEmotesModal()));
 
 // Help
@@ -2434,15 +2509,11 @@ function hideHelp() {
   if (pendingLogin) { pendingLogin = false; showLogin(); }
 }
 $('help-close').addEventListener('click', () => { sfx.ensure(); hideHelp(); });
-$('btn-help').addEventListener('click', showHelp);
-$('btn-save').addEventListener('click', () => saveGame());
-$('btn-load').addEventListener('click', () => loadGame());
-$('btn-reset').addEventListener('click', resetGame);
 function toggleMute() {
   sfx.muted = !sfx.muted;
-  $('btn-mute').textContent = sfx.muted ? '🔇' : '🔊';
+  const el = $('btn-mute');
+  if (el) el.textContent = sfx.muted ? '🔇' : '🔊';
 }
-$('btn-mute').addEventListener('click', () => { sfx.ensure(); toggleMute(); });
 // keep keyboard focus on the game after clicking HUD buttons
 for (const b of document.querySelectorAll('.side-buttons button')) b.addEventListener('click', () => b.blur());
 
@@ -3021,7 +3092,12 @@ function builtPropSpotsNear(x, z, y, radius = 2.6) {
     if (!type || !Props.isInteractable(type)) continue;
     if (Math.abs(piece.y - y) > 1.7) continue;
     const d = Math.hypot(piece.x - x, piece.z - z);
-    if (d < radius) out.push({ type, x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, built: true });
+    if (d < radius) {
+      out.push({
+        type, x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, built: true,
+        screen: game.buildMeshes?.get(piece.id)?.userData?.screen || null,
+      });
+    }
   }
   return out;
 }
@@ -3037,6 +3113,12 @@ function usePropSpot(spot) {
   if (!def) return;
   if (game.seat) { standUpFromProp(); return; }
   if (game.player.vehicle) { toast('Step out of the car first.', 'warn'); return; }
+
+  // FreshMart: shelves, chillers, produce, bakery, tills & the trolley bay all
+  // open the shopping UI instead of applying a one-shot prop effect.
+  if (spot.type === 'trolley') { openTrolleyModal(); return; }
+  if (spot.type === 'till') { openTillModal(spot); return; }
+  if (Props.isShopProp(spot.type)) { openShelfModal(spot); return; }
 
   // Hotel beds are reserved for paying guests
   if (spot.type === 'bed' && spot.buildingId === 'grand_hotel') {
@@ -3055,14 +3137,16 @@ function usePropSpot(spot) {
     return;
   }
 
+  // TV & cinema come first: the cinema screen's interaction is flagged as a
+  // service (the box office), but pressing E on the screen itself must switch
+  // the picture on, not open the ticket desk.
+  if (Props.isScreen(spot.type)) {
+    return watchScreen(spot, def);
+  }
+
   if (def.service) {
     openServiceForBuilding(spot.buildingId);
     return;
-  }
-
-  // TV & cinema: take a seat facing the screen, switch it on and watch it
-  if (spot.type === 'tvwall' || spot.type === 'cinema_screen') {
-    return watchScreen(spot, def);
   }
 
   const res = Props.useProp(s, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
@@ -3099,24 +3183,38 @@ function usePropSpot(spot) {
  * actually shows a channel, and play the watching animation.
  */
 function watchScreen(spot, def) {
-  const p = game.player;
-  const screen = spot.screen || null;
+  const cinema = spot.type === 'cinema_screen';
+  // The screen mesh normally travels with the prop spot; if a spot ever loses
+  // its handle, fall back to the nearest live screen so a TV is never dead.
+  let screen = spot.screen || null;
   if (!screen) {
-    // decorative screen with no live display — fall back to a normal use
-    const res = Props.useProp(game.state, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
-    toast(res.msg, 'good');
+    let bd = 6 * 6;
+    for (const other of allScreenSpots()) {
+      const d = (other.x - spot.x) ** 2 + (other.z - spot.z) ** 2;
+      if (d < bd) { bd = d; screen = other.screen; }
+    }
+  }
+  if (!screen) {
+    const use = Props.useProp(game.state, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
+    toast(use.msg, 'good');
     return;
   }
-  const cinema = spot.type === 'cinema_screen';
+
+  // Pick the nearest seat that actually faces the screen, so you are never
+  // parked on the sofa staring at a wall.
   const seats = city.propSpotsNear(spot.x, spot.z, spot.y, cinema ? 12 : 7)
     .filter((s2) => s2 !== spot && Props.isSeating(s2.type));
   let seat = null;
-  let bestD = Infinity;
+  let bestScore = Infinity;
   for (const s2 of seats) {
-    const d = (s2.x - spot.x) ** 2 + (s2.z - spot.z) ** 2;
-    if (d < bestD) { bestD = d; seat = s2; }
+    const dx = spot.x - s2.x;
+    const dz = spot.z - s2.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const facing = (Math.sin(s2.rot || 0) * dx + Math.cos(s2.rot || 0) * dz) / d;
+    const score = d * (1.7 - Math.max(0, facing));
+    if (score < bestScore) { bestScore = score; seat = s2; }
   }
-  // Face the screen from the seat (screen front is +Z in prop space)
+
   if (seat) {
     const yaw = Math.atan2(spot.x - seat.x, spot.z - seat.z);
     sitOnProp(seat, Props.interactionFor(seat.type), {
@@ -3124,11 +3222,12 @@ function watchScreen(spot, def) {
     });
     game.player.char.playAction(cinema ? 'movie' : 'tv', { loop: true, duration: 30 });
   } else {
+    // no sofa nearby — stand square in front of the screen and watch from there
     const fx = Math.sin(spot.rot || 0);
     const fz = Math.cos(spot.rot || 0);
     const anchor = {
       type: 'tvwall', x: spot.x + fx * 2.1, z: spot.z + fz * 2.1,
-      y: spot.y, rot: Math.atan2(-fx, -fz), buildingId: spot.buildingId,
+      y: spot.y, rot: Math.atan2(-fx, -fz), buildingId: spot.buildingId, screen,
     };
     sitOnProp(anchor, { pose: 'stand', action: '' }, { watch: screen, action: 'tv' });
     game.player.char.seat = null;
@@ -3140,6 +3239,88 @@ function watchScreen(spot, def) {
   city.setTVOn(screen, true);
   sfx.click();
   toast(cinema ? '🎬 The film starts — enjoy the show.' : '📺 You switch the TV on and settle in.', 'good');
+  updateHUD(true);
+}
+
+// ---------------------------------------------------------------------------
+// TVs & cinema screens: switch on whatever the player is actually watching
+// ---------------------------------------------------------------------------
+const TV_SCAN_INTERVAL = 0.3;
+let tvScanT = 0;
+let streamT = 0;
+let streamWarm = true;
+const tvScratch = new THREE.Vector3();
+
+/** Every screen we could switch on: street-level props, the active tower floor
+ *  and anything the player built. Missing screen handles fall back to a scene
+ *  lookup so a TV can never be dead. */
+function allScreenSpots() {
+  const out = [];
+  const seen = new Set();
+  const add = (spot) => {
+    const mesh = spot?.screen;
+    if (!mesh || !mesh.userData?.screen || seen.has(mesh.uuid)) return;
+    seen.add(mesh.uuid);
+    out.push(spot);
+  };
+  for (const s of city.propSpots) add(s);
+  for (const s of city._activePropSpots || []) add(s);
+  for (const [id, group] of game.buildMeshes || []) {
+    const screen = group?.userData?.screen;
+    if (!screen) continue;
+    const piece = (game.state?.builds?.pieces || []).find((p) => p.id === id);
+    if (!piece) continue;
+    add({ type: 'tvwall', x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, screen, built: true });
+  }
+  return out;
+}
+
+/** Nearest screen in front of the player (or of a seat) within `radius`. */
+function screenAhead(radius = 8, minDot = 0.3, from = null) {
+  const p = game.player;
+  const x = from?.x ?? p.x;
+  const z = from?.z ?? p.z;
+  const y = from?.y ?? p.y;
+  const yaw = from?.yaw ?? game.seat?.yaw ?? p.yaw;
+  const fx = Math.sin(yaw); const fz = Math.cos(yaw);
+  let best = null; let bd = Infinity;
+  for (const spot of allScreenSpots()) {
+    const mesh = spot.screen;
+    mesh.getWorldPosition(tvScratch);
+    if (Math.abs(tvScratch.y - (y + 1.2)) > 3.4) continue;
+    const dx = tvScratch.x - x; const dz = tvScratch.z - z;
+    const d = Math.hypot(dx, dz);
+    if (d > radius || d < 0.25) continue;
+    const dot = (dx / d) * fx + (dz / d) * fz;
+    if (dot < minDot) continue;
+    if (d * (1.6 - dot) < bd) { bd = d * (1.6 - dot); best = spot; }
+  }
+  return best;
+}
+
+/**
+ * Keep the screens honest: seated on a sofa (or anywhere) facing a TV switches
+ * it on by itself; standing up or walking away switches it off. The explicit
+ * "Watch TV" prompt does the same thing, just with a seat chosen for you.
+ */
+function updateWatchingTv(dt) {
+  tvScanT -= dt;
+  if (tvScanT > 0) return;
+  tvScanT = TV_SCAN_INTERVAL;
+  const seat = game.seat;
+  if (!seat) return;
+  if (seat.watch) {
+    if (!city.isTVOn(seat.watch)) city.setTVOn(seat.watch, true);
+    return;
+  }
+  const spot = screenAhead(8.5, 0.25);
+  if (!spot) return;
+  seat.watch = spot.screen;
+  city.setTVOn(spot.screen, true);
+  if (!seat.watchToast) {
+    seat.watchToast = true;
+    toast(spot.type === 'cinema_screen' ? '🎬 The film starts — enjoy the show.' : '📺 The screen flickers on.', 'good');
+  }
   updateHUD(true);
 }
 
@@ -3343,6 +3524,7 @@ function placeServiceModal(placeId) {
     if (placeId === 'metro_mall') return mallCard();
     if (placeId === 'metro_gym') return gymCard();
     if (placeId === 'metro_library') return libraryCard();
+    if (placeId === 'freshmart') return tillModal(null);
     return '<h2>Front desk</h2><div class="actions"><button data-action="close">Close</button></div>';
   };
 }
@@ -3438,90 +3620,116 @@ function rideElevator(level) {
 }
 
 // ===========================================================================
+// FreshMart Superstore — shelving, trolley & self-checkout
+// ===========================================================================
+function basketQty(state) {
+  const map = {};
+  for (const line of Groceries.basketLines(state)) map[line.id] = line.qty;
+  return map;
+}
+
+function trolleyLine(summary) {
+  if (!summary.basketCount) return 'empty trolley';
+  return `${summary.basketCount} item${summary.basketCount === 1 ? '' : 's'} · ${money(summary.basketTotal)}`;
+}
+
+function openShelfModal(spot) {
+  openModal(() => shelfModal(spot));
+}
+
+function shelfModal(spot) {
+  const s = game.state;
+  const ids = spot.goods?.length ? spot.goods : Groceries.goodsIn(spot.category || 'produce');
+  const qty = basketQty(s);
+  const sum = Groceries.grocerySummary(s);
+  const rows = ids.map((id) => {
+    const good = Groceries.goodsById(id);
+    if (!good) return '';
+    const have = qty[id] || 0;
+    const effect = good.energy ? `+${good.energy} energy` : (good.comfort ? `+${good.comfort} comfort` : 'household');
+    return `<div class="goods-row">
+      <span class="goods-icon">${good.icon}</span>
+      <span class="goods-name"><b>${good.name}</b><small>${good.unit} · ${effect}</small></span>
+      <span class="goods-price">${money(good.price)}</span>
+      <span class="goods-qty">${have ? `×${have}` : ''}</span>
+      <button data-action="takeGood" data-good="${id}" ${have ? '' : 'disabled'} aria-label="Remove one ${good.name}">−</button>
+      <button class="primary" data-action="addGood" data-good="${id}" aria-label="Add one ${good.name}">+</button>
+    </div>`;
+  }).join('');
+  return `<h2>🛒 ${spot.name || 'FreshMart Superstore'}</h2>
+    <p class="sub">Trolley: <b>${trolleyLine(sum)}</b> · Cash: <b>${money(s.cash)}</b></p>
+    <div class="goods-list">${rows}</div>
+    <div class="actions">
+      <button class="primary" data-action="openTill">🧾 Self-checkout (${money(sum.basketTotal)})</button>
+      <button data-action="openTrolley">🧺 Trolley</button>
+      <button data-action="close">Keep shopping</button>
+    </div>
+    <p class="muted">Walking out with a full trolley is free — the tills are at the front of the store.</p>`;
+}
+
+function openTillModal(spot = null) {
+  openModal(() => tillModal(spot));
+}
+
+function tillModal(spot) {
+  const s = game.state;
+  const lines = Groceries.basketLines(s);
+  const sum = Groceries.grocerySummary(s);
+  const rows = lines.length
+    ? lines.map((line) => `<div class="goods-row">
+        <span class="goods-icon">${line.icon}</span>
+        <span class="goods-name"><b>${line.name}</b><small>${line.qty} × ${money(line.price)}</small></span>
+        <span class="goods-price">${money(line.line)}</span>
+        <button data-action="takeGood" data-good="${line.id}" aria-label="Put one ${line.name} back">−</button>
+      </div>`).join('')
+    : '<p class="muted">Nothing scanned yet — shop the aisles first.</p>';
+  const short = s.cash < sum.basketTotal;
+  return `<h2>💳 ${spot?.name || 'Self-checkout'}</h2>
+    <p class="sub">Beep… beep… · <b>${trolleyLine(sum)}</b> · Cash: <b>${money(s.cash)}</b></p>
+    <div class="goods-list">${rows}</div>
+    <p class="muted">Total <b>${money(sum.basketTotal)}</b>${short ? ' — you are short of cash.' : ''} · Paying stocks your pantry at home.</p>
+    <div class="actions">
+      <button class="primary" data-action="payBasket" ${lines.length ? '' : 'disabled'}>💳 Pay ${money(sum.basketTotal)}</button>
+      <button data-action="clearBasket" ${lines.length ? '' : 'disabled'}>↩ Unload trolley</button>
+      <button data-action="close">Close</button>
+    </div>`;
+}
+
+function openTrolleyModal() {
+  openModal(() => trolleyModal());
+}
+
+function trolleyModal() {
+  const s = game.state;
+  const lines = Groceries.basketLines(s);
+  const sum = Groceries.grocerySummary(s);
+  const rows = lines.length
+    ? lines.map((line) => `<div class="goods-row">
+        <span class="goods-icon">${line.icon}</span>
+        <span class="goods-name"><b>${line.name}</b><small>${line.qty} × ${money(line.price)} · ${Groceries.CATEGORIES[line.cat]?.name || line.cat}</small></span>
+        <span class="goods-price">${money(line.line)}</span>
+        <button data-action="takeGood" data-good="${line.id}" aria-label="Put one ${line.name} back">−</button>
+      </div>`).join('')
+    : '<p class="muted">Your trolley is empty. Take one from the bay and head down the aisles.</p>';
+  return `<h2>🧺 Your trolley</h2>
+    <p class="sub">${trolleyLine(sum)} · Cash: <b>${money(s.cash)}</b></p>
+    <div class="goods-list">${rows}</div>
+    <div class="actions">
+      <button class="primary" data-action="openTill" ${lines.length ? '' : 'disabled'}>🧾 Pay at the tills</button>
+      <button data-action="close">Back to shopping</button>
+    </div>`;
+}
+
+// ===========================================================================
 // 3D Architect Build & Furnish Mode
 // ===========================================================================
 const BUILD_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
 
-// ---------------------------------------------------------------------------
-// Minecraft-style pixel-art materials for Build Mode
-//
-// Every texture is painted into a 16×16 canvas from the palette in data.js and
-// sampled with NearestFilter, so blocks read as hand-pixelled cubes rather than
-// smooth PBR surfaces. Textures are generated once and cached.
-// ---------------------------------------------------------------------------
-const PIXEL_TEX_CACHE = new Map();
-
-/** Wrap a painted 16×16 canvas in a crisp NearestFilter texture. */
-function pixelTexture(spec, seed) {
-  const canvas = Paint.paintPixels(spec, seed);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
-
-/** One face texture for a Minecraft-style block (`kind` from BLOCK_ART, face top|side|bottom). */
-function blockFaceTexture(kind, face) {
-  const key = `block:${kind}:${face}`;
-  const hit = PIXEL_TEX_CACHE.get(key);
-  if (hit) return hit;
-  const art = BLOCK_ART[kind] || BLOCK_ART.stone;
-  const spec = art[face] || art.side || art.top;
-  const tex = pixelTexture(spec, `${kind}:${face}`);
-  PIXEL_TEX_CACHE.set(key, tex);
-  return tex;
-}
-
-const BLOCK_MAT_CACHE = new Map();
-/** Standard material for one block face — 6 materials per cube (top/bottom/sides). */
-function blockFaceMaterial(kind, face, ghost = false, transparent = false) {
-  const key = `${kind}:${face}:${ghost}`;
-  const hit = BLOCK_MAT_CACHE.get(key);
-  if (hit) return hit;
-  const glassy = transparent || kind === 'glass';
-  const mat = new THREE.MeshStandardMaterial({
-    map: blockFaceTexture(kind, face),
-    roughness: glassy ? 0.08 : 0.86,
-    metalness: kind === 'gold' ? 0.55 : glassy ? 0.1 : 0.02,
-    transparent: glassy || ghost,
-    opacity: ghost ? 0.5 : glassy ? 0.62 : 1,
-    depthWrite: !(glassy || ghost),
-    side: THREE.FrontSide,
-  });
-  BLOCK_MAT_CACHE.set(key, mat);
-  return mat;
-}
-
-/** Six-face material array for a block cube (BoxGeometry face order: +x, −x, +y, −y, +z, −z). */
-function blockMaterials(kind, ghost = false) {
-  const top = blockFaceMaterial(kind, 'top', ghost);
-  const side = blockFaceMaterial(kind, 'side', ghost);
-  const bottom = blockFaceMaterial(kind, 'bottom', ghost);
-  return [side, side, top, bottom, side, side];
-}
-
-/** Neutral grey pixel texture used to tint the architectural pieces. */
-const PIECE_TEX_CACHE = new Map();
-function pieceTexture(pattern) {
-  const hit = PIECE_TEX_CACHE.get(pattern);
-  if (hit) return hit;
-  const art = Paint.PIECE_ART[pattern] || Paint.PIECE_ART.stone;
-  const tex = pixelTexture(art, `piece:${pattern}`);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(4, 3);
-  PIECE_TEX_CACHE.set(pattern, tex);
-  return tex;
-}
-
 const BUILD_MAT_CACHE = new Map();
 
 function buildMaterial(color, opts = {}) {
-  const { glass = false, ghost = false, rough = 0.62, metal = 0.06, glow = false, pattern = null } = opts;
-  const key = `${color}|${glass}|${ghost}|${rough}|${metal}|${glow}|${pattern || ''}`;
+  const { glass = false, ghost = false, rough = 0.62, metal = 0.06, glow = false } = opts;
+  const key = `${color}|${glass}|${ghost}|${rough}|${metal}|${glow}`;
   const hit = BUILD_MAT_CACHE.get(key);
   if (hit) return hit;
   const mat = new THREE.MeshStandardMaterial({
@@ -3533,16 +3741,9 @@ function buildMaterial(color, opts = {}) {
     depthWrite: !(glass || ghost),
   });
   if (glow) { mat.emissive = new THREE.Color(color); mat.emissiveIntensity = 0.85; }
-  if (pattern) { mat.map = pieceTexture(pattern); mat.roughness = Math.max(0.55, rough); }
   BUILD_MAT_CACHE.set(key, mat);
   return mat;
 }
-
-/** Which Minecraft-style pixel texture each architectural piece wears. */
-const STRUCTURE_PATTERN = {
-  floor_stone: 'stone', floor_wood: 'planks', wall_solid: 'brick', wall_window: 'brick',
-  wall_door: 'brick', pillar: 'stone', stairs: 'planks', roof_gable: 'planks',
-};
 
 /** Build a 3D mesh for one placed piece (or its translucent ghost preview). */
 function makeBuildMesh(piece, ghost = false) {
@@ -3550,19 +3751,7 @@ function makeBuildMesh(piece, ghost = false) {
   const g = new THREE.Group();
   g.position.set(piece.x, piece.y, piece.z);
   g.rotation.y = piece.rot || 0;
-  // Minecraft-style voxel block: one textured 1 m cube with separate top/bottom faces
-  if (item && item.cat === 'block') {
-    const mesh = new THREE.Mesh(BUILD_BOX_GEO, blockMaterials(item.block, ghost));
-    mesh.scale.set(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-    mesh.position.set(0, BLOCK_SIZE / 2, 0);
-    mesh.castShadow = !ghost;
-    mesh.receiveShadow = !ghost;
-    g.add(mesh);
-    return g;
-  }
-  const color = piece.color || item?.defaultColor || '#f1f5f9';
-  const pattern = STRUCTURE_PATTERN[piece.item] || null;
-  const solid = buildMaterial(color, { ghost, pattern });
+  const solid = buildMaterial(piece.color || item?.defaultColor || '#f1f5f9', { ghost });
   const trim = buildMaterial('#334155', { ghost });
   const glass = buildMaterial('#bae6fd', { glass: true, ghost });
   const soft = buildMaterial('#94a3b8', { ghost, rough: 0.8 });
@@ -3671,11 +3860,18 @@ function makeBuildMesh(piece, ghost = false) {
       for (const dx of [-0.8, 0.8]) box(dx, 0.36, 0, 0.12, 0.72, 0.9, dark);
       for (const dz of [-0.95, 0.95]) box(0, 0.45, dz, 0.5, 0.75, 0.1, trim);
       break;
-    case 'tv_stand':
+    case 'tv_stand': {
       box(0, 0.32, 0, 2.4, 0.55, 0.5, dark);
       box(0, 1.3, 0, 2.1, 1.2, 0.1, dark);
-      box(0, 1.3, 0.07, 1.96, 1.06, 0.03, glass);
+      // the panel is a live screen: it switches on like every other TV in the city
+      const panel = box(0, 1.3, 0.09, 1.96, 1.06, 0.03, ghost ? glass : city._tvSetup().off);
+      if (!ghost) {
+        panel.userData.screen = true;
+        g.userData.screen = panel;
+      }
+      box(0, 1.3, 0.075, 2.0, 1.1, 0.02, trim);
       break;
+    }
     case 'bookshelf':
       box(-1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
       box(1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
@@ -3768,13 +3964,12 @@ function renderBuildBar() {
   const stats = Build.summary(builds);
   const structures = BUILD_ITEMS.filter((i) => i.cat === 'structure');
   const furniture = BUILD_ITEMS.filter((i) => i.cat === 'furniture');
-  const blocks = BUILD_ITEMS.filter((i) => i.cat === 'block');
   const btn = (i) => `<button class="build-item ${i.id === game.buildItem ? 'active' : ''}" data-build-item="${i.id}" title="${i.name}"><span>${i.icon}</span><small>${i.name.replace(/ \(.*\)$/, '')}</small></button>`;
   const swatch = (c) => `<button class="build-swatch ${c === game.buildColor ? 'active' : ''}" style="background:${c}" data-build-color="${c}" aria-label="colour ${c}"></button>`;
   el.innerHTML = `
     <div class="build-row build-head">
       <b>🏗 Build &amp; Furnish</b>
-      <span class="build-meta">${stats.structure} structure · ${stats.furniture} furniture · ${stats.blocks} blocks / ${MAX_CUSTOM_BUILDS}</span>
+      <span class="build-meta">${stats.structure} structure · ${stats.furniture} furniture / ${MAX_CUSTOM_BUILDS}</span>
       <span class="build-tools">
         <span class="build-level">Height ${(game.player.y + game.buildLift).toFixed(1)} m</span>
         <button data-build-lift="1" title="Raise ghost one storey (PageUp)">▲ storey</button>
@@ -3786,21 +3981,15 @@ function renderBuildBar() {
       </span>
     </div>
     <div class="build-row"><span class="build-label">Structure</span>${structures.map(btn).join('')}</div>
-    <div class="build-row blocks"><span class="build-label">Blocks</span>${blocks.map(btn).join('')}</div>
     <div class="build-row"><span class="build-label">Furniture</span>${furniture.map(btn).join('')}</div>
     <div class="build-row"><span class="build-label">Colour</span>${BUILD_COLORS.map(swatch).join('')}
-      <span class="build-hint"><kbd>E</kbd> place · <kbd>X</kbd> demolish · <kbd>Q</kbd>/<kbd>R</kbd> rotate · <kbd>Tab</kbd> item · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> storey · <kbd>Y</kbd> exit<br>Blocks snap to a 1 m grid — stand on one and place the next to stack them like Minecraft.</span>
+      <span class="build-hint"><kbd>E</kbd> place · <kbd>X</kbd> demolish · <kbd>Q</kbd>/<kbd>R</kbd> rotate · <kbd>Tab</kbd> item · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> storey · <kbd>Y</kbd> exit</span>
     </div>`;
 }
 
 function setBuildLift(delta) {
-  const item = Build.itemById(game.buildItem);
-  // voxel blocks step one metre at a time; architectural pieces step a storey
-  const step = item?.cat === 'block' ? BLOCK_SIZE : BUILD_STORY_H;
-  game.buildLift = Math.max(-2 * BUILD_STORY_H, Math.min(10 * BUILD_STORY_H, game.buildLift + delta * step));
-  game.buildLift = +game.buildLift.toFixed(2);
+  game.buildLift = Math.max(-2 * BUILD_STORY_H, Math.min(10 * BUILD_STORY_H, game.buildLift + delta * BUILD_STORY_H));
   renderBuildBar();
-  updateBuildGhost();
 }
 
 function cycleBuildColor() {
@@ -3829,7 +4018,7 @@ function toggleBuildMode(on) {
     if (!game.buildGroup) rebuildBuildWorld();
     renderBuildBar();
     rebuildBuildGhost();
-    toast('🏗 Build Mode — E place · X demolish · Q/R rotate · C colour · Tab item · PgUp/PgDn storey · blocks stack 1 m at a time', 'good');
+    toast('🏗 Build Mode — E place · X demolish · Q/R rotate · C colour · Tab item · PgUp/PgDn storey · walls, floors, stairs & furniture', 'good');
   } else {
     if (game.buildGhost) { scene.remove(game.buildGhost); game.buildGhost = null; }
     renderBuildBar();
@@ -4422,7 +4611,16 @@ function updateRemotes(dt) {
 // --- identity (name + PIN) -------------------------------------------------
 // The PIN is only sent to the server; the browser keeps a session token instead.
 const IDENTITY_KEY = 'metroventure_identity';
+const SAVE_AT_KEY = `${SAVE_KEY}:at`;
 let cityServerUrl = null;
+
+// ---- cloud saves (server-owned wallet & progress) --------------------------
+let cloud = null;
+let cloudRevision = 0;
+let cloudBusy = false;
+let cloudLoaded = false;
+let cloudQuota = false;
+let cloudTimer = null;
 
 function loadIdentity() {
   try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null'); } catch { return null; }
@@ -4432,6 +4630,97 @@ function saveIdentity(identity) {
 }
 function forgetIdentity() {
   try { localStorage.removeItem(IDENTITY_KEY); } catch { /* private mode */ }
+}
+
+// ===========================================================================
+// Cloud saves — the server owns the wallet, the browser keeps a mirror
+// ===========================================================================
+function initCloud(token, saveMeta = null) {
+  if (!cityServerUrl || !token) return;
+  cloud = new CloudClient({ serverUrl: cityServerUrl, token });
+  cloudRevision = Number(saveMeta?.revision) || 0;
+  cloudQuota = false;
+  cloudLoaded = false;   // a new sign-in always re-reads the cloud copy
+  pullCloudSave();
+}
+
+function cloudStatus(text, bad = false) {
+  const el = document.getElementById('cloud-status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('hidden', !text);
+  el.classList.toggle('login-error', !!bad);
+  el.classList.toggle('hint', !bad);
+}
+
+async function pullCloudSave() {
+  if (!cloud || cloudLoaded) return;
+  cloudLoaded = true;
+  const res = await cloud.loadSave();
+  if (!res.ok) {
+    if (res.error?.quota) cloudQuota = true;
+    return;
+  }
+  const meta = res.body.meta;
+  const save = res.body.save;
+  cloudRevision = Number(meta?.revision) || 0;
+  cloudStatus(meta ? `☁️ Cloud save ready · revision ${meta.revision} · ${(meta.bytes / 1024).toFixed(1)} KB` : '☁️ Cloud save ready — nothing saved yet');
+  if (!save) {
+    // Brand-new account: this city is the first one. Nothing is imported from
+    // whatever was played offline before the server existed.
+    cloudStatus('☁️ New account — this city starts here');
+    if (!game.state.seenHelp) showHelp();
+    queueCloudSave(1200); // seed revision 1 so the next device has something to load
+    return;
+  }
+  // The server always wins: there is no local save to compare against.
+  try {
+    game.state = Eco.migrateState(save);
+    applyState();
+    toast(`☁️ Cloud save loaded — revision ${meta.revision} · ${money(game.state.cash)}`, 'good');
+  } catch {
+    toast('☁️ The cloud save could not be read — keeping this device\'s copy.', 'bad');
+  }
+}
+
+/** Push the current state up, debounced so a busy session is one request. */
+function queueCloudSave(delayMs = 4000) {
+  if (!cloud || cloudQuota) return;
+  if (cloudTimer) clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(() => { cloudTimer = null; pushCloudSave(); }, delayMs);
+}
+
+/** Last-chance upload when the tab closes: keepalive survives the unload. */
+function flushCloudSave() {
+  if (!cloud || cloudBusy || cloudQuota || !net?.account) return;
+  if (cloudTimer) { clearTimeout(cloudTimer); cloudTimer = null; }
+  try { snapshotState(); } catch { return; }
+  cloud.save(saveEnvelope(game.state), { baseRevision: cloudRevision, keepalive: true });
+}
+
+async function pushCloudSave(retryOnConflict = true) {
+  if (!cloud || cloudBusy || cloudQuota) return;
+  cloudBusy = true;
+  const res = await cloud.save(saveEnvelope(game.state), { baseRevision: cloudRevision });
+  cloudBusy = false;
+  if (res.ok) {
+    cloudRevision = Number(res.body?.meta?.revision) || cloudRevision + 1;
+    cloudStatus(`☁️ Saved to the cloud · revision ${cloudRevision}`);
+    return;
+  }
+  if (res.error?.code === 'revision_conflict' && retryOnConflict) {
+    // Another device wrote while we were playing: adopt its revision and try once
+    // more, so nothing is silently lost and the newest session still wins.
+    cloudRevision = Number(res.error.revision) || cloudRevision;
+    return pushCloudSave(false);
+  }
+  if (res.error?.quota) {
+    cloudQuota = true;
+    cloudStatus('☁️ Daily server quota used up — progress is on this device until 00:00 UTC.', true);
+    toast('☁️ The free daily server quota is used up — progress is saved on this device until 00:00 UTC.', 'warn');
+  } else {
+    cloudStatus(`☁️ Cloud save failed: ${res.error?.message || 'unknown error'}`, true);
+  }
 }
 
 const AUTH_MESSAGES = {
@@ -4456,6 +4745,17 @@ function showLogin(message) {
   $('login').classList.remove('hidden');
   setTimeout(() => { ($('login-name').value ? $('login-pin') : $('login-name')).focus(); }, 30);
 }
+function showOfflineGate() {
+  const gate = $('offline-gate');
+  if (!gate) return;
+  gate.classList.remove('hidden');
+  let remembered = '';
+  try { remembered = localStorage.getItem('metroventure_server') || ''; } catch { /* private mode */ }
+  $('offline-server').value = remembered;
+  $('offline-error').classList.add('hidden');
+  updateHUD(true);
+}
+
 function hideLogin() {
   game.loginOpen = false;
   $('login').classList.add('hidden');
@@ -4493,6 +4793,7 @@ function startNet(identity = null) {
         loginError('');
         $('btn-account').classList.add('on');
         toast(auth.created ? `🪪 Account created — welcome, ${auth.name}` : `🪪 Signed in as ${auth.name}`, 'good');
+        initCloud(auth.token, auth.save);
       },
       onAuthError(code, msg) {
         if (code === 'session_expired' || code === 'logged_out') forgetIdentity();
@@ -4565,19 +4866,31 @@ $('login-form').addEventListener('submit', (e) => {
 $('login-guest').addEventListener('click', () => {
   const name = $('login-name').value.trim() || game.state.appearance.name || 'Guest';
   hideLogin();
+  if (!game.state.seenHelp) showHelp();   // guests start fresh every visit
   if (net) net.playAsGuest(name);
   else startNet({ mode: 'guest', name });
 });
-$('login-offline').addEventListener('click', () => {
-  hideLogin();
-  if (net) net.disconnect();
-  net = null;
-  cityServerUrl = null;
-  toast('Playing offline. Reload to sign in again.', '');
-  updateHUD(true);
+// --- offline gate (online-only build) --------------------------------------
+function connectFromGate() {
+  const typed = $('offline-server').value;
+  const url = normalizeServerUrl(typed);
+  const err = $('offline-error');
+  if (!url) {
+    err.textContent = 'That is not a server address. Try wss://your-worker.workers.dev/ws?room=metro-1';
+    err.classList.remove('hidden');
+    return;
+  }
+  try { localStorage.setItem('metroventure_server', url); } catch { /* private mode */ }
+  location.reload();
+}
+$('offline-connect').addEventListener('click', connectFromGate);
+$('offline-retry').addEventListener('click', () => location.reload());
+$('offline-server').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); connectFromGate(); }
 });
 $('btn-account').addEventListener('click', () => {
   if (game.loginOpen) return hideLogin();
+  if (cloud) cloudStatus(`☁️ Signed in — cloud revision ${cloudRevision}`);
   showLogin(net?.account ? `Signed in as ${net.name}. Enter a PIN to sign in as someone else.` : '');
 });
 
@@ -4640,14 +4953,42 @@ mmBase.width = mmBase.height = 200;
   for (const r of ROAD_LINES) g.fillRect(toMM(r - ROAD_HALF), toMM(157), ROAD_HALF * 2 * MM_SCALE, 70 * MM_SCALE);
   g.fillRect(toMM(-162), toMM(190 - ROAD_HALF), 324 * MM_SCALE, ROAD_HALF * 2 * MM_SCALE);
 }
+const mmView = { x: -MM_HALF, z: -MM_HALF };
 function drawMinimap() {
   const g = mmCtx;
-  const toMM = (v) => (v + MM_HALF) * MM_SCALE;
-  g.drawImage(mmBase, 0, 0);
-  const dot = (x, z, r, color) => { g.fillStyle = color; g.beginPath(); g.arc(toMM(x), toMM(z), r, 0, Math.PI * 2); g.fill(); };
+  const p = game.player;
+  mmView.x = p.x - MM_HALF;
+  mmView.z = p.z - MM_HALF;
+  const mx = (v) => (v - mmView.x) * MM_SCALE;
+  const mz = (v) => (v - mmView.z) * MM_SCALE;
+  const toMM = (v) => mx(v);
+  // parkland shows through wherever the authored map doesn't reach
+  g.fillStyle = '#3f6b33'; g.fillRect(0, 0, 200, 200);
+  const basePx = mmBase.width * MM_SCALE;
+  g.drawImage(mmBase, mx(-MM_HALF), mz(-MM_HALF), basePx, basePx);
+  // the grid continues forever: draw every street line inside the window
+  g.fillStyle = '#1f2937';
+  const step = Streaming.ROAD_STEP;
+  const half = Streaming.ROAD_HALF;
+  const roadPx = half * 2 * MM_SCALE;
+  const viewMax = MM_HALF * 2;
+  for (let x = Math.floor(mmView.x / step) * step; x <= mmView.x + viewMax + step; x += step) {
+    g.fillRect(mx(x - half), 0, roadPx, 200);
+  }
+  for (let z = Math.floor(mmView.z / step) * step; z <= mmView.z + viewMax + step; z += step) {
+    g.fillRect(0, mz(z - half), 200, roadPx);
+  }
+  // generated blocks, live from the streamer
+  g.fillStyle = '#4b5563';
+  for (const b of city.enterables) {
+    if (!b.streamed) continue;
+    if (Math.abs(b.x - p.x) > MM_HALF + 40 || Math.abs(b.z - p.z) > MM_HALF + 40) continue;
+    g.fillRect(mx(b.x - b.width / 2), mz(b.z - b.depth / 2), b.width * MM_SCALE, b.depth * MM_SCALE);
+  }
+  const dot = (x, z, r, color) => { g.fillStyle = color; g.beginPath(); g.arc(mx(x), mz(z), r, 0, Math.PI * 2); g.fill(); };
   const square = (x, z, s, color, label) => {
-    g.fillStyle = color; g.fillRect(toMM(x) - s / 2, toMM(z) - s / 2, s, s);
-    if (label) { g.fillStyle = '#fff'; g.font = 'bold 9px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, toMM(x), toMM(z) + 0.5); }
+    g.fillStyle = color; g.fillRect(mx(x) - s / 2, mz(z) - s / 2, s, s);
+    if (label) { g.fillStyle = '#fff'; g.font = 'bold 9px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, mx(x), mz(z) + 0.5); }
   };
   for (const [id, def] of Object.entries(BUSINESSES)) {
     const built = !!game.state.businesses[id];
@@ -4670,14 +5011,13 @@ function drawMinimap() {
     const st = game.task.steps[game.task.idx];
     const pulse = 3 + Math.sin(game.elapsed * 6) * 1.2;
     g.strokeStyle = '#f43f5e'; g.lineWidth = 2;
-    g.beginPath(); g.arc(toMM(st.x), toMM(st.z), pulse + 2, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.arc(mx(st.x), mz(st.z), pulse + 2, 0, Math.PI * 2); g.stroke();
     dot(st.x, st.z, 2.5, '#f43f5e');
   }
   if (net) for (const r of remotes.values()) if (net.peers.get(r.id)?.visible) dot(r.x, r.z, 2.4, '#38bdf8');
-  // player arrow
-  const p = game.player;
+  // player arrow (the map scrolls under it, so it sits dead centre)
   g.save();
-  g.translate(toMM(p.x), toMM(p.z));
+  g.translate(mx(p.x), mz(p.z));
   g.rotate(-p.yaw + Math.PI); // yaw 0 faces +z (down on the map)
   g.fillStyle = '#fff'; g.strokeStyle = '#111'; g.lineWidth = 1.5;
   g.beginPath(); g.moveTo(0, -6); g.lineTo(4.5, 5); g.lineTo(0, 2.5); g.lineTo(-4.5, 5); g.closePath();
@@ -4791,7 +5131,16 @@ function frame() {
     const liveSchedule = Uni.getLiveCampusSchedule(nowInGame);
     if (liveSchedule.length) city.updateLectureBoard(liveSchedule[0]);
   }
+  // endless city: pull in the districts around the player (a few cells a second)
+  streamT -= dt;
+  if (streamT <= 0) {
+    streamT = streamWarm ? 0.05 : 0.25;
+    const pp = game.player;
+    const res = city.updateStreaming(pp.x, pp.z, { budget: streamWarm ? 6 : 1 });
+    if (streamWarm && res.built === 0) streamWarm = false;
+  }
   city.update(game.elapsed, dt);
+  updateWatchingTv(dt);
   updatePrompt();
   updateCamera(dt);
   updateHUD();
@@ -4804,23 +5153,46 @@ function frame() {
 // ===========================================================================
 // Boot
 // ===========================================================================
-function boot() {
+async function boot() {
+  // Decide online-vs-offline *before* reading a save: if a city server answers,
+  // that server owns the save and anything this device played offline is dropped.
+  const serverUrl = await discoverServerUrl();
+  let hasLocal = false;
+  try { hasLocal = !!localStorage.getItem(SAVE_KEY); } catch { /* private mode */ }
+  const policy = bootPolicy(serverUrl, hasLocal, { allowOffline: offlineAllowed(location.href) });
+
   game.state = Eco.createInitialState();
-  const loaded = localStorage.getItem(SAVE_KEY) ? loadGame(true) : false;
-  if (!loaded) applyState();
-  if (!game.state.seenHelp) showHelp();
-  else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
-  discoverServerUrl().then((serverUrl) => {
-    if (!serverUrl) return;
-    cityServerUrl = serverUrl;
+  if (policy.blocked) {
+    // The public build has no offline mode: no server, no city.
+    applyState();
+    showOfflineGate();
+    return;
+  }
+  if (policy.online) {
+    cityServerUrl = policy.serverUrl;
+    if (policy.purgeLocalSave) clearLocalSave();
+    applyState();                       // a fresh city until the cloud copy arrives
+    if (policy.purgeLocalSave) {
+      toast('🌐 Online world — offline progress was cleared. Sign in to keep a city.', 'warn');
+    }
     const saved = loadIdentity();
     if (saved?.token) startNet({ mode: 'token', token: saved.token, name: saved.name });
     else if (game.helpOpen) pendingLogin = true; // ask once the welcome card is dismissed
     else showLogin();
-  });
+  } else {
+    const loaded = hasLocal ? loadGame(true) : false;
+    if (!loaded) applyState();
+    if (!game.state.seenHelp) showHelp();
+    else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
+  }
+
   camera.position.set(game.player.x - 6, 5, game.player.z - 6);
   frame();
 }
 
-window.addEventListener('beforeunload', () => { if (game.state) saveGame(true); });
+window.addEventListener('beforeunload', () => {
+  if (!game.state) return;
+  if (cityServerUrl) flushCloudSave();   // online: the cloud is the save
+  else saveGame(true);
+});
 boot();
