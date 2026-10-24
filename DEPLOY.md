@@ -76,13 +76,27 @@ with two values, stored as **secrets** (encrypted, never shown again).
    > `Account` → `Account Settings` → `Read`.
    > Then set **Account Resources** to `Include` → your account and create it.
 8. Scroll to the bottom and click **Continue to summary**.
-9. Check the summary mentions **Workers Scripts** and **Durable Objects** — both must say
-   `Edit`. Then click **Create Token**.
-10. Cloudflare shows the token **once**. Click **Copy**, and paste it next to your Account ID.
-    Label it **API TOKEN**.
+9. On the summary you will see a list of **Permission policies**. What matters:
+   - **`Workers Scripts: Edit`** — this is the one that lets wrangler upload the Worker
+     *and create its Durable Object classes*, because those are declared as migrations
+     inside the script you upload.
+   - **`Account Settings: Read`** — lets the deploy confirm which account it is talking to.
+   - Lines for KV, R2, Pages, Containers and so on are part of the template and harmless.
+   - You may or may not see a separate **`Durable Objects: Edit`** line. **Either is fine** —
+     it is not needed for this deploy. If the run ever fails with a Durable Objects
+     permission message, come back and add it, but expect not to need it.
+10. Click **Create Token**.
+11. Cloudflare shows the token value **once, right after you create it**. Click **Copy** and
+    paste it next to your Account ID. Label it **API TOKEN**.
 
-> **If the token is lost:** you cannot see it again. Just create another one — the old one can
-> be deleted from the same page.
+> **How to tell where you are.** If the page has a green **Create Token** button at the bottom,
+> the token has not been made yet — click it and copy the value on the next screen. If the page
+> instead shows the token's permissions with **Edit** / **Delete** / **Roll** buttons, the token
+> already exists and its value is gone from view: click **Roll**, which generates a fresh value
+> and shows it once, and copy that.
+
+> **If the token is lost:** you cannot see it again. Use **Roll**, or create another one — the
+> old one can be deleted from the same page.
 
 > **If you cannot use the template:** click **Create Custom Token** instead and add exactly
 > three permissions:
