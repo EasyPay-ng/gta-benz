@@ -4786,6 +4786,24 @@ function hideLogin() {
   game.loginOpen = false;
   $('login').classList.add('hidden');
 }
+const CONNECT_DOWN = 'The city server is not answering. It may have stopped — use Server settings, then Retry.';
+let loginWatchdog = null;
+let netDown = false;
+
+/** If the server never answers, say so instead of spinning forever. */
+function armLoginWatchdog() {
+  clearTimeout(loginWatchdog);
+  loginWatchdog = setTimeout(() => {
+    loginWatchdog = null;
+    if (!game.loginOpen) return;
+    loginError(CONNECT_DOWN, 'info');
+  }, 9000);
+}
+function clearLoginWatchdog() {
+  if (loginWatchdog) clearTimeout(loginWatchdog);
+  loginWatchdog = null;
+}
+
 function loginError(message, kind = '') {
   const el = $('login-error');
   el.textContent = message || '';
@@ -4809,11 +4827,21 @@ function startNet(identity = null) {
     appearance: game.state.appearance,
     handlers: {
       onStatus(status) {
-        if (status === 'online') toast('🌐 Joined the city server', 'good');
-        else if (status === 'reconnecting') toast('🌐 Connection lost — retrying…', 'bad');
+        if (status === 'online') {
+          if (netDown) toast('🌐 Reconnected to the city server', 'good');
+          netDown = false;
+          if (game.loginOpen) loginError('');
+        } else if (status === 'reconnecting' || status === 'offline') {
+          // Only complain once per outage, and never leave "Connecting…" on screen
+          // pretending something is still in flight.
+          if (!netDown && status === 'reconnecting') toast('🌐 Connection lost — retrying…', 'bad');
+          netDown = true;
+          if (game.loginOpen) loginError(CONNECT_DOWN, 'info');
+        }
         updateHUD(true);
       },
       onAuth(auth) {
+        clearLoginWatchdog();
         saveIdentity({ name: auth.name, token: auth.token });
         applyPlayerName(auth.name);
         loginError('');
@@ -4822,6 +4850,7 @@ function startNet(identity = null) {
         initCloud(auth.token, auth.save);
       },
       onAuthError(code, msg) {
+        clearLoginWatchdog();
         if (code === 'session_expired' || code === 'logged_out') forgetIdentity();
         if (code === 'session_expired') return; // onAuthRequired will ask again
         loginError(AUTH_MESSAGES[code] || `Sign-in failed (${code}).`);
@@ -4885,9 +4914,12 @@ $('login-form').addEventListener('submit', (e) => {
   if (name.length < 3) return loginError(AUTH_MESSAGES.bad_name);
   if (pin.length < 4) return loginError(AUTH_MESSAGES.bad_pin);
   loginError('Connecting…', 'info');
+  armLoginWatchdog();
   applyPlayerName(name);
-  if (net) net.signIn(name, pin);
-  else startNet({ mode: 'credential', name, pin });
+  if (net) {
+    net.signIn(name, pin);
+    if (!net.connected && net.status !== 'connecting') net.connect();
+  } else startNet({ mode: 'credential', name, pin });
 });
 $('login-guest').addEventListener('click', () => {
   const name = $('login-name').value.trim() || game.state.appearance.name || 'Guest';
@@ -4896,6 +4928,14 @@ $('login-guest').addEventListener('click', () => {
   if (net) net.playAsGuest(name);
   else startNet({ mode: 'guest', name });
 });
+// Server settings: the same card the online-only build uses, reachable any time
+// so a dead server is never a modal you cannot escape.
+$('login-server').addEventListener('click', () => {
+  hideLogin();
+  if (net) { net.disconnect(); net = null; }
+  showOfflineGate();
+});
+
 // --- offline gate (online-only build) --------------------------------------
 async function connectFromGate() {
   const typed = $('offline-server').value.trim();

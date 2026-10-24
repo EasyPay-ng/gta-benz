@@ -116,6 +116,11 @@ can still walk around, but their progress is not kept and the save button says s
 place a local save still exists is a development machine (`npm run dev:offline`, `?offline=1` on
 `localhost`) — and there it is the only option.
 
+**A dead server is never a dead end.** The sign-in card has a **Server settings** button at any time,
+a login attempt that gets no answer within 9 s says so instead of spinning on "Connecting…", and the
+dev server only advertises `/net.json` when the Worker is actually listening — so a stopped backend
+shows the gate (which explains itself) rather than a socket that never opens.
+
 **The public build cannot start without a server.** `offlineAllowed(href)` gates the fallback to
 `localhost`, `127.0.0.1`, `::1` and `file:`; anywhere else `bootPolicy()` returns `blocked`, the frame
 loop never starts, and the player gets the "city is offline" card with a server address field. The

@@ -15,6 +15,10 @@ because that is the development harness. Anywhere else, opening the game without
 shows a single card: **the city is offline** — paste a `wss://…/ws?room=metro-1` address, and it is
 remembered on that device.
 
+If the city server is not running, the dev server says so and the game shows the "city is offline"
+card instead of hanging on a connection. **Server settings** on the sign-in card opens the same card
+at any time.
+
 ES modules don't load from `file://`, so you can't just double-click `index.html`.
 
 ## Multiplayer (optional, free)
