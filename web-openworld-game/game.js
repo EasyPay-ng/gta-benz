@@ -25,7 +25,7 @@ import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
 import * as Groceries from './src/groceries.js';
-import { CloudClient, saveEnvelope, bootPolicy, offlineAllowed, normalizeServerUrl, probeServer } from './src/cloud.js';
+import { CloudClient, saveEnvelope, bootPolicy, offlineAllowed, probeServer, classifyServerAddress, NO_SERVER_HINT } from './src/cloud.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -4755,6 +4755,7 @@ function showOfflineGate() {
   // almost always the right answer, and the probe below will confirm it either way.
   const guess = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=metro-1`;
   $('offline-server').value = remembered || guess;
+  $('offline-server').placeholder = NO_SERVER_HINT;
   const err = $('offline-error');
   if (remembered) {
     err.textContent = `The server saved on this device (${remembered}) did not answer. Retry, or point the game at another one.`;
@@ -4944,11 +4945,14 @@ async function connectFromGate() {
     $('offline-server').focus();
     return;
   }
-  const url = normalizeServerUrl(typed);
-  if (!url) {
-    gateSay('That is not a server address. It should look like wss://your-worker.workers.dev/ws?room=metro-1');
+  // Say what kind of address this actually is before trying to dial it: pasting the
+  // game's own link into the server box is the single most common mistake here.
+  const verdict = classifyServerAddress(typed);
+  if (verdict.kind !== 'server') {
+    gateSay(verdict.message);
     return;
   }
+  const url = verdict.url;
   gateBusy(true, 'Checking the server…');
   const probe = await probeServer(url);
   gateBusy(false);

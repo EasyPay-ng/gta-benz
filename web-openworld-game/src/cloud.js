@@ -227,6 +227,59 @@ export function probeServer(url, { timeoutMs = 4000, WebSocketImpl = globalThis.
   });
 }
 
+const STATIC_HOSTS = ['github.io', 'gitlab.io', 'netlify.app', 'vercel.app', 'pages.dev', 'surge.sh'];
+
+/**
+ * Say what kind of address someone typed, because "nothing answered" is useless
+ * when the real mistake is pasting the game's own URL into the server box.
+ *
+ *   'server'      wss://your-worker.workers.dev/ws?room=metro-1
+ *   'game_link'   https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F…
+ *   'static_host' a static host that can never run the server (github.io, …)
+ *   'no_ws_path'  a real host, but not the /ws endpoint
+ *   'invalid'     not a URL at all
+ */
+export function classifyServerAddress(raw) {
+  const normalized = normalizeServerUrl(raw);
+  if (!normalized) {
+    return { kind: 'invalid', url: null, message: 'That is not a server address. It should look like wss://your-worker.workers.dev/ws?room=metro-1' };
+  }
+  let parsed;
+  try { parsed = new URL(normalized); } catch {
+    return { kind: 'invalid', url: null, message: 'That is not a server address.' };
+  }
+
+  if (parsed.searchParams.has('server')) {
+    return {
+      kind: 'game_link',
+      url: normalized,
+      message: 'That is a link to the game, not to a city server. The game link goes in the address bar; this box wants the server it should talk to — wss://your-worker.workers.dev/ws?room=metro-1',
+    };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (STATIC_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`))) {
+    return {
+      kind: 'static_host',
+      url: normalized,
+      message: `${parsed.hostname} only serves the game's files — it cannot run a server. Deploy the Worker from server/ to Cloudflare, then use its address: wss://<your-worker>.<your-subdomain>.workers.dev/ws?room=metro-1`,
+    };
+  }
+
+  if (!/\/ws\/?$/.test(parsed.pathname)) {
+    return {
+      kind: 'no_ws_path',
+      url: normalized,
+      message: 'A city server answers on /ws. Add it to the address: wss://your-worker.workers.dev/ws?room=metro-1',
+    };
+  }
+
+  return { kind: 'server', url: normalized, message: '' };
+}
+
+/** The stock phrase shown while nobody has deployed a server yet. */
+export const NO_SERVER_HINT = 'wss://<your-worker>.<your-subdomain>.workers.dev/ws?room=metro-1';
+
 /**
  * Boot policy — the whole point of the online rebuild.
  *
