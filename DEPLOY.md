@@ -136,7 +136,19 @@ API TOKEN    a long string, often 40+ characters
    CLOUDFLARE_ACCOUNT_ID
    ```
 
-   **Secret:** paste your ACCOUNT ID. Click **Add secret**.
+   **Secret:** paste **only the 32-character code**, nothing else. Not the whole address
+   bar. It is the part between `dash.cloudflare.com/` and the next `/`:
+
+   ```
+   dash.cloudflare.com/2ac2442acdfcd12169021b6402e3d06c/workers/…
+                       └──────── this ────────┘
+   ```
+
+   Just that middle piece — 32 characters, letters and numbers. Click **Add secret**.
+
+   > If you paste the whole URL, the workflow stops immediately with
+   > *"CLOUDFLARE_ACCOUNT_ID does not look like an account id… Found 94 characters."*
+   > Nothing breaks; just edit the secret (Secrets → the pencil → Update) and re-run.
 
 You should now see both names listed. You will not be able to view their values again — that
 is normal and correct.

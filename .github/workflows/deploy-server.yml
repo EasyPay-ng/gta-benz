@@ -31,7 +31,10 @@ jobs:
           cache-dependency-path: server/package-lock.json
 
       # A missing secret should read like a sentence, not like a failed login.
-      - name: Check both secrets are set
+      # Both secrets get shape-checked too, because the two most common mistakes are
+      # pasting the whole dashboard URL into the account id, and pasting a token with
+      # a trailing space.
+      - name: Check both secrets are set and look right
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -43,7 +46,21 @@ jobs:
             echo "::error::Missing secret(s):$missing. Add them in Settings → Secrets and variables → Actions → New repository secret."
             exit 1
           fi
-          echo "Both secrets are present."
+
+          if ! printf '%s' "$ACCOUNT" | grep -qE '^[0-9a-f]{32}$'; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like an account id."
+            echo "It must be exactly 32 lowercase hex characters, e.g. 2ac2442acdfcd12169021b6402e3d06c."
+            echo "Found ${#ACCOUNT} characters. Did the whole dashboard URL get pasted?"
+            echo "It is the part between dash.cloudflare.com/ and the next slash."
+            exit 1
+          fi
+
+          if printf '%s' "$TOKEN" | grep -qE '[[:space:]]'; then
+            echo "::error::CLOUDFLARE_API_TOKEN contains a space or newline — re-paste it without stray whitespace."
+            exit 1
+          fi
+
+          echo "Both secrets are present and well-formed."
 
       - name: Install the server's dependencies
         working-directory: server
