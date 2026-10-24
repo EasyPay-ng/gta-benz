@@ -339,7 +339,16 @@ export function isInteractable(propType) {
   return !!PROP_INTERACTIONS[propType];
 }
 
+// Screens use the seated pose to watch from, but they are not seats themselves.
+const SCREEN_TYPES = new Set(['tvwall', 'cinema_screen']);
+
+/** A television, media wall or cinema screen: pressing E shows a picture. */
+export function isScreen(propType) {
+  return SCREEN_TYPES.has(propType);
+}
+
 export function isSeating(propType) {
+  if (SCREEN_TYPES.has(propType)) return false;
   const def = interactionFor(propType);
   return !!def && (def.pose === 'sit' || def.pose === 'lie');
 }

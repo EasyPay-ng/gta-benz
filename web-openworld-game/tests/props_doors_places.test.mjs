@@ -92,7 +92,9 @@ test('Interactive furniture: sitting, sleeping, TV, study props, paid meals & co
     const def = P.interactionFor(id);
     assert.ok(def, `${id} is interactive`);
     assert.ok(def.verb.length > 3 && def.icon, `${id} has a verb & icon`);
-    assert.ok(P.isSeating(id) === (def.pose === 'sit' || def.pose === 'lie'));
+    // screens use a seated pose to watch from but are never picked as a seat
+    const wantsSeat = (def.pose === 'sit' || def.pose === 'lie') && !['tvwall', 'cinema_screen'].includes(id);
+    assert.ok(P.isSeating(id) === wantsSeat, `${id} seating = ${wantsSeat}`);
   }
 
   // sofa: sit pose, comfort up, stat counted, cooldown armed

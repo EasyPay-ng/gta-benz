@@ -171,6 +171,75 @@ test('TV: screens power on, show a live channel and switch off', async () => {
   assert.ok(mesh.material === off, 'screen goes dark again');
 });
 
+test('TV: every television in the city — stations, showroom, apartments — can switch on', async () => {
+  const THREE = await import('three');
+  const { City } = await import('../src/world.js');
+  const Props = await import('../src/props.js');
+  const city = new City(new THREE.Scene());
+
+  const TVs = city.propSpots.filter((s) => s.type === 'tvwall' || s.type === 'cinema_screen');
+  assert.ok(TVs.length >= 3, `televisions placed in the city (${TVs.length})`);
+  for (const spot of TVs) {
+    assert.ok(spot.screen, `${spot.type} in ${spot.buildingId} carries a screen handle`);
+    assert.equal(spot.screen.userData.screen, true, 'the mesh is tagged as a screen');
+    assert.ok(spot.screen.isMesh && spot.screen.material, 'the screen is a real mesh with a material');
+  }
+
+  // the security station used to register its media wall without a screen
+  const station = city.propSpots.find((s) => s.buildingId === 'station-security' && s.type === 'tvwall');
+  assert.ok(station, 'City Security HQ has a media wall');
+  assert.ok(station.screen, 'and it is wired up');
+
+  // every tower apartment TV is wired too
+  const tower = city.enterables.find((b) => b.kind === 'tower');
+  let apartmentTv = 0;
+  for (let lvl = 0; lvl <= tower.floors; lvl++) {
+    const floor = city.setActiveInterior(tower.id, lvl);
+    if (!floor) continue;
+    for (const spot of floor.spots.filter((s) => s.type === 'tvwall')) {
+      apartmentTv++;
+      assert.ok(spot.screen, `${tower.name} L${lvl} TV can switch on`);
+    }
+    city.clearActiveInterior();
+  }
+  assert.ok(apartmentTv > 0, 'at least one apartment has a TV');
+
+  // player-built TV stands route into the same "Watch TV" interaction
+  assert.equal(Props.BUILD_PROP_MAP.tv_stand, 'tvwall');
+  assert.equal(Props.isInteractable('tvwall'), true);
+  assert.equal(Props.actionFor('tvwall'), 'tv');
+});
+
+test('TV: the picture is painted while on, changes channel, and stops when switched off', async () => {
+  const THREE = await import('three');
+  const { City } = await import('../src/world.js');
+  const city = new City(new THREE.Scene());
+  const spot = city.propSpots.find((s) => s.type === 'tvwall' && s.screen);
+  const mesh = spot.screen;
+  const tex = () => mesh.material.map;
+  const version = () => (tex() ? tex().version : 0);
+
+  city.setTVOn(mesh, true);
+  const map = tex();
+  assert.ok(map, 'a channel texture is attached');
+  const v0 = version();
+  for (let i = 0; i < 6; i++) city.update(2 + i * 0.2, 0.12);
+  const v1 = version();
+  assert.ok(v1 > v0, `the channel canvas repaints while on (${v0} → ${v1})`);
+
+  // the channel rolls over every 16 s and keeps repainting
+  const channel0 = city._tv.channel;
+  for (let i = 0; i < 20; i++) city.update(20 + i * 1.1, 1.1);
+  assert.notEqual(city._tv.channel, channel0, 'the channel changes while watching');
+
+  // switching off stops the work and darkens the panel again
+  city.setTVOn(mesh, false);
+  const vOff = version();
+  assert.equal(city.tvCount(), 0, 'no active screens');
+  for (let i = 0; i < 8; i++) city.update(40 + i * 0.2, 0.2);
+  assert.equal(version(), vOff, 'nothing repaints once the screen is off');
+});
+
 // ---------------------------------------------------------------------------
 // 4. All buildings are walk-in with real walls, windows, doors & a desk
 // ---------------------------------------------------------------------------
@@ -298,4 +367,51 @@ test('Seats: the desk seats you on its own chair, facing the monitor', async () 
   const chair = deskGroup.children.find((c) => c.isGroup && Math.abs(c.position.z - seat.forward) < 0.02);
   assert.ok(chair, 'the desk is built with its chair');
   assert.equal(Math.round(chair.rotation.y / Math.PI), 1, 'the chair faces the desk');
+});
+
+test('TV: every screen has a seat facing it, or a clear spot to watch from', async () => {
+  const THREE = await import('three');
+  const { City } = await import('../src/world.js');
+  const Props = await import('../src/props.js');
+  const city = new City(new THREE.Scene());
+
+  // screens are screens, not seats, and the cinema is still a "service" in the data
+  assert.equal(Props.isScreen('tvwall'), true);
+  assert.equal(Props.isScreen('cinema_screen'), true);
+  assert.equal(Props.isScreen('sofa'), false);
+  assert.equal(Props.isSeating('tvwall'), false, 'a TV is never chosen as a seat');
+  assert.equal(Props.isSeating('cinema_screen'), false);
+  assert.equal(Props.interactionFor('cinema_screen').service, true, 'the box office flag stays on the data');
+
+  const screens = city.propSpots.filter((s) => Props.isScreen(s.type));
+  assert.ok(screens.length >= 3);
+  for (const spot of screens) {
+    const cinema = spot.type === 'cinema_screen';
+    const seats = city.propSpotsNear(spot.x, spot.z, spot.y, cinema ? 12 : 7)
+      .filter((s2) => s2 !== spot && Props.isSeating(s2.type));
+    // same scoring the game uses: nearest seat that actually faces the picture
+    let best = null; let bestScore = Infinity;
+    for (const s2 of seats) {
+      const dx = spot.x - s2.x; const dz = spot.z - s2.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const facing = (Math.sin(s2.rot || 0) * dx + Math.cos(s2.rot || 0) * dz) / d;
+      const score = d * (1.7 - Math.max(0, facing));
+      if (score < bestScore) { bestScore = score; best = { spot: s2, facing, d }; }
+    }
+    if (best) {
+      assert.ok(best.facing > 0.85, `${spot.buildingId}: the chosen seat faces the screen (${best.facing.toFixed(2)})`);
+      assert.ok(best.d <= (cinema ? 12 : 7), 'and it is in range');
+    } else {
+      // no furniture: the game stands you 2.1 m along the screen normal
+      const ax = spot.x + Math.sin(spot.rot || 0) * 2.1;
+      const az = spot.z + Math.cos(spot.rot || 0) * 2.1;
+      const inside = city.buildingAt(ax, az);
+      assert.ok(inside && inside.building.id === spot.buildingId,
+        `${spot.buildingId}: the standing spot is inside the room`);
+    }
+  }
+
+  // the mall cinema really does have rows to sit in
+  const rows = city.propSpots.filter((s) => s.buildingId === 'metro_mall' && s.type === 'bench');
+  assert.ok(rows.length >= 4, `cinema seating (${rows.length})`);
 });

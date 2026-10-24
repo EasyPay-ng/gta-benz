@@ -363,6 +363,19 @@ export class City {
     return !!this._tv && this._tv.active.has(mesh);
   }
 
+  /** Label of the channel currently airing (visible in the HUD). */
+  channelName() {
+    const tv = this._tv;
+    if (!tv || !tv.active.size) return '';
+    const names = ['Metro News', 'Metro Sports', 'Benny & the Metro Crew', 'The Long Road'];
+    return names[tv.channel % names.length];
+  }
+
+  /** Count of screens currently switched on. */
+  tvCount() {
+    return this._tv ? this._tv.active.size : 0;
+  }
+
   _drawScreen(target, mode, t) {
     const { ctx, canvas } = target;
     const w = canvas.width;
@@ -1169,13 +1182,15 @@ export class City {
   }
 
   /** Register every prop of a frame-local interior and return the persisted list. */
-  _registerFrameProps(building, frame, props, level = 0) {
+  _registerFrameProps(building, frame, props, level = 0, groups = null) {
     const list = [];
-    for (const prop of props) {
+    for (let i = 0; i < props.length; i++) {
+      const prop = props[i];
       const world = this.toWorld(frame, prop.x, prop.z);
       const spot = this._registerPropSpot({
         buildingId: building.id, level, type: prop.type,
         x: world.x, z: world.z, y: building.baseY + 0.1, rot: prop.rot + (frame.face === 1 ? 0 : Math.PI),
+        screen: groups?.[i]?.userData?.screen || null,
       });
       if (spot) list.push(spot);
     }
@@ -1436,6 +1451,13 @@ export class City {
           { type: 'planter', x: -hw + 2.0, z: hd - 2.4, rot: 0 },
           { type: 'planter', x: hw - 2.0, z: hd - 2.4, rot: 0 },
           { type: 'cinema_screen', x: 0, z: -hd + 0.9, rot: 0 },
+          // cinema seating facing the screen (E seats you facing the picture)
+          { type: 'bench', x: -3.6, z: -hd + 5.2, rot: Math.PI },
+          { type: 'bench', x: 0, z: -hd + 5.2, rot: Math.PI },
+          { type: 'bench', x: 3.6, z: -hd + 5.2, rot: Math.PI },
+          { type: 'bench', x: -3.6, z: -hd + 7.4, rot: Math.PI },
+          { type: 'bench', x: 0, z: -hd + 7.4, rot: Math.PI },
+          { type: 'bench', x: 3.6, z: -hd + 7.4, rot: Math.PI },
         ].filter((p, i, arr) => {
           // the cinema screen lives on the east wing; keep it clear of the counters
           if (p.type === 'cinema_screen') return true;
@@ -2122,8 +2144,9 @@ export class City {
       this.frameCollider(frame, 6.4, -9.2, 1.2, 2.8);
       for (const x of [-12, -6, 6, 12]) this.box(g, x, 0.02, 8, 0.2, 0.02, 5, this.mats.white, { cast: false });
     }
+    const propGroups = [];
     for (const prop of props) {
-      this._addProp(g, prop);
+      propGroups.push(this._addProp(g, prop));
       const spec = Interiors.PROP_SPECS[prop.type];
       if (spec && spec.collide) {
         const world = this.toWorld(frame, prop.x, prop.z);
@@ -2133,7 +2156,7 @@ export class City {
         });
       }
     }
-    this._registerFrameProps(building, frame, props);
+    this._registerFrameProps(building, frame, props, 0, propGroups);
     this.box(g, 0, 0.06, -9, 3.4, 0.06, 12.4, m.cream, { cast: false }); // entry runner rug
 
     // interior reception pad (press E at the desk)
@@ -2212,6 +2235,8 @@ export class City {
       { type: 'planter', x: -9.2, z: -5.2, rot: 0 },
       { type: 'planter', x: 9.2, z: -5.2, rot: 0 },
       { type: 'tvwall', x: -6.0, z: -7.6, rot: 0 },
+      { type: 'armchair', x: -6.0, z: -4.4, rot: Math.PI },
+      { type: 'armchair', x: -3.4, z: -4.9, rot: Math.PI },
     ];
     const dealerGroups = dealerProps.map((prop) => this._addProp(showroom, prop));
     this._registerWorldProps(showroomBuilding, dealerProps, 0, dealerGroups);
@@ -2329,8 +2354,9 @@ export class City {
       { type: 'sofa', x: 6.2, z: -5.2, rot: 0 },
       { type: 'sculpture', x: 0, z: -8.4, rot: 0 },
     ];
+    const shopGroups = [];
     for (const prop of props) {
-      this._addProp(g, prop);
+      shopGroups.push(this._addProp(g, prop));
       const spec = Interiors.PROP_SPECS[prop.type];
       if (spec && spec.collide) {
         const world = this.toWorld(frame, prop.x, prop.z);
@@ -2340,7 +2366,7 @@ export class City {
         });
       }
     }
-    this._registerFrameProps(shop, frame, props);
+    this._registerFrameProps(shop, frame, props, 0, shopGroups);
     // fitting rooms (velvet booths with mirrors)
     for (const sx of [-9.4, 9.4]) {
       this.box(g, sx, 1.4, -12.6, 2.4, 2.8, 2.4, velvetMat);
@@ -2537,13 +2563,14 @@ export class City {
         { type: 'deskpair', x: bw / 2 - 3.8, z: cz - 2.2, rot: -Math.PI / 2 },
         { type: 'planter', x: bw / 2 - 2.2, z: cz + 4.6, rot: 0 },
       ];
+      const lobbyGroups = [];
       for (const prop of lobbyProps) {
-        this._addProp(g, prop);
+        lobbyGroups.push(this._addProp(g, prop));
         const spec = Interiors.PROP_SPECS[prop.type];
         if (spec && spec.collide) this.frameCollider(frame, prop.x, prop.z, spec.w, spec.d, list);
       }
       const techBuilding = this.buildingById(lotId);
-      if (techBuilding) this._registerFrameProps(techBuilding, frame, lobbyProps);
+      if (techBuilding) this._registerFrameProps(techBuilding, frame, lobbyProps, 0, lobbyGroups);
       const techDoor = this.toWorld(frame, 0, front);
       this._addSwingDoor({
         x: techDoor.x, z: techDoor.z, y: CURB_Y,
@@ -2655,8 +2682,9 @@ export class City {
           this.frameCollider(frame, x, z, 1.6, 1.6, list);
         }
       }
+      const lotGroups = [];
       for (const prop of props) {
-        this._addProp(g, prop);
+        lotGroups.push(this._addProp(g, prop));
         const spec = Interiors.PROP_SPECS[prop.type];
         if (spec && spec.collide) {
           this.frameCollider(frame, prop.x, prop.z, spec.w, spec.d, list);
@@ -2667,7 +2695,7 @@ export class City {
           });
         }
       }
-      this._registerFrameProps({ id: lotId, baseY: CURB_Y }, frame, props);
+      this._registerFrameProps({ id: lotId, baseY: CURB_Y }, frame, props, 0, lotGroups);
       const lotDoor = this.toWorld(frame, 0, front);
       this._addSwingDoor({
         x: lotDoor.x, z: lotDoor.z, y: CURB_Y,

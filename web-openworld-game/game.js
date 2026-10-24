@@ -1022,7 +1022,7 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
       e.preventDefault(); sfx.ensure();
       if (b.id === 't-emote') { openEmotesModal(); return; }
       if (b.id === 't-camera') { toggleCameraMode(); return; }
-      if (b.id === 't-uni') { openUniversity(); return; }
+      if (b.id === 't-phone') { if (game.phoneOpen) closePhone(); else phoneOpen(); return; }
       if (b.id === 't-build') { toggleBuildMode(); return; }
       if (anyOverlay()) return;
       if (key === 'interact') interact();
@@ -1073,6 +1073,17 @@ function updateHUD(force = false) {
     $('hud-job').textContent = 'Off duty';
     $('hud-xpwrap').classList.add('hidden');
     $('btn-clockout').classList.add('hidden');
+  }
+  // live TV / cinema state so you can see the picture is really on
+  const tvRow = $('hud-tv-row');
+  if (tvRow) {
+    const on = city.tvCount();
+    tvRow.classList.toggle('hidden', !on);
+    if (on) {
+      const ch = city.channelName();
+      const el = $('hud-tv');
+      if (el) el.textContent = `📺 ${ch || 'On air'}`;
+    }
   }
   $('hud-startups').textContent = `${Eco.builtCount(s)} / ${Object.keys(BUSINESSES).length}`;
   $('hud-employment').textContent = `${Eco.employedCount(s)} / ${TOTAL_CITIZENS} citizens hired`;
@@ -1229,7 +1240,7 @@ phoneEl?.addEventListener('click', (e) => {
     case 'save': saveGame(true); toast('💾 Progress saved.', 'good'); renderPhone(); break;
     case 'load': closePhone(); loadGame(); break;
     case 'help': closePhone(); showHelp(); break;
-    case 'reset': closePhone(); $('btn-reset')?.click(); break;
+    case 'reset': closePhone(); resetGame(); break;
     default: break;
   }
 });
@@ -2416,11 +2427,9 @@ function closeCreator() {
   saveGame(true);
   if (net) net.setAppearance(game.state.appearance);
 }
+// The side rail only carries in-the-moment controls; everything else is in the phone.
 $('btn-camera')?.addEventListener('click', () => toggleCameraMode());
-$('btn-uni')?.addEventListener('click', () => (game.modal ? closeModal() : openUniversity()));
 $('btn-build')?.addEventListener('click', () => toggleBuildMode());
-$('btn-creator').addEventListener('click', () => (game.creatorOpen ? closeCreator() : openCreator()));
-$('btn-garage').addEventListener('click', () => (game.modal ? closeModal() : openGarageModal()));
 $('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : openEmotesModal()));
 
 // Help
@@ -2434,15 +2443,11 @@ function hideHelp() {
   if (pendingLogin) { pendingLogin = false; showLogin(); }
 }
 $('help-close').addEventListener('click', () => { sfx.ensure(); hideHelp(); });
-$('btn-help').addEventListener('click', showHelp);
-$('btn-save').addEventListener('click', () => saveGame());
-$('btn-load').addEventListener('click', () => loadGame());
-$('btn-reset').addEventListener('click', resetGame);
 function toggleMute() {
   sfx.muted = !sfx.muted;
-  $('btn-mute').textContent = sfx.muted ? '🔇' : '🔊';
+  const el = $('btn-mute');
+  if (el) el.textContent = sfx.muted ? '🔇' : '🔊';
 }
-$('btn-mute').addEventListener('click', () => { sfx.ensure(); toggleMute(); });
 // keep keyboard focus on the game after clicking HUD buttons
 for (const b of document.querySelectorAll('.side-buttons button')) b.addEventListener('click', () => b.blur());
 
@@ -3021,7 +3026,12 @@ function builtPropSpotsNear(x, z, y, radius = 2.6) {
     if (!type || !Props.isInteractable(type)) continue;
     if (Math.abs(piece.y - y) > 1.7) continue;
     const d = Math.hypot(piece.x - x, piece.z - z);
-    if (d < radius) out.push({ type, x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, built: true });
+    if (d < radius) {
+      out.push({
+        type, x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, built: true,
+        screen: game.buildMeshes?.get(piece.id)?.userData?.screen || null,
+      });
+    }
   }
   return out;
 }
@@ -3055,14 +3065,16 @@ function usePropSpot(spot) {
     return;
   }
 
+  // TV & cinema come first: the cinema screen's interaction is flagged as a
+  // service (the box office), but pressing E on the screen itself must switch
+  // the picture on, not open the ticket desk.
+  if (Props.isScreen(spot.type)) {
+    return watchScreen(spot, def);
+  }
+
   if (def.service) {
     openServiceForBuilding(spot.buildingId);
     return;
-  }
-
-  // TV & cinema: take a seat facing the screen, switch it on and watch it
-  if (spot.type === 'tvwall' || spot.type === 'cinema_screen') {
-    return watchScreen(spot, def);
   }
 
   const res = Props.useProp(s, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
@@ -3099,24 +3111,38 @@ function usePropSpot(spot) {
  * actually shows a channel, and play the watching animation.
  */
 function watchScreen(spot, def) {
-  const p = game.player;
-  const screen = spot.screen || null;
+  const cinema = spot.type === 'cinema_screen';
+  // The screen mesh normally travels with the prop spot; if a spot ever loses
+  // its handle, fall back to the nearest live screen so a TV is never dead.
+  let screen = spot.screen || null;
   if (!screen) {
-    // decorative screen with no live display — fall back to a normal use
-    const res = Props.useProp(game.state, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
-    toast(res.msg, 'good');
+    let bd = 6 * 6;
+    for (const other of allScreenSpots()) {
+      const d = (other.x - spot.x) ** 2 + (other.z - spot.z) ** 2;
+      if (d < bd) { bd = d; screen = other.screen; }
+    }
+  }
+  if (!screen) {
+    const use = Props.useProp(game.state, spot.type, { now: Date.now(), spot: propSpotLabel(spot) });
+    toast(use.msg, 'good');
     return;
   }
-  const cinema = spot.type === 'cinema_screen';
+
+  // Pick the nearest seat that actually faces the screen, so you are never
+  // parked on the sofa staring at a wall.
   const seats = city.propSpotsNear(spot.x, spot.z, spot.y, cinema ? 12 : 7)
     .filter((s2) => s2 !== spot && Props.isSeating(s2.type));
   let seat = null;
-  let bestD = Infinity;
+  let bestScore = Infinity;
   for (const s2 of seats) {
-    const d = (s2.x - spot.x) ** 2 + (s2.z - spot.z) ** 2;
-    if (d < bestD) { bestD = d; seat = s2; }
+    const dx = spot.x - s2.x;
+    const dz = spot.z - s2.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const facing = (Math.sin(s2.rot || 0) * dx + Math.cos(s2.rot || 0) * dz) / d;
+    const score = d * (1.7 - Math.max(0, facing));
+    if (score < bestScore) { bestScore = score; seat = s2; }
   }
-  // Face the screen from the seat (screen front is +Z in prop space)
+
   if (seat) {
     const yaw = Math.atan2(spot.x - seat.x, spot.z - seat.z);
     sitOnProp(seat, Props.interactionFor(seat.type), {
@@ -3124,11 +3150,12 @@ function watchScreen(spot, def) {
     });
     game.player.char.playAction(cinema ? 'movie' : 'tv', { loop: true, duration: 30 });
   } else {
+    // no sofa nearby — stand square in front of the screen and watch from there
     const fx = Math.sin(spot.rot || 0);
     const fz = Math.cos(spot.rot || 0);
     const anchor = {
       type: 'tvwall', x: spot.x + fx * 2.1, z: spot.z + fz * 2.1,
-      y: spot.y, rot: Math.atan2(-fx, -fz), buildingId: spot.buildingId,
+      y: spot.y, rot: Math.atan2(-fx, -fz), buildingId: spot.buildingId, screen,
     };
     sitOnProp(anchor, { pose: 'stand', action: '' }, { watch: screen, action: 'tv' });
     game.player.char.seat = null;
@@ -3140,6 +3167,86 @@ function watchScreen(spot, def) {
   city.setTVOn(screen, true);
   sfx.click();
   toast(cinema ? '🎬 The film starts — enjoy the show.' : '📺 You switch the TV on and settle in.', 'good');
+  updateHUD(true);
+}
+
+// ---------------------------------------------------------------------------
+// TVs & cinema screens: switch on whatever the player is actually watching
+// ---------------------------------------------------------------------------
+const TV_SCAN_INTERVAL = 0.3;
+let tvScanT = 0;
+const tvScratch = new THREE.Vector3();
+
+/** Every screen we could switch on: street-level props, the active tower floor
+ *  and anything the player built. Missing screen handles fall back to a scene
+ *  lookup so a TV can never be dead. */
+function allScreenSpots() {
+  const out = [];
+  const seen = new Set();
+  const add = (spot) => {
+    const mesh = spot?.screen;
+    if (!mesh || !mesh.userData?.screen || seen.has(mesh.uuid)) return;
+    seen.add(mesh.uuid);
+    out.push(spot);
+  };
+  for (const s of city.propSpots) add(s);
+  for (const s of city._activePropSpots || []) add(s);
+  for (const [id, group] of game.buildMeshes || []) {
+    const screen = group?.userData?.screen;
+    if (!screen) continue;
+    const piece = (game.state?.builds?.pieces || []).find((p) => p.id === id);
+    if (!piece) continue;
+    add({ type: 'tvwall', x: piece.x, z: piece.z, y: piece.y, rot: piece.rot || 0, screen, built: true });
+  }
+  return out;
+}
+
+/** Nearest screen in front of the player (or of a seat) within `radius`. */
+function screenAhead(radius = 8, minDot = 0.3, from = null) {
+  const p = game.player;
+  const x = from?.x ?? p.x;
+  const z = from?.z ?? p.z;
+  const y = from?.y ?? p.y;
+  const yaw = from?.yaw ?? game.seat?.yaw ?? p.yaw;
+  const fx = Math.sin(yaw); const fz = Math.cos(yaw);
+  let best = null; let bd = Infinity;
+  for (const spot of allScreenSpots()) {
+    const mesh = spot.screen;
+    mesh.getWorldPosition(tvScratch);
+    if (Math.abs(tvScratch.y - (y + 1.2)) > 3.4) continue;
+    const dx = tvScratch.x - x; const dz = tvScratch.z - z;
+    const d = Math.hypot(dx, dz);
+    if (d > radius || d < 0.25) continue;
+    const dot = (dx / d) * fx + (dz / d) * fz;
+    if (dot < minDot) continue;
+    if (d * (1.6 - dot) < bd) { bd = d * (1.6 - dot); best = spot; }
+  }
+  return best;
+}
+
+/**
+ * Keep the screens honest: seated on a sofa (or anywhere) facing a TV switches
+ * it on by itself; standing up or walking away switches it off. The explicit
+ * "Watch TV" prompt does the same thing, just with a seat chosen for you.
+ */
+function updateWatchingTv(dt) {
+  tvScanT -= dt;
+  if (tvScanT > 0) return;
+  tvScanT = TV_SCAN_INTERVAL;
+  const seat = game.seat;
+  if (!seat) return;
+  if (seat.watch) {
+    if (!city.isTVOn(seat.watch)) city.setTVOn(seat.watch, true);
+    return;
+  }
+  const spot = screenAhead(8.5, 0.25);
+  if (!spot) return;
+  seat.watch = spot.screen;
+  city.setTVOn(spot.screen, true);
+  if (!seat.watchToast) {
+    seat.watchToast = true;
+    toast(spot.type === 'cinema_screen' ? '🎬 The film starts — enjoy the show.' : '📺 The screen flickers on.', 'good');
+  }
   updateHUD(true);
 }
 
@@ -3671,11 +3778,18 @@ function makeBuildMesh(piece, ghost = false) {
       for (const dx of [-0.8, 0.8]) box(dx, 0.36, 0, 0.12, 0.72, 0.9, dark);
       for (const dz of [-0.95, 0.95]) box(0, 0.45, dz, 0.5, 0.75, 0.1, trim);
       break;
-    case 'tv_stand':
+    case 'tv_stand': {
       box(0, 0.32, 0, 2.4, 0.55, 0.5, dark);
       box(0, 1.3, 0, 2.1, 1.2, 0.1, dark);
-      box(0, 1.3, 0.07, 1.96, 1.06, 0.03, glass);
+      // the panel is a live screen: it switches on like every other TV in the city
+      const panel = box(0, 1.3, 0.09, 1.96, 1.06, 0.03, ghost ? glass : city._tvSetup().off);
+      if (!ghost) {
+        panel.userData.screen = true;
+        g.userData.screen = panel;
+      }
+      box(0, 1.3, 0.075, 2.0, 1.1, 0.02, trim);
       break;
+    }
     case 'bookshelf':
       box(-1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
       box(1.0, 1.1, 0, 0.1, 2.2, 0.5, dark);
@@ -4792,6 +4906,7 @@ function frame() {
     if (liveSchedule.length) city.updateLectureBoard(liveSchedule[0]);
   }
   city.update(game.elapsed, dt);
+  updateWatchingTv(dt);
   updatePrompt();
   updateCamera(dt);
   updateHUD();
