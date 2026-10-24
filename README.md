@@ -81,6 +81,7 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - **Wellbeing:** the prop restores the right wellbeing stat and the camera follows. Live **Wellbeing** HUD row (energy · comfort · hotel key): energy drains as you walk and sprint, and low energy slows your sprint; comfort, health and fitness each have their own effects. Sitting regenerates energy & comfort, beds restore energy overnight, TV/bookshelf/desk hook into leisure & university study, the kitchen feeds you for $12, the bar pours a drink, the server rack pays a freelance bonus, the pool table, piano and gym equipment each have their own verb, and every prop has a cooldown so bonuses can't be farmed.
   - **Reception desks open their real menus:** clock in at the courier/security/cab desks, browse Maison Verve, run your startup, or check in at the hotel — all from inside the building.
 - **Every Building Walk-In with Standard Walls & Windows.** Metro Motors' showroom and a new **Fuel & Go** convenience store on each of the three forecourts are now enterable buildings with real doors, reception/counter service and stocking shelves — alongside the towers, job HQs, Maison Verve and university halls. Every walk-in interior is lined with **painted plaster walls, skirting boards, framed windows and a ceiling trim** so rooms look like real rooms from the inside instead of showing the exterior window texture.
+- **FreshMart Superstore — a supermarket you actually shop in (`src/groceries.js`, `src/world.js`).** A 34 m big-box grocery on the South Waterfront with five dry aisles of stocked shelving (dairy, pantry, drinks, household, chilled & frozen), a glowing chiller wall, a produce island, a bakery counter and **four self-checkout tills**. Walk up to any shelf and press `E` to open it: add and remove products, watch the trolley total, then pay at a till. What you buy is carried home to your **pantry** — eat it from the **Groceries** app on the MetroPhone to restore energy and comfort (a steak is +26, a cake is +18 and a lot of comfort). The phone also keeps a weekly **shopping list** that ticks itself off as you stock up and rolls over to a fresh list once it is complete.
 - **South Waterfront — Hotel, Hospital, Museum, Mall, Gym & Library District (`src/publicPlaces.js`, `src/world.js`).** A brand-new civic district runs south of `3rd St` (map labels **H A C G L**): the **13-storey Grand Meridian Hotel** (standard $120 / deluxe $260 / penthouse $640 a night — book a room, ride the lift, sleep in a real hotel bed, check out), **Metro General Hospital** (checkup $45, emergency $120, full treatment $260 plus interactive treatment beds), the **Museum of Art** (3 ticket tiers, three galleries and a sculpture court), **Metro Central Mall & Cineplex** (fashion boutiques, a food court of 6 meals & a six-screen cinema), **Metro Iron Fitness Club** (day pass, PT session, protein bar) and **Metro Public Library** (free borrowing, quiet study desks, borrowable books that boost study).
   - **The district is a real place:** a new cross avenue with street lamps, a palm-lined promenade with benches, sun loungers, a lifeguard tower and a sea wall over the beach, all walk-in with openable doors and reception counters.
   - **Denser downtown:** every skyline block now packs a 3×3 parcel of towers, all street-facing, so the skyline and your lift directory grew with it.
@@ -108,7 +109,7 @@ On touch devices you get an on-screen joystick and buttons (including `🎥` cam
   - At 0 HP the car is **wrecked** and smokes until towed or repaired.
   - **Shop & Roadside service:** visit **Metro Motors' mechanic** (+20% city rates) or your **Apex Auto Garage** (house rates), OR press **`T`** anywhere (or **`E`** beside a wrecked/stalled car) to open **Garage & Roadside Assist** and call a tow ($250), dispatch a mobile mechanic ($150 call-out + parts), or buy an emergency +35% fuel can ($95).
 - **AI traffic.** 12 cars drive right-hand lanes across the grid and brake for pedestrians, cars and you. They honk if you block them.
-- **Save system.** `localStorage` key `metroventure_openworld_save_v1` (v9). Stores cash, look, job XP, startups, employees, vehicles, positions, every 3D piece you have built (`state.builds`) and your **wellbeing & hotel stay** (`state.leisure`). Old v2–v8 saves migrate automatically with an empty build plot, a fresh wellbeing meter and no booked room.
+- **Save system.** `localStorage` key `metroventure_openworld_save_v1` (v10). Stores cash, look, job XP, startups, employees, vehicles, positions, every 3D piece you have built (`state.builds`), your **wellbeing & hotel stay** (`state.leisure`) and your **groceries** — pantry, trolley and shopping list (`state.groceries`). Old v2–v9 saves migrate automatically with an empty build plot, a fresh wellbeing meter, no booked room and a brand-new pantry.
 
 ## Project layout
 
@@ -124,6 +125,7 @@ web-openworld-game/
   src/props.js        pure interactive-furniture catalogue, wellbeing/energy model, cooldowns, swing-door state
   src/publicPlaces.js pure South Waterfront places, hotel booking, hospital, museum, mall, gym & library services
   src/build.js        pure 3D Architect catalog, grid snapping, placement/collision, stairs & save migration
+  src/groceries.js    pure FreshMart catalogue, trolley, self-checkout, pantry & shopping list
   src/time.js         pure 24× city clock, day/night lighting & shift boundaries
   src/economy.js      pure game-state logic & save migrations (unit-tested, no DOM)
   src/customization.js pure Boutique wardrobe, outfit bundles, vehicle mods & multiplayer vehicle codec
@@ -138,7 +140,7 @@ web-openworld-game/
   src/vehicles.js     sculpted clearcoat cars, 5-spoke rims, light flares, AI traffic & PoliceCar
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
   src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock & emote sync)
-  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism, streaming)
+  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism, streaming, groceries)
 server/               free multiplayer server (Cloudflare Worker + Durable Object)
 tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
@@ -157,9 +159,9 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming, FreshMart shopping & pantry) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
 
-- **101 client tests** — `npm test`
+- **114 client tests** — `npm test`
 - **89 server tests** — `npm --prefix server run test:all` (smoke, accounts & NetClient E2E)
 
 ## Deploy to GitHub Pages

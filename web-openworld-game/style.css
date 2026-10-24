@@ -362,6 +362,17 @@ button.big { padding: 12px 22px; font-size: 1.05rem; }
 }
 #floor-badge.hidden { display: none; }
 
+/* FreshMart shopping list & self-checkout */
+.goods-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.goods-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); }
+.goods-icon { font-size: 22px; line-height: 1; width: 26px; text-align: center; }
+.goods-name { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.goods-name b { font-size: 14px; }
+.goods-name small { opacity: 0.62; font-size: 11px; }
+.goods-price { font-variant-numeric: tabular-nums; font-weight: 700; opacity: 0.9; min-width: 52px; text-align: right; }
+.goods-qty { min-width: 26px; text-align: center; font-weight: 700; color: #86efac; }
+.goods-row button { padding: 4px 10px; min-width: 34px; border-radius: 8px; }
+
 .lift-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px; margin: 12px 0;

@@ -24,6 +24,7 @@ import * as PhoneView from './src/phoneview.js';
 import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
+import * as Groceries from './src/groceries.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -1232,6 +1233,13 @@ phoneEl?.addEventListener('click', (e) => {
     case 'openGarage': closePhone(); openGarageModal(); break;
     case 'openUni': closePhone(); openUniversity(); break;
     case 'clockOut': doClockOut(); renderPhone(); break;
+    case 'eatGood': {
+      const res = Groceries.eatFromPantry(game.state, act.dataset.good);
+      if (res.ok) { sfx.cash(); toast(res.msg, 'good'); saveGame(true); } else { sfx.error(); toast(res.msg, 'warn'); }
+      renderPhone();
+      updateHUD(true);
+      break;
+    }
     case 'openBuild': closePhone(); toggleBuildMode(true); break;
     case 'openLook': closePhone(); openCreator(); break;
     case 'camera': toggleCameraMode(); renderPhone(); break;
@@ -1974,6 +1982,36 @@ function dealerModal() {
 const modalActions = {
   close: () => closeModal(),
   rideLift: ({ level }) => rideElevator(Number(level)),
+
+  // FreshMart
+  addGood: ({ good }) => {
+    const res = Groceries.basketAdd(game.state, good);
+    if (res.ok) { sfx.click(); toast(res.msg, ''); } else { sfx.error(); toast(res.msg, 'warn'); }
+  },
+  takeGood: ({ good }) => {
+    const res = Groceries.basketRemove(game.state, good);
+    if (res.ok) { sfx.click(); toast(res.msg, ''); } else { sfx.error(); toast(res.msg, 'warn'); }
+  },
+  clearBasket: () => {
+    const res = Groceries.basketClear(game.state);
+    sfx.click();
+    toast(res.msg, '');
+  },
+  payBasket: () => {
+    const res = Groceries.checkout(game.state);
+    if (res.ok) {
+      sfx.cash();
+      toast(res.msg, 'good');
+      saveGame(true);
+      updateHUD(true);
+      closeModal();
+    } else {
+      sfx.error();
+      toast(res.msg, 'warn');
+    }
+  },
+  openTill: () => { openTillModal(null); },
+  openTrolley: () => { openTrolleyModal(); },
   openUni: () => { closeModal(); openUniversity(); },
   hotelBook: ({ room, nights }) => {
     const res = Places.bookHotelRoom(game.state, { roomType: room, nights: Number(nights) || 1, day: Time.dayOf(getClock()) });
@@ -3047,6 +3085,12 @@ function usePropSpot(spot) {
   if (game.seat) { standUpFromProp(); return; }
   if (game.player.vehicle) { toast('Step out of the car first.', 'warn'); return; }
 
+  // FreshMart: shelves, chillers, produce, bakery, tills & the trolley bay all
+  // open the shopping UI instead of applying a one-shot prop effect.
+  if (spot.type === 'trolley') { openTrolleyModal(); return; }
+  if (spot.type === 'till') { openTillModal(spot); return; }
+  if (Props.isShopProp(spot.type)) { openShelfModal(spot); return; }
+
   // Hotel beds are reserved for paying guests
   if (spot.type === 'bed' && spot.buildingId === 'grand_hotel') {
     const res = Places.sleepHotelNight(s, {});
@@ -3451,6 +3495,7 @@ function placeServiceModal(placeId) {
     if (placeId === 'metro_mall') return mallCard();
     if (placeId === 'metro_gym') return gymCard();
     if (placeId === 'metro_library') return libraryCard();
+    if (placeId === 'freshmart') return tillModal(null);
     return '<h2>Front desk</h2><div class="actions"><button data-action="close">Close</button></div>';
   };
 }
@@ -3543,6 +3588,107 @@ function rideElevator(level) {
   toast(`🛗 ${Interiors.floorLabel(b, target)}`, 'good');
   sfx.tone(320, 0.08, 'triangle', 0.05);
   sfx.tone(480, 0.12, 'triangle', 0.04, 0.09);
+}
+
+// ===========================================================================
+// FreshMart Superstore — shelving, trolley & self-checkout
+// ===========================================================================
+function basketQty(state) {
+  const map = {};
+  for (const line of Groceries.basketLines(state)) map[line.id] = line.qty;
+  return map;
+}
+
+function trolleyLine(summary) {
+  if (!summary.basketCount) return 'empty trolley';
+  return `${summary.basketCount} item${summary.basketCount === 1 ? '' : 's'} · ${money(summary.basketTotal)}`;
+}
+
+function openShelfModal(spot) {
+  openModal(() => shelfModal(spot));
+}
+
+function shelfModal(spot) {
+  const s = game.state;
+  const ids = spot.goods?.length ? spot.goods : Groceries.goodsIn(spot.category || 'produce');
+  const qty = basketQty(s);
+  const sum = Groceries.grocerySummary(s);
+  const rows = ids.map((id) => {
+    const good = Groceries.goodsById(id);
+    if (!good) return '';
+    const have = qty[id] || 0;
+    const effect = good.energy ? `+${good.energy} energy` : (good.comfort ? `+${good.comfort} comfort` : 'household');
+    return `<div class="goods-row">
+      <span class="goods-icon">${good.icon}</span>
+      <span class="goods-name"><b>${good.name}</b><small>${good.unit} · ${effect}</small></span>
+      <span class="goods-price">${money(good.price)}</span>
+      <span class="goods-qty">${have ? `×${have}` : ''}</span>
+      <button data-action="takeGood" data-good="${id}" ${have ? '' : 'disabled'} aria-label="Remove one ${good.name}">−</button>
+      <button class="primary" data-action="addGood" data-good="${id}" aria-label="Add one ${good.name}">+</button>
+    </div>`;
+  }).join('');
+  return `<h2>🛒 ${spot.name || 'FreshMart Superstore'}</h2>
+    <p class="sub">Trolley: <b>${trolleyLine(sum)}</b> · Cash: <b>${money(s.cash)}</b></p>
+    <div class="goods-list">${rows}</div>
+    <div class="actions">
+      <button class="primary" data-action="openTill">🧾 Self-checkout (${money(sum.basketTotal)})</button>
+      <button data-action="openTrolley">🧺 Trolley</button>
+      <button data-action="close">Keep shopping</button>
+    </div>
+    <p class="muted">Walking out with a full trolley is free — the tills are at the front of the store.</p>`;
+}
+
+function openTillModal(spot = null) {
+  openModal(() => tillModal(spot));
+}
+
+function tillModal(spot) {
+  const s = game.state;
+  const lines = Groceries.basketLines(s);
+  const sum = Groceries.grocerySummary(s);
+  const rows = lines.length
+    ? lines.map((line) => `<div class="goods-row">
+        <span class="goods-icon">${line.icon}</span>
+        <span class="goods-name"><b>${line.name}</b><small>${line.qty} × ${money(line.price)}</small></span>
+        <span class="goods-price">${money(line.line)}</span>
+        <button data-action="takeGood" data-good="${line.id}" aria-label="Put one ${line.name} back">−</button>
+      </div>`).join('')
+    : '<p class="muted">Nothing scanned yet — shop the aisles first.</p>';
+  const short = s.cash < sum.basketTotal;
+  return `<h2>💳 ${spot?.name || 'Self-checkout'}</h2>
+    <p class="sub">Beep… beep… · <b>${trolleyLine(sum)}</b> · Cash: <b>${money(s.cash)}</b></p>
+    <div class="goods-list">${rows}</div>
+    <p class="muted">Total <b>${money(sum.basketTotal)}</b>${short ? ' — you are short of cash.' : ''} · Paying stocks your pantry at home.</p>
+    <div class="actions">
+      <button class="primary" data-action="payBasket" ${lines.length ? '' : 'disabled'}>💳 Pay ${money(sum.basketTotal)}</button>
+      <button data-action="clearBasket" ${lines.length ? '' : 'disabled'}>↩ Unload trolley</button>
+      <button data-action="close">Close</button>
+    </div>`;
+}
+
+function openTrolleyModal() {
+  openModal(() => trolleyModal());
+}
+
+function trolleyModal() {
+  const s = game.state;
+  const lines = Groceries.basketLines(s);
+  const sum = Groceries.grocerySummary(s);
+  const rows = lines.length
+    ? lines.map((line) => `<div class="goods-row">
+        <span class="goods-icon">${line.icon}</span>
+        <span class="goods-name"><b>${line.name}</b><small>${line.qty} × ${money(line.price)} · ${Groceries.CATEGORIES[line.cat]?.name || line.cat}</small></span>
+        <span class="goods-price">${money(line.line)}</span>
+        <button data-action="takeGood" data-good="${line.id}" aria-label="Put one ${line.name} back">−</button>
+      </div>`).join('')
+    : '<p class="muted">Your trolley is empty. Take one from the bay and head down the aisles.</p>';
+  return `<h2>🧺 Your trolley</h2>
+    <p class="sub">${trolleyLine(sum)} · Cash: <b>${money(s.cash)}</b></p>
+    <div class="goods-list">${rows}</div>
+    <div class="actions">
+      <button class="primary" data-action="openTill" ${lines.length ? '' : 'disabled'}>🧾 Pay at the tills</button>
+      <button data-action="close">Back to shopping</button>
+    </div>`;
 }
 
 // ===========================================================================

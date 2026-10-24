@@ -10,6 +10,7 @@ import * as Interiors from './interiors.js';
 import * as Streaming from './streaming.js';
 import * as Props from './props.js';
 import { PUBLIC_PLACES, DISTRICT } from './publicPlaces.js';
+import { AISLES, CAT_COLORS, GOODS, goodsIn, goodsInAisle } from './groceries.js';
 import {
   makeAsphaltPBR,
   makeFlagstonePBR,
@@ -1182,13 +1183,14 @@ export class City {
   // =========================================================================
   // Interactable furniture spots
   // =========================================================================
-  _registerPropSpot({ buildingId = null, level = 0, type, x, z, y = CURB_Y, rot = 0, name = '', screen = null }) {
+  _registerPropSpot({ buildingId = null, level = 0, type, x, z, y = CURB_Y, rot = 0, name = '', screen = null, extra = null }) {
     if (!Props.isInteractable(type)) return null;
     const def = Props.interactionFor(type);
     const spot = {
       type, x: +x.toFixed(2), z: +z.toFixed(2), y: +y.toFixed(2), rot: +rot.toFixed(3),
       buildingId, level, name: name || def.verb, icon: def.icon, screen,
     };
+    if (extra && typeof extra === 'object') Object.assign(spot, extra);
     this.propSpots.push(spot);
     return spot;
   }
@@ -1281,6 +1283,229 @@ export class City {
     this.addCollider(x - 0.32, x + 0.32, z - 0.32, z + 0.32);
     this.palms.push({ x, z });
     return g;
+  }
+
+  /**
+   * FreshMart Superstore — a big-box grocery you actually shop in: five dry
+   * aisles of shelving, a chiller wall, a produce island, a bakery counter and
+   * four self-checkout tills. Every one of them is an interactive prop spot.
+   */
+  _buildSupermarket(place) {
+    const { id, name, width: w, depth: d, height: h, yaw, color } = place;
+    const m = this._propMaterials();
+    const g = new THREE.Group();
+    g.position.set(place.x, CURB_Y, place.z);
+    g.rotation.y = yaw;
+    this.root.add(g);
+
+    const building = {
+      id, kind: 'hall', name, x: place.x, z: place.z, width: w, depth: d, height: h,
+      baseY: CURB_Y, floors: 0, themeId: place.themeId, seed: 4711, yaw, shop: 'supermarket',
+    };
+    this.enterables.push(building);
+    this.interiorFurniture[id] = [];
+
+    const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.4, metalness: 0.35 });
+    const cream = m.white;
+    const t = 0.6;
+    const doorW = 8.0; const doorH = 4.6;
+    const front = d / 2;
+
+    // ---- shell -------------------------------------------------------------
+    this.box(g, 0, 0.07, 0, w - 1.2, 0.14, d - 1.2, m.marble, { cast: false });
+    this.box(g, 0, h - 0.3, 0, w - 0.4, 0.4, d - 0.4, cream);
+    this.box(g, 0, h + 0.35, 0, w + 0.8, 0.5, d + 0.8, accent);
+    this.box(g, 0, h + 0.75, 0, w + 1.2, 0.22, d + 1.2, this.mats.darkMetal);
+    // back + side walls
+    this.box(g, 0, h / 2, -d / 2, w, h, t, cream);
+    this.frameWorldCollider(building, 0, -d / 2, w, t);
+    for (const sx of [-w / 2, w / 2]) {
+      this.box(g, sx, h / 2, 0, t, h, d, cream);
+      this.frameWorldCollider(building, sx, 0, t, d);
+    }
+    // glazed shopfront either side of the sliding entrance
+    const segW = (w - doorW) / 2;
+    for (const sgn of [-1, 1]) {
+      const x = sgn * (doorW / 2 + segW / 2);
+      this.box(g, x, h / 2, front, segW, h, t, cream);
+      this.frameWorldCollider(building, x, front, segW, t);
+      this.box(g, x, 2.55, front + t / 2 + 0.02, Math.max(1, segW - 2.4), 3.9, 0.12, this.mats.glass, { cast: false });
+      this.box(g, x, 0.6, front + t / 2 + 0.02, Math.max(1, segW - 2.4), 1.2, 0.14, cream, { cast: false });
+      this.box(g, x, 4.6, front + t / 2 + 0.02, Math.max(1, segW - 2.4), 0.22, t + 0.12, accent, { cast: false });
+    }
+    this.box(g, 0, doorH + (h - doorH) / 2, front, doorW + 0.5, h - doorH, t + 0.1, cream);
+    // entrance canopy + trolley bay
+    this.box(g, 0, 4.9, front + 1.5, doorW + 5.0, 0.32, 3.2, accent);
+    for (const sgn of [-1, 1]) {
+      this.box(g, sgn * (doorW / 2 + 2.0), 2.45, front + 2.8, 0.36, 4.9, 0.36, cream);
+      this.box(g, sgn * (doorW / 2 + 2.0), 0.1, front + 2.8, 0.9, 0.2, 0.9, m.dark);
+    }
+    this.sign(g, ['FRESHMART', 'SUPERSTORE · OPEN 24/7'], 0, h + 1.5, front + 0.1, Math.min(w - 4, 20), 2.2, {
+      bg: '#052e16', fg: '#f0fdf4', border: color,
+    });
+    this.sign(g, ['🛒 FRESH EVERY DAY'], 0, 4.55, front + 0.42, 7.4, 0.9, {
+      bg: '#16a34a', fg: '#f0fdf4',
+    });
+
+    // interior lining: painted walls, skirting and high clerestory windows
+    this._interiorWalls(g, {
+      w: w - 1.0, d: d - 1.0, h: h - 0.45,
+      sill: 4.9, head: Math.min(h - 1.4, 7.2),
+      doorW: 8.2, doorH: 4.6, warm: false,
+    });
+
+    // ceiling light panels down the shop
+    for (let lz = -7; lz <= 7; lz += 3.5) {
+      for (const lx of [-9, 0, 9]) this.box(g, lx, h - 0.42, lz, 5.0, 0.1, 0.6, m.glow, { cast: false, receive: false });
+    }
+
+    // ---- aisles ------------------------------------------------------------
+    const shelfH = 1.85;
+    const shelfD = 1.5;
+    const shelfL = 10;
+    const aisleZ = -2;
+    AISLES.forEach((aisle, i) => {
+      const lx = -12 + i * 6;
+      this.box(g, lx, shelfH / 2, aisleZ, shelfD, shelfH, shelfL, m.metal);
+      // three shelf decks, both faces, stocked with coloured product blocks
+      const goods = goodsInAisle(aisle.id);
+      for (const side of [-1, 1]) {
+        for (let level = 0; level < 3; level++) {
+          const y = 0.28 + level * 0.58;
+          this.box(g, lx + side * (shelfD / 2 + 0.02), y, aisleZ, 0.06, 0.06, shelfL - 0.2, m.white, { cast: false });
+          this.box(g, lx + side * (shelfD / 2 - 0.02), y + 0.42, aisleZ, 0.05, 0.05, shelfL - 0.2, m.white, { cast: false });
+        }
+      }
+      // product cartons stand in for stock on the front face
+      for (let k = 0; k < 12; k++) {
+        const good = GOODS[goods[k % goods.length]];
+        if (!good) continue;
+        const pz = aisleZ - shelfL / 2 + 0.7 + k * 0.78;
+        const side = k % 2 === 0 ? 1 : -1;
+        const tone = new THREE.Color(good.icon === '🕯' ? '#fde68a' : CAT_COLORS[good.cat] || '#e5e7eb');
+        const box = new THREE.Mesh(this.boxGeo, this._stockMat(tone));
+        box.scale.set(0.5, 0.34, 0.5);
+        box.position.set(lx + side * (shelfD / 2 + 0.22), 0.22 + (k % 3) * 0.58, pz);
+        box.castShadow = true;
+        g.add(box);
+      }
+      this.frameWorldCollider(building, lx, aisleZ, shelfD, shelfL);
+      // hanging aisle sign
+      this.sign(g, [aisle.id, aisle.label.toUpperCase()], lx, 4.35, aisleZ + shelfL / 2 + 0.4, 3.0, 1.15, {
+        bg: '#0b1220', fg: '#f8fafc', border: aisle.color,
+      });
+      this._registerPropSpot({
+        buildingId: id, type: 'shelf', x: place.x + lx, z: place.z + aisleZ + shelfL / 2 - 0.9, y: CURB_Y,
+        rot: yaw, name: `${aisle.id} · ${aisle.label}`, extra: { aisle: aisle.id, goods: goodsInAisle(aisle.id) },
+      });
+    });
+
+    // ---- chiller wall ------------------------------------------------------
+    const chZ = -d / 2 + 0.9;
+    this.box(g, 0, 1.35, chZ, w - 4, 2.7, 1.1, m.metal);
+    for (const cx of [-9, 0, 9]) {
+      this.box(g, cx, 1.35, chZ + 0.58, 7.4, 2.5, 0.08, this.mats.glass, { cast: false });
+      for (let k = 0; k < 3; k++) {
+        this.box(g, cx, 0.42 + k * 0.78, chZ + 0.5, 7.2, 0.07, 0.5, m.white, { cast: false });
+        this.box(g, cx, 0.78 + k * 0.78, chZ + 0.3, 7.0, 0.06, 0.06, m.glow, { cast: false });
+      }
+      this.box(g, cx, 2.72, chZ + 0.6, 7.4, 0.14, 0.2, accent, { cast: false });
+    }
+    this.frameWorldCollider(building, 0, chZ, w - 4, 1.1);
+    this.sign(g, ['CHILLED & FROZEN'], 0, 3.0, chZ + 0.75, 8.0, 1.0, { bg: '#0c4a6e', fg: '#e0f2fe' });
+    this._registerPropSpot({
+      buildingId: id, type: 'fridge', x: place.x, z: place.z + chZ + 1.6, y: CURB_Y,
+      rot: yaw, name: 'Chiller wall',
+      extra: { goods: [...goodsIn('chilled'), ...goodsIn('frozen')] },
+    });
+
+    // ---- produce island ----------------------------------------------------
+    const prX = -w / 2 + 2.0;
+    this.box(g, prX, 0.45, -1, 2.6, 0.9, 7.2, m.wood);
+    this.box(g, prX, 0.95, -1, 2.7, 0.12, 7.3, m.woodDark);
+    for (let k = 0; k < 6; k++) {
+      const zz = -3.6 + k * 1.05;
+      this.box(g, prX - 0.5, 1.12, zz, 0.9, 0.34, 0.8, this._stockMat(CAT_COLORS.produce), { cast: false });
+      this.box(g, prX + 0.58, 1.12, zz + 0.2, 0.9, 0.34, 0.8, this._stockMat(CAT_COLORS.bakery), { cast: false });
+    }
+    this.frameWorldCollider(building, prX, -1, 2.7, 7.4);
+    this.sign(g, ['FRESH PRODUCE'], prX, 2.3, 2.9, 4.2, 0.9, { bg: '#14532d', fg: '#dcfce7' });
+    this._registerPropSpot({
+      buildingId: id, type: 'produce', x: place.x + prX, z: place.z + 3.4, y: CURB_Y,
+      rot: yaw, name: 'Fresh produce', extra: { goods: goodsIn('produce') },
+    });
+
+    // ---- bakery counter ----------------------------------------------------
+    const bkX = w / 2 - 2.0;
+    this.box(g, bkX, 0.5, -1, 2.6, 1.0, 7.2, m.woodDark);
+    this.box(g, bkX, 1.25, -1, 2.7, 1.4, 7.3, this.mats.glass, { cast: false });
+    for (let k = 0; k < 5; k++) {
+      const zz = -3.4 + k * 1.3;
+      this.box(g, bkX, 1.12, zz, 2.2, 0.14, 0.9, this._stockMat(CAT_COLORS.bakery), { cast: false });
+    }
+    this.box(g, bkX, 2.05, -1, 2.8, 0.16, 7.4, m.wood);
+    this.frameWorldCollider(building, bkX, -1, 2.7, 7.4);
+    this.sign(g, ['BAKERY'], bkX, 2.55, 2.9, 3.4, 0.85, { bg: '#78350f', fg: '#fef3c7' });
+    this._registerPropSpot({
+      buildingId: id, type: 'bakery', x: place.x + bkX, z: place.z + 3.4, y: CURB_Y,
+      rot: yaw, name: 'Bakery counter', extra: { goods: goodsIn('bakery') },
+    });
+
+    // ---- self-checkout tills ----------------------------------------------
+    const laneX = [-10.5, -3.5, 3.5, 10.5];
+    laneX.forEach((lx, i) => {
+      this.box(g, lx, 0.5, 6.5, 3.2, 1.0, 1.3, m.white);
+      this.box(g, lx, 1.05, 6.5, 3.3, 0.12, 1.4, m.dark, { cast: false });
+      this.box(g, lx - 0.9, 1.5, 6.15, 0.8, 0.8, 0.24, m.black);        // belt screen
+      this.box(g, lx - 0.9, 1.55, 6.0, 0.66, 0.5, 0.05, m.screen, { cast: false });
+      this.box(g, lx + 1.2, 1.2, 6.5, 0.15, 1.5, 0.15, m.metal);
+      this.box(g, lx + 1.2, 1.95, 6.5, 0.5, 0.34, 0.3, m.led, { cast: false });
+      this.box(g, lx, 2.7, 6.5, 1.2, 0.5, 0.1, accent, { cast: false });
+      this.sign(g, [`TILL ${i + 1}`], lx, 3.15, 6.4, 1.6, 0.5, { bg: '#052e16', fg: '#bbf7d0' });
+      this.frameWorldCollider(building, lx, 6.5, 3.2, 1.3);
+      this._registerPropSpot({
+        buildingId: id, type: 'till', x: place.x + lx, z: place.z + 7.35, y: CURB_Y,
+        rot: yaw, name: `Self-checkout · till ${i + 1}`, extra: { till: i + 1 },
+      });
+    });
+
+    // ---- trolley bay -------------------------------------------------------
+    for (let k = 0; k < 6; k++) {
+      const tx = -6.2 + k * 0.42;
+      this.box(g, tx, 0.52, 8.4, 0.5, 0.9, 1.4, m.metal, { cast: false });
+      this.box(g, tx, 1.0, 8.4, 0.5, 0.1, 1.4, accent, { cast: false });
+    }
+    this.frameWorldCollider(building, -5.2, 8.4, 3.2, 1.4);
+    this._registerPropSpot({
+      buildingId: id, type: 'trolley', x: place.x - 5.2, z: place.z + 9.0, y: CURB_Y,
+      rot: yaw, name: 'Trolley bay',
+    });
+
+    // a checkout desk prompt so the store is listed with the other services
+    this._registerServiceSpot({
+      placeId: id,
+      serviceId: 'supermarket',
+      name,
+      prompt: 'FreshMart Superstore — self-checkout & groceries',
+      x: place.x, z: place.z + 7.9, y: CURB_Y,
+    });
+
+    // ---- entrance marker, doors & map pin ----------------------------------
+    this._addSwingDoor({
+      x: place.x + Math.sin(yaw) * front,
+      z: place.z + Math.cos(yaw) * front,
+      yaw, width: doorW, height: doorH, leaves: 2,
+      label: `${name} entrance`, buildingId: id,
+    });
+    const marker = this._marker(new THREE.Color(color));
+    const mx = place.x + Math.sin(yaw) * (front + 7.5);
+    const mz = place.z + Math.cos(yaw) * (front + 7.5);
+    marker.position.set(mx, CURB_Y + 0.04, mz);
+    this.root.add(marker);
+    this.stationMarkers.push(marker);
+    this.districtSpots.push({ x: mx, z: mz, id, name, icon: place.icon, place });
+
+    return building;
   }
 
   _buildCivicHall(place) {
@@ -1641,6 +1866,8 @@ export class City {
         this.root.add(marker);
         this.stationMarkers.push(marker);
         this.districtSpots.push({ x: marker.position.x, z: marker.position.z, id: place.id, name: place.name, icon: place.icon, place });
+      } else if (place.type === 'supermarket') {
+        this._buildSupermarket(place);
       } else {
         this._buildCivicHall(place);
       }
@@ -3387,6 +3614,17 @@ export class City {
   // Endless city — procedural districts streamed in around the player
   // =========================================================================
   /** Shared materials for streamed buildings (created once). */
+  /** Cheapest possible way to give shelf stock a colour: one material per hex. */
+  _stockMat(color) {
+    if (!this._stockMats) this._stockMats = new Map();
+    let mat = this._stockMats.get(color);
+    if (!mat) {
+      mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness: 0.75, metalness: 0.05 });
+      this._stockMats.set(color, mat);
+    }
+    return mat;
+  }
+
   _streamMats() {
     if (this._streamMat) return this._streamMat;
     const mk = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, metalness: 0.05, ...extra });

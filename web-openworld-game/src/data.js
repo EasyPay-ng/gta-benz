@@ -1,7 +1,7 @@
 // MetroVenture 3D — static game data (no Three.js dependency, safe to import in Node tests)
 
 export const SAVE_KEY = 'metroventure_openworld_save_v1';
-export const SAVE_VERSION = 9; // v9: interactive furniture & doors, rest/energy, hotel stays & the South Waterfront public district
+export const SAVE_VERSION = 10; // v10: FreshMart groceries, trolley, pantry & shopping list
 
 export const STARTING_CASH = 500;
 export const PAYROLL_INTERVAL = 30; // real seconds per 12-in-game-minute shift (30s * 24 = 720s = 12m)

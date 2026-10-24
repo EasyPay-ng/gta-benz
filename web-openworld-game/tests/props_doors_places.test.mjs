@@ -203,14 +203,14 @@ test('Doors: open/close swing animation, closed doors block, open doors clear th
 // ---------------------------------------------------------------------------
 // 3. Public places & services
 // ---------------------------------------------------------------------------
-test('Public places: hotel stays, hospital, museum, gym, mall, cinema & library', async () => {
+test('Public places: hotel stays, hospital, museum, gym, mall, cinema, library & supermarket', async () => {
   const Places = await import('../src/publicPlaces.js');
   const P = await import('../src/props.js');
   globalThis.__props = P;
 
-  assert.equal(Places.PUBLIC_PLACES.length, 6);
+  assert.equal(Places.PUBLIC_PLACES.length, 7);
   const types = Places.PUBLIC_PLACES.map((p) => p.type).sort().join(',');
-  assert.equal(types, 'gym,hospital,hotel,library,mall,museum');
+  assert.equal(types, 'gym,hospital,hotel,library,mall,museum,supermarket');
   for (const place of Places.PUBLIC_PLACES) {
     assert.ok(place.width > 10 && place.depth > 10 && place.height > 5, `${place.name} has real dimensions`);
     assert.ok(place.services.length >= 1, `${place.name} has a service`);
