@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   CloudClient, httpOrigin, mapCloudError, saveEnvelope, bootPolicy, syncLabel, cloudMessageFor,
-  offlineAllowed, normalizeServerUrl, probeServer,
+  offlineAllowed, normalizeServerUrl, probeServer, classifyServerAddress, NO_SERVER_HINT,
 } from '../src/cloud.js';
 
 /** A fetch double that records requests and replays canned responses. */
@@ -259,4 +259,39 @@ test('Gate: a server that never answers times out instead of hanging the page', 
   assert.equal(res.ok, false);
   assert.equal(res.code, 'timeout');
   assert.ok(Date.now() - started < 1500, 'gave up quickly');
+});
+
+// ---------------------------------------------------------------------------
+// 6. What did the player actually paste?
+// ---------------------------------------------------------------------------
+test('Gate: pasting the game link is called out instead of "nothing answered"', () => {
+  const gameLink = 'wss://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2Fworker.workers.dev%2Fws';
+  const verdict = classifyServerAddress(gameLink);
+  assert.equal(verdict.kind, 'game_link');
+  assert.match(verdict.message, /link to the game, not to a city server/);
+
+  // the plain shared link is the same mistake
+  assert.equal(classifyServerAddress('https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2Fx').kind, 'game_link');
+});
+
+test('Gate: a static host is named, because it can never run the server', () => {
+  const verdict = classifyServerAddress('wss://easypay-ng.github.io/ws');
+  assert.equal(verdict.kind, 'static_host');
+  assert.match(verdict.message, /cannot run a server/);
+  assert.match(verdict.message, /Deploy the Worker/);
+
+  assert.equal(classifyServerAddress('https://anything.netlify.app/ws').kind, 'static_host');
+  assert.equal(classifyServerAddress('https://my-worker.workers.dev/ws').kind, 'server');
+});
+
+test('Gate: a real host without the /ws endpoint is told what is missing', () => {
+  const verdict = classifyServerAddress('wss://my-worker.workers.dev');
+  assert.equal(verdict.kind, 'no_ws_path');
+  assert.match(verdict.message, /\/ws/);
+
+  assert.equal(classifyServerAddress('wss://my-worker.workers.dev/ws').kind, 'server');
+  assert.equal(classifyServerAddress('wss://my-worker.workers.dev/ws?room=metro-1').kind, 'server');
+  assert.equal(classifyServerAddress('').kind, 'invalid');
+  assert.equal(classifyServerAddress('not a url at all !!).').kind, 'invalid');
+  assert.match(NO_SERVER_HINT, /workers\.dev\/ws\?room=/);
 });

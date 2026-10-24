@@ -4,6 +4,11 @@
   "main": "src/index.js",
   "compatibility_date": "2026-09-01",
 
+  // Always claim a *.workers.dev address. Without this a deploy can succeed and
+  // still leave the Worker with "No URLs enabled", which looks exactly like a
+  // broken deploy from the game's side.
+  "workers_dev": true,
+
   // One Durable Object per city/room. SQLite-backed DOs are available on the
   // Workers Free plan; every new DO class must be declared in a migration.
   "durable_objects": {

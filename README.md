@@ -49,6 +49,9 @@ A deployed static build finds its server through `net.json` (the dev server serv
 the GitHub Pages build connect by itself, copy `web-openworld-game/net.example.json` to
 `web-openworld-game/net.json` and put your Worker's URL in it — then the gate never appears.
 
+The server is deployed with a button, not a terminal:
+[`DEPLOY.md`](DEPLOY.md) walks through it in four stages (~8 minutes, free tier, no card).
+
 Point a deployed game at a deployed server once:
 
 ```

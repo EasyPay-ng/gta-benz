@@ -32,6 +32,32 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      # If the repository variable CITY_SERVER_URL is set (Settings → Secrets and
+      # variables → Actions → Variables), the published game learns its city server
+      # at build time and never shows the "city is offline" card. Leave it unset and
+      # the game falls back to asking the player for an address on first visit.
+      - name: Tell the published game where its city server is
+        env:
+          CITY_SERVER_URL: ${{ vars.CITY_SERVER_URL }}
+        run: |
+          if [ -z "$CITY_SERVER_URL" ]; then
+            echo "CITY_SERVER_URL is not set — the game will ask for a server address."
+            exit 0
+          fi
+          python3 - <<'PY' > web-openworld-game/net.json
+          import json, os
+          url = os.environ["CITY_SERVER_URL"].strip()
+          # Accept https://… or wss://… from the variable and publish a WebSocket URL.
+          if url.startswith("https://"):
+              url = "wss://" + url[len("https://"):]
+          elif url.startswith("http://"):
+              url = "ws://" + url[len("http://"):]
+          print(json.dumps({"url": url}, indent=2))
+          PY
+          echo "Wrote web-openworld-game/net.json:"
+          cat web-openworld-game/net.json
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

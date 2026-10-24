@@ -1,0 +1,139 @@
+name: Deploy the city server
+
+# One button, in the browser: Actions → "Deploy the city server" → Run workflow.
+#
+# It needs two repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   a token with the "Edit Cloudflare Workers" template
+#   CLOUDFLARE_ACCOUNT_ID  the account id shown on the Workers & Pages overview
+#
+# Nothing here touches the game files; it only publishes server/ to Cloudflare.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      # A missing secret should read like a sentence, not like a failed login.
+      # Both secrets get shape-checked too, because the two most common mistakes are
+      # pasting the whole dashboard URL into the account id, and pasting a token with
+      # a trailing space.
+      - name: Check both secrets are set and look right
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -z "$TOKEN" ] && missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -z "$ACCOUNT" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secret(s):$missing. Add them in Settings → Secrets and variables → Actions → New repository secret."
+            exit 1
+          fi
+
+          if ! printf '%s' "$ACCOUNT" | grep -qE '^[0-9a-f]{32}$'; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID does not look like an account id."
+            echo "It must be exactly 32 lowercase hex characters, e.g. 2ac2442acdfcd12169021b6402e3d06c."
+            echo "Found ${#ACCOUNT} characters. Did the whole dashboard URL get pasted?"
+            echo "It is the part between dash.cloudflare.com/ and the next slash."
+            exit 1
+          fi
+
+          if printf '%s' "$TOKEN" | grep -qE '[[:space:]]'; then
+            echo "::error::CLOUDFLARE_API_TOKEN contains a space or newline — re-paste it without stray whitespace."
+            exit 1
+          fi
+
+          echo "Both secrets are present and well-formed."
+
+      - name: Install the server's dependencies
+        working-directory: server
+        run: npm install --no-audit --no-fund
+
+      - name: Run the server's own tests first
+        working-directory: server
+        run: node --test test/hub.test.mjs
+
+      # Plain `wrangler deploy`, no third-party action: fewer moving parts, and the
+      # URL it prints is parsed below rather than trusted to an action's output name.
+      - name: Deploy to Cloudflare
+        id: deploy
+        working-directory: server
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          npx wrangler deploy --outdir /tmp/worker-build 2>&1 | tee /tmp/deploy.log
+          URL="$(grep -oE 'https://[A-Za-z0-9._-]+\.workers\.dev' /tmp/deploy.log | head -1)"
+          if [ -z "$URL" ]; then
+            echo "::warning::Could not read the workers.dev URL from the deploy output. Check the log above."
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Prove the deployed server answers
+        if: steps.deploy.outputs.url != ''
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          for i in 1 2 3; do
+            if curl -fsS --max-time 20 "$URL/health"; then
+              echo ""
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt $i did not answer yet; waiting 5s…"
+            sleep 5
+          done
+          echo "::error::The Worker deployed but /health did not answer at $URL"
+          exit 1
+
+      - name: Where your city server lives now
+        if: always() && steps.deploy.outputs.url != ''
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          {
+            echo "## ✅ Your city server is live"
+            echo ""
+            echo "**Server address** — paste this into the game's card once, or save it as the"
+            echo "\`CITY_SERVER_URL\` repository variable so the public build finds it automatically:"
+            echo ""
+            echo '```'
+            echo "${URL}/ws?room=metro-1"
+            echo '```'
+            echo ""
+            echo "**Game address** — share this: https://easypay-ng.github.io/gta-benz/"
+            echo ""
+            echo "Health check: <${URL}/health>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: If this failed, here is what usually causes it
+        if: failure()
+        run: |
+          {
+            echo "## The deploy did not finish"
+            echo ""
+            echo "| What you saw | What it means |"
+            echo "|---|---|"
+            echo "| \`Missing secret(s)\` | Add them in Settings → Secrets and variables → Actions |"
+            echo "| \`Authentication error\` / \`10000\` | The API token is wrong, expired, or lacks **Workers Scripts: Edit** |"
+            echo "| \`workers.dev subdomain\` | Open dash.cloudflare.com → Workers & Pages once and register a subdomain |"
+            echo "| \`node --test\` failed | The server tests broke; the deploy was stopped on purpose |"
+            echo ""
+            echo "The run log above has the exact message."
+          } >> "$GITHUB_STEP_SUMMARY"
