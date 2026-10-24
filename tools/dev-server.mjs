@@ -37,12 +37,42 @@ const MIME = {
   '.map': 'application/json; charset=utf-8',
 };
 
-const server = http.createServer((req, res) => {
+// Is the city server actually listening? Without this the page would advertise a
+// server that is not there, connect, fail, and loop on "Connecting…" forever.
+// Cached briefly so a health probe on every page load stays cheap.
+let upstreamAlive = false;
+let upstreamCheckedAt = 0;
+function probeUpstream() {
+  return new Promise((resolve) => {
+    const now = Date.now();
+    if (now - upstreamCheckedAt < 1000) return resolve(upstreamAlive);
+    const sock = net.connect(WS_PORT, WS_HOST);
+    const done = (alive) => {
+      sock.destroy();
+      upstreamAlive = alive;
+      upstreamCheckedAt = Date.now();
+      resolve(alive);
+    };
+    sock.setTimeout(700);
+    sock.once('connect', () => done(true));
+    sock.once('timeout', () => done(false));
+    sock.once('error', () => done(false));
+  });
+}
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  // Presence of this file is how the game decides to go online.
+  // Presence of this file is how the game decides to go online — so only report a
+  // server that is really there. Otherwise the player gets the offline gate, which
+  // tells them what is wrong, instead of a socket that never opens.
   if (url.pathname === '/net.json') {
     if (process.env.OFFLINE === '1') { res.writeHead(404).end('offline'); return; }
+    if (!(await probeUpstream())) {
+      res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+      res.end(JSON.stringify({ error: 'city server not running', hint: 'npm --prefix server run dev' }));
+      return;
+    }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify({ url: `/ws?room=${ROOM}` }));
     return;
