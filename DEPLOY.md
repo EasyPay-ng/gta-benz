@@ -52,10 +52,29 @@ with two values, stored as **secrets** (encrypted, never shown again).
 4. Click the blue **Create Token** button.
 5. You now see a list of templates. Find the one called **Edit Cloudflare Workers** and click
    **Use template** on that row.
-6. On the next screen, scroll down. Find **Account Resources** — it should already say
-   `Include` and your account name. Leave it.
-7. Find **Zone Resources** — it may say `Include` / `All zones from an account`. Leave it as
-   it is, even if you own no domains.
+6. On the next screen, scroll down to **Account Resources**. You will see two boxes and a red
+   **"Choose an account resource"** error. This is normal — the template cannot guess your
+   account yet.
+   1. Leave the left box on **Include**.
+   2. Click the **Select…** box on the right. A dropdown opens listing your account
+      (it looks like `yourname@gmail.com's Account`).
+   3. Click your account. **The red error disappears.**
+7. Now look at **Zone Resources**, which shows a similar red **"Choose a zone resource"**.
+   A "zone" is a domain name, and you probably own none — which is fine, Workers do not need
+   one.
+   1. Click the **middle** box (it says **Specific zone**) and choose
+      **All zones from an account**.
+   2. Click the **Select…** box and pick your account again.
+   3. If the dropdown is empty because you have no domains, that is still correct — the
+      selection is what matters, not the number of zones.
+
+   > **If it refuses to accept a zone at all:** skip the template. Click **Create Custom
+   > Token** instead (bottom of the API Tokens page) and add only these three permissions,
+   > all of which are account-level, so the Zone section stays empty and valid:
+   > `Account` → `Workers Scripts` → `Edit`,
+   > `Account` → `Durable Objects` → `Edit`,
+   > `Account` → `Account Settings` → `Read`.
+   > Then set **Account Resources** to `Include` → your account and create it.
 8. Scroll to the bottom and click **Continue to summary**.
 9. Check the summary mentions **Workers Scripts** and **Durable Objects** — both must say
    `Edit`. Then click **Create Token**.
