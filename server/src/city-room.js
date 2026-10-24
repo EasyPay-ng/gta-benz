@@ -12,15 +12,7 @@
 // trick that keeps a real-time game server inside Cloudflare's free tier: you are not
 // billed for duration while the room is idle.
 
-import {
-  normalizeName,
-  createAccount,
-  verifyLogin,
-  issueToken,
-  resolveToken,
-  revokeToken,
-  accountCount,
-} from './accounts.js';
+import { normalizeName } from './accounts.js';
 import { RoomClock } from './city-clock.js';
 
 const MAX_MESSAGE_BYTES = 2048;   // hard cap per inbound frame
@@ -64,6 +56,28 @@ export class CityRoom {
     this.room = state.id.name || 'city';
     const tickMs = Number(env?.CLOCK_TICK_MS) || undefined;
     this.clock = new RoomClock(state.storage, { tickMs });
+  }
+
+  /**
+   * Talk to the global AccountHub. Identity lives in exactly one place now, so a
+   * player keeps their name, tokens and cloud save when the world is sharded into
+   * district rooms (Phase 2) instead of carrying a copy per room.
+   */
+  async _hub(path, payload = null, method = 'POST') {
+    const ns = this.env?.ACCOUNTS;
+    if (!ns) return { status: 503, body: { ok: false, code: 'hub_unavailable' } };
+    try {
+      const stub = ns.get(ns.idFromName('global'));
+      const res = await stub.fetch(`https://accounts.internal${path}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: method === 'GET' ? undefined : JSON.stringify(payload || {}),
+      });
+      const body = await res.json().catch(() => ({ ok: false, code: 'hub_error' }));
+      return { status: res.status, body };
+    } catch {
+      return { status: 503, body: { ok: false, code: 'hub_unavailable' } };
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -200,34 +214,32 @@ export class CityRoom {
     if (!name) return this._send(ws, { t: 'auth', ok: false, code: 'bad_name' });
 
     const isRegister = msg.t === 'register';
-    const result = isRegister
-      ? await createAccount(this.state.storage, name, msg.pin, `u_${crypto.randomUUID().slice(0, 8)}`)
-      : await verifyLogin(this.state.storage, name, msg.pin);
+    const res = await this._hub(isRegister ? '/api/register' : '/api/login', { name, pin: msg.pin });
+    const body = res.body || {};
 
-    if (!result.ok) {
-      return this._send(ws, { t: 'auth', ok: false, code: result.code, attemptsLeft: result.attemptsLeft, retryAfter: result.retryAfter });
+    if (!body.ok) {
+      return this._send(ws, {
+        t: 'auth', ok: false,
+        code: body.code || (res.status === 429 ? 'quota' : 'hub_error'),
+        attemptsLeft: body.attemptsLeft,
+        retryAfter: body.retryAfter,
+      });
     }
-
-    const account = result.account;
-    const token = await issueToken(this.state.storage, account);
 
     this._send(ws, {
       t: 'auth',
       ok: true,
-      name,
-      playerId: account.playerId,
-      token,
+      name: body.account?.name || name,
+      playerId: body.account?.playerId || null,
+      token: body.token,
       created: isRegister,
-      accounts: await accountCount(this.state.storage),
+      accounts: body.accounts || 0,
+      save: body.save || null,
     });
   }
 
   async _logout(ws, s) {
-    if (s.playerId) {
-      const token = s.token;
-      const acc = s.account ? await this.state.storage.get(`account:${s.account}`) : null;
-      await revokeToken(this.state.storage, token, acc);
-    }
+    if (s.token) await this._hub('/api/logout', { token: s.token });
     this._send(ws, { t: 'auth', ok: true, loggedOut: true });
   }
 
@@ -239,9 +251,14 @@ export class CityRoom {
     let token = null;
 
     if (typeof msg.token === 'string') {
-      const res = await resolveToken(this.state.storage, msg.token);
-      if (!res.ok) return this._send(ws, { t: 'error', code: 'unknown_token' });
-      account = res.account;
+      const res = await this._hub('/api/token', { token: msg.token });
+      const body = res.body || {};
+      if (!body.ok) return this._send(ws, { t: 'error', code: body.code || 'unknown_token' });
+      account = {
+        name: body.account.name,
+        nameLower: body.account.nameLower,
+        playerId: body.account.playerId,
+      };
       token = msg.token;
     }
 

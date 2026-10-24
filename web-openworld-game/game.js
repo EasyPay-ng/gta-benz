@@ -25,6 +25,7 @@ import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
 import * as Groceries from './src/groceries.js';
+import { CloudClient, saveEnvelope, shouldTakeCloudSave } from './src/cloud.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
@@ -666,6 +667,8 @@ function saveGame(silent = false) {
   try {
     snapshotState();
     localStorage.setItem(SAVE_KEY, JSON.stringify(game.state));
+    try { localStorage.setItem(SAVE_AT_KEY, String(Date.now())); } catch { /* private mode */ }
+    queueCloudSave();
     if (!silent) toast('💾 Game saved', 'good');
     return true;
   } catch (err) {
@@ -691,6 +694,11 @@ function loadGame(silent = false) {
 function resetGame() {
   if (!window.confirm('Delete your save and start a brand new city?')) return;
   localStorage.removeItem(SAVE_KEY);
+  try { localStorage.removeItem(SAVE_AT_KEY); } catch { /* private mode */ }
+  // the cloud copy is the real one now, so wipe it too when the player resets
+  if (cloud) {
+    cloud.deleteSave().then((res) => { if (res.ok) cloudRevision = 0; });
+  }
   game.state = Eco.createInitialState();
   applyState();
   closeModal();
@@ -4582,7 +4590,16 @@ function updateRemotes(dt) {
 // --- identity (name + PIN) -------------------------------------------------
 // The PIN is only sent to the server; the browser keeps a session token instead.
 const IDENTITY_KEY = 'metroventure_identity';
+const SAVE_AT_KEY = `${SAVE_KEY}:at`;
 let cityServerUrl = null;
+
+// ---- cloud saves (server-owned wallet & progress) --------------------------
+let cloud = null;
+let cloudRevision = 0;
+let cloudBusy = false;
+let cloudLoaded = false;
+let cloudQuota = false;
+let cloudTimer = null;
 
 function loadIdentity() {
   try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null'); } catch { return null; }
@@ -4592,6 +4609,87 @@ function saveIdentity(identity) {
 }
 function forgetIdentity() {
   try { localStorage.removeItem(IDENTITY_KEY); } catch { /* private mode */ }
+}
+
+// ===========================================================================
+// Cloud saves — the server owns the wallet, the browser keeps a mirror
+// ===========================================================================
+function initCloud(token, saveMeta = null) {
+  if (!cityServerUrl || !token) return;
+  cloud = new CloudClient({ serverUrl: cityServerUrl, token });
+  cloudRevision = Number(saveMeta?.revision) || 0;
+  cloudQuota = false;
+  cloudLoaded = false;   // a new sign-in always re-reads the cloud copy
+  pullCloudSave();
+}
+
+function cloudStatus(text, bad = false) {
+  const el = document.getElementById('cloud-status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('hidden', !text);
+  el.classList.toggle('login-error', !!bad);
+  el.classList.toggle('hint', !bad);
+}
+
+async function pullCloudSave() {
+  if (!cloud || cloudLoaded) return;
+  cloudLoaded = true;
+  const res = await cloud.loadSave();
+  if (!res.ok) {
+    if (res.error?.quota) cloudQuota = true;
+    return;
+  }
+  const meta = res.body.meta;
+  const save = res.body.save;
+  cloudRevision = Number(meta?.revision) || 0;
+  cloudStatus(meta ? `☁️ Cloud save ready · revision ${meta.revision} · ${(meta.bytes / 1024).toFixed(1)} KB` : '☁️ Cloud save ready — nothing saved yet');
+  if (!save) { queueCloudSave(1200); return; } // first login on a fresh account: seed it
+  const localAt = Number(localStorage.getItem(SAVE_AT_KEY) || 0);
+  if (!shouldTakeCloudSave(meta, localAt)) {
+    // this device has the newer progress — send it up rather than lose it
+    if (localAt) queueCloudSave(1200);
+    return;
+  }
+  try {
+    game.state = Eco.migrateState(save);
+    applyState();
+    toast(`☁️ Cloud save loaded — revision ${meta.revision} · ${money(game.state.cash)}`, 'good');
+  } catch {
+    toast('☁️ The cloud save could not be read — keeping this device\'s copy.', 'bad');
+  }
+}
+
+/** Push the current state up, debounced so a busy session is one request. */
+function queueCloudSave(delayMs = 4000) {
+  if (!cloud || cloudQuota) return;
+  if (cloudTimer) clearTimeout(cloudTimer);
+  cloudTimer = setTimeout(() => { cloudTimer = null; pushCloudSave(); }, delayMs);
+}
+
+async function pushCloudSave(retryOnConflict = true) {
+  if (!cloud || cloudBusy || cloudQuota) return;
+  cloudBusy = true;
+  const res = await cloud.save(saveEnvelope(game.state), { baseRevision: cloudRevision });
+  cloudBusy = false;
+  if (res.ok) {
+    cloudRevision = Number(res.body?.meta?.revision) || cloudRevision + 1;
+    cloudStatus(`☁️ Saved to the cloud · revision ${cloudRevision}`);
+    return;
+  }
+  if (res.error?.code === 'revision_conflict' && retryOnConflict) {
+    // Another device wrote while we were playing: adopt its revision and try once
+    // more, so nothing is silently lost and the newest session still wins.
+    cloudRevision = Number(res.error.revision) || cloudRevision;
+    return pushCloudSave(false);
+  }
+  if (res.error?.quota) {
+    cloudQuota = true;
+    cloudStatus('☁️ Daily server quota used up — progress is on this device until 00:00 UTC.', true);
+    toast('☁️ The free daily server quota is used up — progress is saved on this device until 00:00 UTC.', 'warn');
+  } else {
+    cloudStatus(`☁️ Cloud save failed: ${res.error?.message || 'unknown error'}`, true);
+  }
 }
 
 const AUTH_MESSAGES = {
@@ -4653,6 +4751,7 @@ function startNet(identity = null) {
         loginError('');
         $('btn-account').classList.add('on');
         toast(auth.created ? `🪪 Account created — welcome, ${auth.name}` : `🪪 Signed in as ${auth.name}`, 'good');
+        initCloud(auth.token, auth.save);
       },
       onAuthError(code, msg) {
         if (code === 'session_expired' || code === 'logged_out') forgetIdentity();
@@ -4738,6 +4837,7 @@ $('login-offline').addEventListener('click', () => {
 });
 $('btn-account').addEventListener('click', () => {
   if (game.loginOpen) return hideLogin();
+  if (cloud) cloudStatus(`☁️ Signed in — cloud revision ${cloudRevision}`);
   showLogin(net?.account ? `Signed in as ${net.name}. Enter a PIN to sign in as someone else.` : '');
 });
 

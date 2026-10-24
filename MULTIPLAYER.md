@@ -63,17 +63,62 @@ Cloudflare account — which is what this code implements directly, without the 
 
 ```
 server/
-  wrangler.jsonc          Worker config: one Durable Object class, SQLite backend
-  src/index.js            Routes: /health, /ws?room=<name>
+  wrangler.jsonc          Worker config: two Durable Object classes (rooms + accounts), SQLite backend
+  src/index.js            Routes: /health, /ws?room=<name>, /api/* -> AccountHub
+  src/account-hub.js      Global accounts + cloud saves (pure handler, unit-tested)
+  src/account-hub-do.js   Thin Durable Object wrapper: one object owns every account
+  src/saves.js            Save contract: size cap, version gate, revision conflicts
+  test/hub.test.mjs       11 account & cloud-save tests (memory storage, no wrangler)
   src/city-room.js        One CityRoom per city: join/leave, 5 Hz snapshots, rate limits, room clock
   src/city-clock.js       Authoritative 24× city clock persisted in DO storage (hibernates when empty)
   test/smoke.mjs          24 protocol + room-clock tests (raw WebSockets, no deps)
-  test/accounts.mjs       34 account/PIN/token tests
+  test/accounts.mjs       34 account/PIN/token tests (over WebSockets)
   test/client.mjs         28 NetClient tests (the real browser module, in Node)
 web-openworld-game/src/net.js   Browser transport: reconnect, ping, throttled sends, clock interpolation
 tools/dev-server.mjs      Static server + /ws proxy + /net.json discovery
 tools/dev.mjs             `npm run dev`: game and city server together
 ```
+
+### Cloud saves & the global AccountHub
+
+Identity used to live inside each city room, which was fine while a room *was* the
+whole city. It is not fine once the world is sharded into districts: your wallet would
+disappear when you drove into the next cell. So accounts and saves now live in one
+**AccountHub** Durable Object (`idFromName('global')`), reached over plain HTTP, and the
+rooms only verify tokens against it.
+
+| Endpoint | Body | Notes |
+|---|---|---|
+| `POST /api/register` | `{name, pin}` | creates the account, returns `{token, account, save}` |
+| `POST /api/login` | `{name, pin}` | same shape; `bad_pin` / `locked` / `no_account` |
+| `POST /api/logout` | `{}` + `Authorization: Bearer` | revokes that one token |
+| `GET /api/me` | — | account + save metadata (revision, bytes, updatedAt) |
+| `GET /api/save` | — | the cloud save blob, or `null` |
+| `PUT /api/save` | `{save, baseRevision}` | 409 on a stale revision, 413 over the cap |
+| `DELETE /api/save` | — | wiping the save (the Reset button uses this) |
+| `POST /api/token` | `{token}` | who is this? — used by the rooms on `join` |
+| `GET /api/health` | — | account count + build info |
+
+The save contract (`server/src/saves.js`): **512 KB** cap, `version` between 1 and 10,
+finite non-negative `cash`, prototype keys stripped, and a monotonic `revision`. A client
+sends the revision it last saw; a second device writing from a stale revision gets
+**409** instead of silently losing the first device's progress.
+
+The browser half is `web-openworld-game/src/cloud.js`: it converts the WebSocket server
+URL into an HTTP origin, keeps the bearer token, mirrors the last synced save locally,
+and turns 401/409/429 into codes the UI can act on.
+
+### Free-tier budget (the number that shapes the design)
+
+Durable Objects on the Workers **Free** plan allow **100,000 requests/day**; incoming
+WebSocket messages bill at **20:1**, outgoing messages are free, and static assets are
+unlimited. That means a player sending at **5 Hz** costs `5 / 20 = 0.25` requests per
+second, so the whole free allowance buys roughly **111 player-hours per day** — about one
+hour of a full 100-player city, or ten players for eleven hours. The world is therefore
+built for **5 Hz input with client-side interpolation**, hibernating rooms, and
+event-driven simulation; when the daily quota is gone the client is told plainly and the
+world stops rather than silently degrading. On the paid plan (~$5/month) the same
+100 players around the clock costs roughly **$15/month**.
 
 ### Protocol (v1, JSON over WebSocket)
 

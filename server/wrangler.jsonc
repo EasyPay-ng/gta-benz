@@ -7,10 +7,16 @@
   // One Durable Object per city/room. SQLite-backed DOs are available on the
   // Workers Free plan; every new DO class must be declared in a migration.
   "durable_objects": {
-    "bindings": [{ "name": "CITY_ROOM", "class_name": "CityRoom" }]
+    "bindings": [
+      { "name": "CITY_ROOM", "class_name": "CityRoom" },
+      // Global accounts + cloud saves: one object, so identity and wallets
+      // survive when the world is sharded into district rooms.
+      { "name": "ACCOUNTS", "class_name": "AccountHub" }
+    ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["CityRoom"] }
+    { "tag": "v1", "new_sqlite_classes": ["CityRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["AccountHub"] }
   ],
 
   "observability": { "enabled": true },

@@ -23,7 +23,9 @@ npm run dev:offline  # game only
 ```
 
 Players sign in with a **display name and a PIN** (no email), so a name stays theirs
-across sessions and devices; guests can play without one. Open two tabs on the same
+across sessions and devices; guests can play without one. Accounts and cloud saves live
+in a single global **AccountHub** Durable Object, so your wallet, cars, pantry and builds
+follow you to any device — and will still find you once the world is split into districts. Open two tabs on the same
 machine — use two browsers or a private window, since one browser holds one session —
 and you will see each other walking, driving and on the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
 Workers free plan (no card, no bill); `npm run deploy`-style instructions, the protocol,
@@ -140,7 +142,8 @@ web-openworld-game/
   src/vehicles.js     sculpted clearcoat cars, 5-spoke rims, light flares, AI traffic & PoliceCar
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
   src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock & emote sync)
-  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism, streaming, groceries)
+  src/cloud.js        accounts & cloud saves client: HTTP origin, bearer token, revisions, offline mirror
+  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism, streaming, groceries, cloud)
 server/               free multiplayer server (Cloudflare Worker + Durable Object)
 tools/                dev server + /ws proxy used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
@@ -159,10 +162,11 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming, FreshMart shopping & pantry) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming, FreshMart shopping & pantry, cloud-save client & revision rules) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
 
-- **114 client tests** — `npm test`
-- **89 server tests** — `npm --prefix server run test:all` (smoke, accounts & NetClient E2E)
+- **127 client tests** — `npm test`
+- **100 server tests** — `npm --prefix server run test:all` (smoke, accounts, NetClient E2E, AccountHub),
+  where the AccountHub tests run without wrangler against an in-memory storage stub
 
 ## Deploy to GitHub Pages
 
