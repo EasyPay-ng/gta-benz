@@ -688,10 +688,14 @@ body.build-mode #fp-reticle { border-color: #38bdf8; }
 
 
 /* ===== Mobile =============================================================
-   A phone is not a small desktop: the screen has cutouts and a home indicator,
-   fingers are less precise than a mouse, and landscape is the way the game is
-   actually played. These rules are all additive overrides, so desktop is
-   untouched. */
+   Laid out from what the device *is* (body.mobile-device, set from the same
+   detection that decides the touch controls) rather than from a pixel
+   breakpoint. The earlier media queries simply did not match this phone, so it
+   kept the desktop layout: a 250px HUD, full-size rail buttons, and a 2-column
+   touch pad that grew taller than the screen and collided with the rail.
+
+   Sizes are vh-based wherever vertical space is the constraint, so portrait
+   and landscape both fit instead of the pad being pushed off the bottom. */
 
 :root {
   --safe-t: env(safe-area-inset-top, 0px);
@@ -720,7 +724,7 @@ body.build-mode #fp-reticle { border-color: #38bdf8; }
 #prompt { bottom: calc(max(26px, var(--safe-b) + 22px)); }
 #hud-error { bottom: calc(18px + var(--safe-b)); }
 
-/* Environment controls live under the button grid, always reachable. */
+/* Environment controls live under the minimap, always reachable. */
 .side-extra { display: flex; gap: 6px; }
 .side-extra button {
   width: 40px; height: 40px; padding: 0; font-size: 17px; line-height: 1;
@@ -748,41 +752,86 @@ body.build-mode #fp-reticle { border-color: #38bdf8; }
 }
 .diag-card button { width: 100%; }
 
-/* Phone layout. Tap targets stay at least 44 CSS px — the size a finger needs. */
-@media (max-height: 520px), (max-width: 760px) {
-  #hud { top: max(8px, var(--safe-t)); left: max(8px, var(--safe-l)); }
-  #side { top: max(8px, var(--safe-t)); right: max(8px, var(--safe-r)); }
-  #joystick {
-    left: max(16px, var(--safe-l));
-    bottom: max(16px, var(--safe-b));
-  }
-  #touch-buttons {
-    grid-template-columns: repeat(2, 60px);
-    gap: 8px;
-    right: max(14px, var(--safe-r));
-    bottom: max(16px, var(--safe-b));
-  }
-  #touch-buttons button { width: 60px; height: 60px; font-size: 18px; }
-  .side-extra button { width: 44px; height: 44px; font-size: 18px; }
+/* ---- Phone layout, keyed off the device profile ---------------------------- */
+.mobile-device #hud {
+  width: clamp(150px, 44vw, 210px);
+  font-size: clamp(9.5px, 1.55vh + 6px, 12px);
+  padding: 7px 9px;
+  line-height: 1.45;
+}
+.mobile-device .brand { font-size: clamp(12px, 1.9vh + 7px, 15px); margin-bottom: 3px; }
+.mobile-device .stat.cash span:last-child { font-size: clamp(13px, 2.2vh + 6px, 18px); }
+
+.mobile-device #minimap {
+  width: clamp(64px, 13vh, 108px);
+  height: clamp(64px, 13vh, 108px);
+}
+.mobile-device #side { gap: 5px; }
+.mobile-device .side-buttons {
+  width: clamp(120px, 30vw, 170px);
+  gap: 4px;
+}
+.mobile-device .side-buttons button {
+  font-size: clamp(9.5px, 1.5vh + 4px, 12px);
+  padding: 4px 5px;
+  min-height: 32px;
+}
+.mobile-device .side-extra button {
+  width: clamp(34px, 7vh, 44px);
+  height: clamp(34px, 7vh, 44px);
+  font-size: clamp(15px, 3vh, 19px);
 }
 
-/* Landscape phone: the vertical budget is the scarce one, so the side rail
-   becomes a single row and the minimap shrinks rather than pushing the touch
-   controls off the bottom of the screen. */
-@media (orientation: landscape) and (max-height: 460px) {
-  #hud { width: 186px; font-size: 10px; padding: 6px 8px; }
-  #minimap { width: 92px; height: 92px; }
-  #side { gap: 4px; }
-  .side-buttons { width: 158px; grid-template-columns: 1fr 1fr; gap: 3px; }
-  .side-buttons button { font-size: 9.5px; padding: 3px 4px; min-height: 30px; }
-  .side-extra button { width: 34px; height: 34px; font-size: 15px; border-radius: 10px; }
-  #joystick { width: 104px; height: 104px; left: max(12px, var(--safe-l)); bottom: max(12px, var(--safe-b)); }
-  #joystick-knob { left: 27px; top: 27px; width: 44px; height: 44px; }
-  #touch-buttons {
-    grid-template-columns: repeat(3, 54px); gap: 7px;
-    right: max(12px, var(--safe-r)); bottom: max(12px, var(--safe-b));
-  }
-  #touch-buttons button { width: 54px; height: 54px; font-size: 16px; }
-  #prompt { bottom: calc(max(20px, var(--safe-b) + 16px)); }
-  #vehicle-hud { bottom: 150px; }
+/* The touch pad. Three columns so nine buttons stay three rows tall; sized from
+   the viewport height so it can never grow past the rail above it. */
+.mobile-device #touch-buttons {
+  --pad: clamp(44px, 11vh, 62px);
+  grid-template-columns: repeat(3, var(--pad));
+  gap: clamp(5px, 1.2vh, 10px);
+  right: max(12px, var(--safe-r));
+  bottom: max(12px, var(--safe-b));
 }
+.mobile-device #touch-buttons button {
+  width: var(--pad);
+  height: var(--pad);
+  font-size: calc(var(--pad) * 0.34);
+}
+.mobile-device #joystick {
+  --stick: clamp(88px, 24vh, 130px);
+  width: var(--stick);
+  height: var(--stick);
+  left: max(14px, var(--safe-l));
+  bottom: max(14px, var(--safe-b));
+}
+.mobile-device #joystick-knob {
+  width: calc(var(--stick) * 0.38);
+  height: calc(var(--stick) * 0.38);
+  left: calc(var(--stick) * 0.31);
+  top: calc(var(--stick) * 0.31);
+}
+.mobile-device #prompt {
+  bottom: calc(max(18px, var(--safe-b) + 14px));
+  font-size: clamp(10px, 1.8vh + 5px, 13px);
+  padding: 5px 10px;
+  max-width: 52vw;
+}
+.mobile-device .toast { font-size: 11px; padding: 5px 9px; }
+.mobile-device #hud-error { font-size: 11px; padding: 8px 10px; max-width: 94vw; }
+
+/* Landscape: the vertical budget is the scarce one. The rail keeps only what
+   the touch pad does not already offer — Phone, View, Build and Actions all
+   have dedicated pad buttons, so repeating them costs the height the pad
+   needs. */
+.mobile-device.mobile-landscape #hud {
+  width: clamp(150px, 26vw, 200px);
+  font-size: clamp(9px, 2.1vh, 11.5px);
+  padding: 6px 8px;
+}
+.mobile-device.mobile-landscape .brand { font-size: clamp(12px, 3.2vh, 15px); }
+.mobile-device.mobile-landscape .side-buttons { width: auto; grid-template-columns: 1fr 1fr; }
+.mobile-device.mobile-landscape .side-buttons #btn-phone,
+.mobile-device.mobile-landscape .side-buttons #btn-camera,
+.mobile-device.mobile-landscape .side-buttons #btn-build,
+.mobile-device.mobile-landscape .side-buttons #btn-emotes { display: none; }
+.mobile-device.mobile-landscape #vehicle-hud { bottom: auto; top: max(8px, var(--safe-t)); right: max(8px, var(--safe-r)); }
+.mobile-device.mobile-landscape .veh-keys { display: none; }

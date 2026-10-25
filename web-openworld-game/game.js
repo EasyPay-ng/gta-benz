@@ -63,6 +63,14 @@ const deviceEnv = {
 };
 const device = Mobile.detectProfile(deviceEnv);
 const budget = Mobile.renderBudget(device, window.devicePixelRatio || 1);
+const framePlan = Mobile.frameBudget(device);
+// Current render scale. Starts at the device budget and may be stepped down by
+// the frame-time watchdog below; never climbs back, to avoid oscillating.
+let qualityScale = budget.pixelRatio;
+
+// Mark the document so CSS can lay out for a phone from what the device *is*,
+// not from a guess about its pixel width. Breakpoints kept missing this phone.
+document.body.classList.toggle('mobile-device', device.phoneLayout);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: budget.antialias, powerPreference: 'high-performance' });
 renderer.setPixelRatio(budget.pixelRatio);
@@ -124,7 +132,7 @@ function resizeToViewport() {
   const size = Mobile.canvasSize(window.innerWidth, window.innerHeight, window.visualViewport);
   camera.aspect = size.aspect;
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Mobile.renderBudget(device, window.devicePixelRatio || 1).pixelRatio);
+  renderer.setPixelRatio(Math.min(Mobile.renderBudget(device, window.devicePixelRatio || 1).pixelRatio, qualityScale));
   renderer.setSize(size.width, size.height, false);
   // Everything else on the page is positioned against #app, so #app has to be
   // exactly as big as what the player can see. Otherwise, on a phone whose
@@ -132,6 +140,10 @@ function resizeToViewport() {
   // HUD is laid out below the fold and looks like it never rendered at all.
   document.documentElement.style.setProperty('--app-w', `${size.width}px`);
   document.documentElement.style.setProperty('--app-h', `${size.height}px`);
+  // Orientation as a class, so the layout can respond to the screen the player
+  // is actually holding rather than to a breakpoint guess.
+  document.body.classList.toggle('mobile-landscape', size.aspect > 1.05);
+  document.body.classList.toggle('mobile-portrait', size.aspect <= 1.05);
   applyViewportFraming();
 }
 
@@ -945,11 +957,16 @@ function renderCockpitMirrors() {
   if (rig.needsPrime) {
     passes = ['rear', 'left', 'right'];
     rig.needsPrime = false;
+  } else if (framePlan.mirrorEvery > 1) {
+    // Each pass is a full scene render. On a phone that is most of the frame.
+    passes = rig.tick % framePlan.mirrorEvery === 0 ? ['rear'] : [];
+    if (!framePlan.sideMirrors && passes.length && cam.cockpitYaw < -0.12) passes = ['rear', 'right'];
   } else {
     const primarySide = cam.cockpitYaw < -0.12 ? 'right' : 'left';
     const secondarySide = primarySide === 'left' ? 'right' : 'left';
     passes = rig.tick === 0 ? ['rear', primarySide, secondarySide] : ['rear', primarySide];
   }
+  if (!passes.length) return;
 
   const prevTarget = renderer.getRenderTarget();
   const prevShadowAuto = renderer.shadowMap.autoUpdate;
@@ -1288,7 +1305,7 @@ syncFullscreenButton();
 
 // --- touch controls toggle --------------------------------------------------
 $('btn-touch')?.addEventListener('click', () => {
-  setTouchVisible(toggleTouchControls(touchVisible));
+  setTouchVisible(Mobile.toggleTouchControls(touchVisible));
   resizeToViewport();      // the HUD rail changes height; keep the canvas honest
 });
 
@@ -1306,6 +1323,8 @@ function refreshDiagnostics() {
   };
   const size = Mobile.canvasSize(window.innerWidth, window.innerHeight, window.visualViewport);
   body.textContent = Mobile.describeEnvironment(env, device, size)
+    + `\nfps              ${game.perfAvgMs ? Math.round(1000 / game.perfAvgMs) : '—'}`
+    + `\nrender scale     ${qualityScale}`
     + `\ntouch controls   ${touchVisible ? 'shown' : 'hidden'}`
     + `\nfullscreen now   ${isFullscreen() ? 'yes' : 'no'}`
     + `\ncanvas buffer    ${renderer.domElement.width}×${renderer.domElement.height}`
@@ -5397,6 +5416,24 @@ function frame() {
   requestAnimationFrame(frame);
   try {
   const dt = Math.min(clock.getDelta(), 0.05);
+
+  // Frame-time watchdog. A phone that cannot hold 30 fps renders fewer pixels
+  // until it can. Measured over ~1.5 s so one slow frame is not a verdict.
+  if (device.lowPower) {
+    game.perfMs = (game.perfMs || 0) + dt * 1000;
+    game.perfFrames = (game.perfFrames || 0) + 1;
+    if (game.perfFrames >= 45) {
+      const avg = game.perfMs / game.perfFrames;
+      game.perfAvgMs = avg;          // shown in the ⓘ panel
+      game.perfMs = 0;
+      game.perfFrames = 0;
+      const next = Mobile.nextQuality(qualityScale, avg);
+      if (next !== qualityScale) {
+        qualityScale = next;
+        resizeToViewport();   // keeps the visible-viewport maths in one place
+      }
+    }
+  }
   game.elapsed += dt;
   clockHudTimer -= dt;
   dayNightTimer -= dt;
@@ -5510,6 +5547,12 @@ function frame() {
   mmTimer -= dt;
   if (mmTimer <= 0) { mmTimer = 1 / 15; drawMinimap(); }
   renderCockpitMirrors();
+  // A shadow refresh is another full depth pass over the scene.
+  if (framePlan.shadowEvery > 1) {
+    renderer.shadowMap.autoUpdate = false;
+    game.frameCount = (game.frameCount || 0) + 1;
+    renderer.shadowMap.needsUpdate = game.frameCount % framePlan.shadowEvery === 0;
+  }
   renderer.render(scene, camera);
   } catch (err) { reportFrameError(err); }
 }
