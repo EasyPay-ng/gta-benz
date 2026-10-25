@@ -12,7 +12,8 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1220; color: var(--text); }
-#app { position: fixed; inset: 0; user-select: none; -webkit-user-select: none; }
+#app { position: fixed; top: 0; left: 0; width: var(--app-w, 100%); height: var(--app-h, 100%);
+       user-select: none; -webkit-user-select: none; overflow: hidden; }
 #scene { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 #scene:active { cursor: grabbing; }
 
@@ -226,7 +227,7 @@ button.big { padding: 12px 22px; font-size: 1.05rem; }
   #vehicle-hud { top: auto; bottom: 170px; right: 12px; padding: 6px 10px; min-width: 0; }
   #vehicle-hud .speed { font-size: 26px; }
   .veh-keys { display: none; }
-  #toasts { top: auto; bottom: 70px; right: auto; left: 50%; transform: translateX(-50%); align-items: center; }
+  #toasts { top: auto; bottom: calc(70px + var(--safe-b)); right: auto; left: 50%; transform: translateX(-50%); align-items: center; }
   .toast { font-size: 11px; padding: 5px 9px; }
   #joystick { left: 16px; bottom: 16px; width: 110px; height: 110px; }
   #joystick-knob { left: 30px; top: 30px; }
@@ -659,4 +660,129 @@ body.build-mode #fp-reticle { border-color: #38bdf8; }
   .phone-clock { font-size: 48px; }
   .phone-app .app-icon { width: 46px; height: 46px; font-size: 21px; }
   .phone-shell { height: 92vh; }
+}
+
+/* ===== Runtime error strip =====
+   Shown only when the render loop throws. It exists so a black screen is never
+   silent: the message names the failure and can be screenshotted. */
+#hud-error {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: min(760px, 92vw);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(127, 29, 29, 0.92);
+  border: 1px solid #f87171;
+  color: #fee2e2;
+  font-size: 13px;
+  line-height: 1.45;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  z-index: 60;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+}
+#hud-error.hidden { display: none; }
+
+
+/* ===== Mobile =============================================================
+   A phone is not a small desktop: the screen has cutouts and a home indicator,
+   fingers are less precise than a mouse, and landscape is the way the game is
+   actually played. These rules are all additive overrides, so desktop is
+   untouched. */
+
+:root {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+}
+
+/* Never let a notch or the home indicator sit on top of a control. */
+#hud {
+  top: max(12px, var(--safe-t));
+  left: max(12px, var(--safe-l));
+}
+#side {
+  top: max(12px, var(--safe-t));
+  right: max(12px, var(--safe-r));
+}
+#joystick {
+  left: max(24px, var(--safe-l));
+  bottom: max(24px, var(--safe-b));
+}
+#touch-buttons {
+  right: max(20px, var(--safe-r));
+  bottom: max(24px, var(--safe-b));
+}
+#prompt { bottom: calc(max(26px, var(--safe-b) + 22px)); }
+#hud-error { bottom: calc(18px + var(--safe-b)); }
+
+/* Environment controls live under the button grid, always reachable. */
+.side-extra { display: flex; gap: 6px; }
+.side-extra button {
+  width: 40px; height: 40px; padding: 0; font-size: 17px; line-height: 1;
+  border-radius: 12px; background: rgba(15, 23, 42, 0.72);
+}
+.side-extra button.on { background: var(--primary); color: #0b1220; border-color: #fde047; }
+
+/* Device facts, sized to be read and screenshotted from a phone. */
+#diag {
+  position: fixed; inset: 0; z-index: 80; display: flex; align-items: center;
+  justify-content: center; background: rgba(2, 6, 23, 0.7); padding: 16px;
+}
+#diag.hidden { display: none; }
+.diag-card {
+  width: min(460px, 100%); max-height: 80vh; overflow: auto; padding: 16px 18px;
+  border-radius: 16px; background: #0b1220; border: 1px solid var(--border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.diag-card h3 { margin: 0 0 10px; font-size: 15px; }
+#diag-body {
+  margin: 0 0 14px; padding: 10px; border-radius: 10px; background: #111c33;
+  font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #cbd5e1; white-space: pre-wrap; word-break: break-word; user-select: text;
+  -webkit-user-select: text;
+}
+.diag-card button { width: 100%; }
+
+/* Phone layout. Tap targets stay at least 44 CSS px — the size a finger needs. */
+@media (max-height: 520px), (max-width: 760px) {
+  #hud { top: max(8px, var(--safe-t)); left: max(8px, var(--safe-l)); }
+  #side { top: max(8px, var(--safe-t)); right: max(8px, var(--safe-r)); }
+  #joystick {
+    left: max(16px, var(--safe-l));
+    bottom: max(16px, var(--safe-b));
+  }
+  #touch-buttons {
+    grid-template-columns: repeat(2, 60px);
+    gap: 8px;
+    right: max(14px, var(--safe-r));
+    bottom: max(16px, var(--safe-b));
+  }
+  #touch-buttons button { width: 60px; height: 60px; font-size: 18px; }
+  .side-extra button { width: 44px; height: 44px; font-size: 18px; }
+}
+
+/* Landscape phone: the vertical budget is the scarce one, so the side rail
+   becomes a single row and the minimap shrinks rather than pushing the touch
+   controls off the bottom of the screen. */
+@media (orientation: landscape) and (max-height: 460px) {
+  #hud { width: 186px; font-size: 10px; padding: 6px 8px; }
+  #minimap { width: 92px; height: 92px; }
+  #side { gap: 4px; }
+  .side-buttons { width: 158px; grid-template-columns: 1fr 1fr; gap: 3px; }
+  .side-buttons button { font-size: 9.5px; padding: 3px 4px; min-height: 30px; }
+  .side-extra button { width: 34px; height: 34px; font-size: 15px; border-radius: 10px; }
+  #joystick { width: 104px; height: 104px; left: max(12px, var(--safe-l)); bottom: max(12px, var(--safe-b)); }
+  #joystick-knob { left: 27px; top: 27px; width: 44px; height: 44px; }
+  #touch-buttons {
+    grid-template-columns: repeat(3, 54px); gap: 7px;
+    right: max(12px, var(--safe-r)); bottom: max(12px, var(--safe-b));
+  }
+  #touch-buttons button { width: 54px; height: 54px; font-size: 16px; }
+  #prompt { bottom: calc(max(20px, var(--safe-b) + 16px)); }
+  #vehicle-hud { bottom: 150px; }
 }

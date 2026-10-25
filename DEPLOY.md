@@ -177,6 +177,10 @@ https://metroventure-city.your-subdomain.workers.dev/ws?room=metro-1
 
 **That is your server address.** Copy it. It is the thing the game has been asking for.
 
+> **Note the shape:** it starts with `https://` and ends `/ws?room=metro-1`. The game turns
+> `https` into `wss` for you, so you can paste it exactly as printed — in the card, or into
+> the `CITY_SERVER_URL` variable in Stage 4.
+
 Test it yourself: open `https://metroventure-city.your-subdomain.workers.dev/health` in a new
 tab. You should see something like:
 

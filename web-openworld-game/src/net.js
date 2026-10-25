@@ -471,21 +471,78 @@ function round(v, dp = 2) {
 //   localStorage.metroventure_server = "wss://…"  (sticky across reloads)
 //   ?offline=1                                     (force single-player)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Discovery helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the deployment's `net.json` lives, relative to the page.
+ *
+ * GitHub Pages serves this project from a sub-path (`/gta-benz/`), so an absolute
+ * `/net.json` would look at the domain root and never be found. Resolve next to the
+ * page instead — and because a path without a trailing slash is ambiguous, strip a
+ * final segment only when it is clearly a file (`index.html`), so `/gta-benz` and
+ * `/gta-benz/` both land on `/gta-benz/net.json`.
+ */
+export function netJsonUrl(href) {
+  try {
+    const base = new URL(href, 'http://localhost');
+    base.search = '';
+    base.hash = '';
+    const last = base.pathname.split('/').pop();
+    if (last && !last.includes('.')) base.pathname += '/';      // a directory: /gta-benz
+    else if (last) base.pathname = base.pathname.replace(/[^/]*$/, ''); // a file: index.html
+    return new URL('net.json', base).toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Anything a person might paste → a URL a WebSocket can dial.
+ * `https://host/ws` and `http://host/ws` are the shapes Cloudflare and the deploy
+ * summary print; both work, but ws/wss is what the socket wants.
+ */
+export function toWebSocketUrl(raw, base) {
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  // A URL parser happily turns "not-a-url" into a relative path, so decide what
+  // shape an advertised address is allowed to have first: absolute (wss://host/ws,
+  // the shape Cloudflare prints) or root-relative (/ws?room=metro-1, the shape the
+  // dev server prints). Anything else is a typo, not an address.
+  const absolute = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+  if (!absolute && !text.startsWith('/')) return null;
+  try {
+    const url = new URL(text, base);
+    if (url.protocol === 'http:') url.protocol = 'ws:';
+    else if (url.protocol === 'https:') url.protocol = 'wss:';
+    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export async function discoverServerUrl(href = location.href, storage = globalThis.localStorage, fetchImpl = globalThis.fetch) {
   const params = new URL(href).searchParams;
   if (params.get('offline') === '1') return null;
 
   const explicit = resolveServerUrl(href, storage);
-  if (explicit) return explicit;
+  if (explicit) return toWebSocketUrl(explicit, href) || null;
 
-  // A dev server (tools/dev-server.mjs) or a deployment can advertise the city
-  // server in /net.json. GitHub Pages has no such file, so the game stays
-  // single-player there unless you pass ?server=.
+  // A dev server (tools/dev-server.mjs) or a static deployment can advertise the
+  // city server in net.json, next to the page (see netJsonUrl). GitHub Pages has
+  // no such file unless the build wrote one, so discovery is allowed to fail.
   try {
-    const res = await fetchImpl(new URL('/net.json', href), { cache: 'no-store' });
+    const res = await fetchImpl(netJsonUrl(href), { cache: 'no-store' });
     if (!res.ok) return null;
     const cfg = await res.json();
-    return cfg?.url ? new URL(cfg.url, href).toString() : null;
+    if (!cfg?.url) return null;
+    const resolved = toWebSocketUrl(cfg.url, href);
+    if (!resolved && typeof console !== 'undefined') {
+      console.warn('net.json has a url that is not a ws:// or wss:// address:', cfg.url);
+    }
+    return resolved;
   } catch {
     return null;
   }

@@ -2,7 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <!-- viewport-fit=cover is what makes env(safe-area-inset-*) non-zero on a
+       notched phone. Without it the HUD and joystick sit under the cutout.
+       interactive-widget=resizes-content keeps the canvas right when a keyboard
+       opens instead of letting the layout viewport grow behind it. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#0b1220" />
+  <!-- Add to Home Screen is the only way to get true fullscreen on an iPhone. -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <title>MetroVenture 3D — Work, Build, Hire, Drive</title>
   <meta name="description" content="A GTA-style 3D open-world tycoon in your browser: work jobs, launch startups, hire citizens and drive across the city." />
   <link rel="stylesheet" href="style.css" />
@@ -13,6 +22,9 @@
 <body>
   <div id="app">
     <canvas id="scene"></canvas>
+
+    <!-- Anything that stops the render loop says so here instead of going black -->
+    <div id="hud-error" class="hidden" role="status" aria-live="polite"></div>
 
     <!-- ===== HUD ===== -->
     <div id="hud" class="glass">
@@ -48,9 +60,26 @@
         <button id="btn-emotes" title="Character actions &amp; emotes (B / 1–8)">✋ Actions</button>
         <button id="btn-clockout" class="hidden" title="Clock out of your current job">⏹ Clock out</button>
       </div>
+      <!-- Environment controls. Touch is a toggle so a wrong auto-detect can always
+           be corrected by the player; fullscreen is what makes a phone feel native. -->
+      <div class="side-extra">
+        <button id="btn-touch" title="Show / hide touch controls">🎮</button>
+        <button id="btn-fullscreen" title="Fullscreen">⛶</button>
+        <button id="btn-diag" title="Device info — useful for bug reports">ⓘ</button>
+      </div>
     </div>
 
     <div id="fp-reticle" class="hidden" aria-hidden="true"></div>
+
+    <!-- Device / viewport facts. A black screen or a missing HUD is otherwise
+         impossible to describe accurately from a phone. -->
+    <div id="diag" class="hidden" role="dialog" aria-label="Device information">
+      <div class="diag-card">
+        <h3>Device</h3>
+        <pre id="diag-body"></pre>
+        <button id="diag-close" type="button">Close</button>
+      </div>
+    </div>
 
     <div id="prompt" class="hidden"><kbd id="prompt-key">E</kbd><span id="prompt-text"></span></div>
 

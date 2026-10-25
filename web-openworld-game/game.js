@@ -32,6 +32,7 @@ import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } f
 import { setupRealisticAtmosphere } from './src/textures.js';
 import { StreetFX } from './src/fx.js';
 import { NetClient, discoverServerUrl } from './src/net.js';
+import * as Mobile from './src/mobile.js';
 
 const $ = (id) => document.getElementById(id);
 const money = Eco.money;
@@ -47,8 +48,24 @@ const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2;
 // Renderer / scene
 // ===========================================================================
 const canvas = $('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+
+// What kind of device is this, asked several ways at once. A single media query
+// decided this before, and when it was wrong the player had no touch controls.
+const deviceEnv = {
+  coarsePointer: !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches),
+  anyCoarse: !!(window.matchMedia && window.matchMedia('(any-pointer: coarse)').matches),
+  maxTouchPoints: navigator.maxTouchPoints || 0,
+  hasTouchEvent: 'ontouchstart' in window,
+  innerWidth: window.innerWidth,
+  innerHeight: window.innerHeight,
+  userAgent: navigator.userAgent || '',
+  devicePixelRatio: window.devicePixelRatio || 1,
+};
+const device = Mobile.detectProfile(deviceEnv);
+const budget = Mobile.renderBudget(device, window.devicePixelRatio || 1);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: budget.antialias, powerPreference: 'high-performance' });
+renderer.setPixelRatio(budget.pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -65,7 +82,7 @@ const hemi = new THREE.HemisphereLight(0xe0f2fe, 0x4d6b35, 1.9);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(budget.shadowMapSize, budget.shadowMapSize);
 Object.assign(sun.shadow.camera, { left: -65, right: 65, top: 65, bottom: -65, near: 1, far: 260 });
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.03;
@@ -78,11 +95,52 @@ playerHeadlight.visible = false;
 let currentSunOffset = { x: 45, y: 90, z: 30 };
 let currentNightFactor = 0;
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+window.addEventListener('error', (e) => {
+  if (e?.error) reportFrameError(e.error, 'runtime');
 });
+
+/**
+ * Size the canvas to what is actually visible.
+ *
+ * A phone reports a layout viewport that can be taller than the screen (URL bar,
+ * home indicator). Sizing from `visualViewport` keeps the render, the HUD and the
+ * touch controls on the same page instead of leaving the HUD outside the picture.
+ */
+let camUserTuned = false;
+
+function applyViewportFraming(force = false) {
+  const f = Mobile.framingForViewport(camera.aspect);
+  if (force || !camUserTuned) {
+    cam.dist = f.dist;
+    cam.pitch = f.pitch;
+  }
+  if (Math.abs(camera.fov - f.fov) > 0.01) {
+    camera.fov = f.fov;
+    camera.updateProjectionMatrix();
+  }
+}
+
+function resizeToViewport() {
+  const size = Mobile.canvasSize(window.innerWidth, window.innerHeight, window.visualViewport);
+  camera.aspect = size.aspect;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Mobile.renderBudget(device, window.devicePixelRatio || 1).pixelRatio);
+  renderer.setSize(size.width, size.height, false);
+  // Everything else on the page is positioned against #app, so #app has to be
+  // exactly as big as what the player can see. Otherwise, on a phone whose
+  // layout viewport is taller than the screen (URL bar / home indicator), the
+  // HUD is laid out below the fold and looks like it never rendered at all.
+  document.documentElement.style.setProperty('--app-w', `${size.width}px`);
+  document.documentElement.style.setProperty('--app-h', `${size.height}px`);
+  applyViewportFraming();
+}
+
+window.addEventListener('resize', resizeToViewport);
+window.addEventListener('orientationchange', () => setTimeout(resizeToViewport, 120));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', resizeToViewport);
+  window.visualViewport.addEventListener('scroll', resizeToViewport);
+}
 
 // ===========================================================================
 // Audio (tiny WebAudio synth, no assets)
@@ -845,6 +903,12 @@ function axes() {
 
 // Camera orbit / first-person & 3D car cockpit freelook + live 3D planar mirror rig
 const cam = Cam.createCameraState('third');
+// Frame the camera for this window shape before the first render: a portrait phone
+// needs a further, wider, flatter view than a desktop window.
+applyViewportFraming(true);
+// Normalise the canvas to the visible viewport (a phone's layout viewport is
+// often taller than the screen) and re-frame against the real aspect.
+resizeToViewport();
 let mirrorRig = null;
 
 function ensureMirrorRig() {
@@ -1007,30 +1071,80 @@ game.cameraView = {
   state: cam,
 };
 
+// Pointers currently on the canvas. Two of them means a pinch, which is how a
+// phone player zooms — there is no wheel.
+const canvasPointers = new Map();
+let pinch = null;
+
+const pointerSpread = () => {
+  const [a, b] = [...canvasPointers.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+
 canvas.addEventListener('pointerdown', (e) => {
   sfx.ensure();
+  canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (canvasPointers.size === 2) {
+    // A pinch is not a drag: drop the look-drag so the view does not spin.
+    cam.drag = null;
+    pinch = { spread: pointerSpread(), dist: cam.dist };
+    return;
+  }
   cam.drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
+  if (canvasPointers.has(e.pointerId)) canvasPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && canvasPointers.size === 2) {
+    const spread = pointerSpread();
+    // Fingers apart = camera in. Guard against a zero spread when they touch.
+    if (spread > 8) {
+      cam.dist = THREE.MathUtils.clamp(pinch.dist * (pinch.spread / spread), 3.5, 18);
+      camUserTuned = true;
+    }
+    return;
+  }
   if (!cam.drag || cam.drag.id !== e.pointerId) return;
   const dx = e.clientX - cam.drag.x; const dy = e.clientY - cam.drag.y;
   cam.drag.x = e.clientX; cam.drag.y = e.clientY;
   Cam.applyCameraDrag(cam, dx, dy, { inVehicle: !!game.player.vehicle, elapsed: game.elapsed });
 });
-const endDrag = (e) => { if (cam.drag && cam.drag.id === e.pointerId) cam.drag = null; };
+const endDrag = (e) => {
+  canvasPointers.delete(e.pointerId);
+  if (canvasPointers.size < 2) pinch = null;
+  if (cam.drag && cam.drag.id === e.pointerId) cam.drag = null;
+};
 canvas.addEventListener('pointerup', endDrag);
 canvas.addEventListener('pointercancel', endDrag);
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (cam.mode === 'third') {
     cam.dist = THREE.MathUtils.clamp(cam.dist + Math.sign(e.deltaY) * 0.8, 3.5, 18);
+    camUserTuned = true;   // the player chose this distance; do not overwrite on resize
   }
 }, { passive: false });
 
-// Touch controls
-if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
-  $('touch').classList.remove('hidden');
+// Touch controls.
+// These used to appear only when `matchMedia('(pointer: coarse)')` matched. One
+// wrong answer there and a phone had no joystick and no buttons at all, so the
+// decision now comes from `device` (several signals) and the player can override
+// it from the side rail either way.
+const touchEl = $('touch');
+let touchVisible = false;
+
+function setTouchVisible(next) {
+  touchVisible = !!next;
+  touchEl.classList.toggle('hidden', !touchVisible);
+  const btn = $('btn-touch');
+  if (btn) btn.classList.toggle('on', touchVisible);
+}
+
+if (device.touchControls) {
+  setTouchVisible(true);
+}
+
+// Joystick + action buttons. Scoped, so the element handles stay private.
+{
   const joy = $('joystick'); const knob = $('joystick-knob');
   let jid = null;
   const setJoy = (e) => {
@@ -1070,6 +1184,140 @@ if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
     b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
   }
 }
+
+// ===========================================================================
+// Screen environment: fullscreen, orientation, device facts
+// ===========================================================================
+const fullscreenEl = document.documentElement;
+
+const canFullscreen = !!(fullscreenEl.requestFullscreen || fullscreenEl.webkitRequestFullscreen);
+const isFullscreen = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const isLandscape = () => {
+  const size = Mobile.canvasSize(window.innerWidth, window.innerHeight, window.visualViewport);
+  return size.aspect > 1;
+};
+
+function syncFullscreenButton() {
+  const btn = $('btn-fullscreen');
+  if (!btn) return;
+  btn.classList.toggle('on', isFullscreen());
+  btn.title = isFullscreen() ? 'Leave fullscreen' : 'Fullscreen';
+}
+
+async function enterFullscreen() {
+  if (!canFullscreen || isFullscreen()) return false;
+  try {
+    const p = fullscreenEl.requestFullscreen
+      ? fullscreenEl.requestFullscreen({ navigationUI: 'hide' })
+      : fullscreenEl.webkitRequestFullscreen();
+    // requestFullscreen resolves to undefined in some browsers; await either way.
+    await Promise.resolve(p);
+    // Best effort: a phone held sideways hides the browser UI too.
+    if (screen.orientation && screen.orientation.lock && isLandscape()) {
+      try { await screen.orientation.lock('landscape'); } catch { /* not permitted */ }
+    }
+    return true;
+  } catch {
+    return false;   // iOS Safari has no element fullscreen; the button simply stays off
+  }
+}
+
+async function leaveFullscreen() {
+  try { await (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); } catch { /* already out */ }
+}
+
+function toggleFullscreen() {
+  return isFullscreen() ? leaveFullscreen() : enterFullscreen();
+}
+
+const isIOSHandset = /iP(hone|od)/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);   // iPadOS reports as Mac
+
+$('btn-fullscreen')?.addEventListener('click', () => {
+  // iPhone Safari has no element fullscreen at all. Say so once, with the only
+  // route that actually works there, instead of a button that does nothing.
+  if (!canFullscreen) {
+    toast(isIOSHandset
+      ? 'iPhone: use Share ▸ Add to Home Screen, then open it from the icon for fullscreen.'
+      : 'This browser does not allow fullscreen.');
+    return;
+  }
+  if (isFullscreen()) {
+    fullscreenSuppressed = true;
+    leaveFullscreen().then(syncFullscreenButton);
+  } else {
+    fullscreenSuppressed = false;
+    fullscreenAttempts = 0;
+    enterFullscreen().then(syncFullscreenButton);
+  }
+});
+
+// Fullscreen must be requested from a user gesture — a programmatic request on
+// rotation is rejected by every mobile browser. So: when the player is holding
+// the phone sideways, the next tap or key press takes them fullscreen. That
+// covers "rotated after starting" as well as "started sideways".
+let fullscreenWanted = device.touch && canFullscreen;
+let fullscreenSuppressed = false;   // the player chose to leave; do not re-enter
+let fullscreenAttempts = 0;
+
+function maybeFullscreen() {
+  if (!fullscreenWanted || fullscreenSuppressed) return;
+  if (isFullscreen() || !isLandscape()) return;
+  if (fullscreenAttempts >= 3) return;   // a browser that refuses will keep refusing
+  fullscreenAttempts += 1;
+  enterFullscreen().then((ok) => {
+    syncFullscreenButton();
+    if (!ok) fullscreenSuppressed = true;
+  });
+}
+window.addEventListener('pointerdown', maybeFullscreen, { passive: true });
+window.addEventListener('keydown', maybeFullscreen);
+// Rotating into landscape has no gesture of its own; try once in case the browser
+// allows it, and rely on the next tap otherwise.
+window.addEventListener('orientationchange', () => setTimeout(maybeFullscreen, 200));
+
+// Some browsers only rotate after a fullscreen request; re-frame whenever either
+// changes so the camera and canvas agree with the screen afterwards.
+for (const ev of ['fullscreenchange', 'webkitfullscreenchange', 'orientationchange']) {
+  document.addEventListener(ev, () => {
+    syncFullscreenButton();
+    setTimeout(() => { resizeToViewport(); applyViewportFraming(true); }, 140);
+  });
+}
+syncFullscreenButton();
+
+// --- touch controls toggle --------------------------------------------------
+$('btn-touch')?.addEventListener('click', () => {
+  setTouchVisible(toggleTouchControls(touchVisible));
+  resizeToViewport();      // the HUD rail changes height; keep the canvas honest
+});
+
+// --- device information -----------------------------------------------------
+function refreshDiagnostics() {
+  const body = $('diag-body');
+  if (!body) return;
+  const env = {
+    ...deviceEnv,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    fullscreenSupported: canFullscreen,
+    orientation: (screen.orientation && screen.orientation.type) || 'unknown',
+  };
+  const size = Mobile.canvasSize(window.innerWidth, window.innerHeight, window.visualViewport);
+  body.textContent = Mobile.describeEnvironment(env, device, size)
+    + `\ntouch controls   ${touchVisible ? 'shown' : 'hidden'}`
+    + `\nfullscreen now   ${isFullscreen() ? 'yes' : 'no'}`
+    + `\ncanvas buffer    ${renderer.domElement.width}×${renderer.domElement.height}`
+    + `\nwebgl            ${renderer.capabilities.isWebGL2 ? 'webgl2' : 'webgl1'}`;
+}
+
+$('btn-diag')?.addEventListener('click', () => {
+  refreshDiagnostics();
+  $('diag').classList.remove('hidden');
+});
+$('diag-close')?.addEventListener('click', () => $('diag').classList.add('hidden'));
+$('diag')?.addEventListener('click', (e) => { if (e.target.id === 'diag') $('diag').classList.add('hidden'); });
 
 // ===========================================================================
 // UI helpers: toasts, HUD, modals
@@ -5129,8 +5377,25 @@ function drawMinimap() {
 const clock = new THREE.Clock();
 let mmTimer = 0;
 
+// A throw anywhere in the frame stops the 3D view while the HUD (plain DOM) keeps
+// updating — the screen goes dark and nothing explains why. Catch it, say it once in
+// the console, and print the message on screen so a report contains the real cause.
+let frameErrorShown = false;
+function reportFrameError(err, where = 'frame') {
+  if (!frameErrorShown) {
+    frameErrorShown = true;
+    console.error(`[MetroVenture] ${where} threw — the world will stop updating:`, err);
+  }
+  const el = document.getElementById('hud-error');
+  if (el) {
+    el.textContent = `⚠ ${where}: ${err?.message || err}`;
+    el.classList.remove('hidden');
+  }
+}
+
 function frame() {
   requestAnimationFrame(frame);
+  try {
   const dt = Math.min(clock.getDelta(), 0.05);
   game.elapsed += dt;
   clockHudTimer -= dt;
@@ -5246,6 +5511,7 @@ function frame() {
   if (mmTimer <= 0) { mmTimer = 1 / 15; drawMinimap(); }
   renderCockpitMirrors();
   renderer.render(scene, camera);
+  } catch (err) { reportFrameError(err); }
 }
 
 // ===========================================================================

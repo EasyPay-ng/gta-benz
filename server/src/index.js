@@ -5,7 +5,10 @@
 //
 //   GET /health          -> liveness + build info (no auth, no cost beyond a request)
 //   GET /ws?room=metro-1 -> WebSocket upgrade, handled by that room's Durable Object
+//   /api/*               -> global accounts & cloud saves (one AccountHub object)
 //   GET /                -> plain-text help
+
+import { webSocketFallback } from './landing.js';
 
 export { CityRoom } from './city-room.js';
 export { AccountHub } from './account-hub-do.js';
@@ -40,7 +43,9 @@ export default {
 
     if (url.pathname === '/ws') {
       if (request.headers.get('Upgrade') !== 'websocket') {
-        return json({ error: 'expected a WebSocket upgrade' }, 426);
+        // A browser landing here gets a page that explains itself; a tool still
+        // gets the machine-readable 426 it was already getting.
+        return webSocketFallback(request, url.origin, url.searchParams.get('room') || DEFAULT_ROOM);
       }
       // The room name is the Durable Object name, so the same city always lands
       // on the same object (and therefore the same in-memory player list).
@@ -51,7 +56,10 @@ export default {
     }
 
     return new Response(
-      'MetroVenture city server\n\nConnect a WebSocket to /ws?room=<room>\nAccounts & cloud saves: /api/*\nHealth check: /health\n',
+      'MetroVenture city server\n\n'
+      + 'Connect a WebSocket to /ws?room=<room>\n'
+      + 'Accounts & cloud saves: /api/*\n'
+      + 'Health check: /health\n',
       { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } },
     );
   },

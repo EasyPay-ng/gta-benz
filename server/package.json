@@ -11,9 +11,10 @@
     "test": "node test/smoke.mjs",
     "test:auth": "node test/accounts.mjs",
     "test:client": "SERVER_URL=ws://127.0.0.1:8080/ws?room=client-test node test/client.mjs",
-    "test:all": "npm test && npm run test:auth && npm run test:hub && npm run test:deploy && npm run test:client",
+    "test:all": "npm test && npm run test:auth && npm run test:hub && npm run test:deploy && npm run test:landing && npm run test:client",
     "test:hub": "node --test test/hub.test.mjs",
-    "test:deploy": "node --test test/deploy-script.test.mjs"
+    "test:deploy": "node --test test/deploy-script.test.mjs",
+    "test:landing": "node --test test/landing.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

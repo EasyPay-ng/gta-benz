@@ -72,7 +72,17 @@ https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.w
 | `O` (or HUD `📱`): **MetroPhone** — garage, uni, jobs, messages, wallet, map, build, look, settings | Tap an app icon · `‹` back · `✕ Close` or `Esc` |
 | `F`: get in/out of your car · `V`: valet · `T`: Garage · `C`: look · `H`: help · `M`: mute | `F5` save / `F9` load |
 
-On touch devices you get an on-screen joystick and buttons (including `🎥` camera view toggle).
+### On a phone
+
+The game is playable on a phone in either orientation, and landscape is the way it is meant to be played.
+
+- **Joystick + action buttons** appear automatically. Detection asks five separate questions — `maxTouchPoints`, `pointer: coarse`, `any-pointer: coarse`, `ontouchstart` and a mobile user agent — so one wrong answer never leaves you with no controls. If it still gets it wrong, the **🎮** button in the side rail shows or hides them by hand.
+- **Drag** anywhere on the world to look around, and **pinch** to zoom (there is no wheel). The camera pulls back and widens on a tall screen so the character is not cropped.
+- **Landscape enters fullscreen** on your next tap, hiding the browser UI. **⛶** toggles it. iPhone Safari has no element fullscreen at all — there the button explains *Share ▸ Add to Home Screen*, which is the only route to a fullscreen game on iOS.
+- **Cutouts are respected:** the HUD, minimap, joystick and buttons all offset by `env(safe-area-inset-*)`, and the page carries `viewport-fit=cover` so those insets are actually non-zero.
+- **ⓘ** opens a device panel (viewport, visual viewport, dpr, touch signals, fullscreen state, canvas buffer, WebGL version). If something looks wrong on a device, that screenshot says what it is.
+
+Rendering is scaled down on phones and other small screens: pixel ratio is capped at 1.25, shadows drop to 1024, and antialiasing is off. Desktop is unchanged.
 
 ## Features
 
