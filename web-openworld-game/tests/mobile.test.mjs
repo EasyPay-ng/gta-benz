@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   detectProfile, toggleTouchControls, framingForViewport, renderBudget,
-  canvasSize, describeEnvironment,
+  canvasSize, describeEnvironment, nextQuality, frameBudget, QUALITY_STEPS,
 } from '../src/mobile.js';
 
 const PHONE = {
@@ -54,6 +54,22 @@ test('Mobile: touch controls follow touch, and small screens are cheap-rendered'
   assert.equal(small.lowPower, true);
 });
 
+test('Mobile: the compact layout needs a small screen, not just a touchscreen', () => {
+  // This phone reported ~845 CSS px across in landscape. A width breakpoint
+  // reads that as a desktop and leaves the desktop layout in place.
+  const phoneLandscape = detectProfile({ ...PHONE, innerWidth: 845, innerHeight: 373 });
+  assert.equal(phoneLandscape.phoneLayout, true, 'short side 373 is a phone');
+  assert.equal(phoneLandscape.touch, true);
+
+  const portrait = detectProfile(PHONE);
+  assert.equal(portrait.phoneLayout, true);
+
+  // A big touch laptop keeps the desktop layout.
+  const laptop = detectProfile({ ...DESKTOP, maxTouchPoints: 10, innerWidth: 1440, innerHeight: 900 });
+  assert.equal(laptop.touch, true, 'it does have a touchscreen');
+  assert.equal(laptop.phoneLayout, false, 'but it is not held in a hand');
+});
+
 test('Mobile: the escape hatch always works', () => {
   assert.equal(toggleTouchControls(false), true);
   assert.equal(toggleTouchControls(true), false);
@@ -81,6 +97,10 @@ test('Mobile: every aspect ratio gets a sane camera', () => {
     assert.ok(f.pitch > 0.2 && f.pitch < 0.5, `pitch in range for ${aspect}`);
     assert.ok(f.fov >= 55 && f.fov <= 75, `fov in range for ${aspect}`);
   }
+  // A very wide phone must not be framed closer than a monitor: `fov` is
+  // vertical, so pulling in only enlarges the character.
+  assert.equal(framingForViewport(2.3).dist, framingForViewport(1.78).dist);
+
   // and junk input falls back to the desktop framing instead of NaN
   assert.deepEqual(framingForViewport(NaN), framingForViewport(1));
   assert.deepEqual(framingForViewport(0), framingForViewport(1));
@@ -136,4 +156,31 @@ test('Mobile: the diagnostic panel is short and copyable', () => {
   assert.match(text, /touch\s+yes \(points 5\)/);
   assert.match(text, /fullscreen\s+yes/);
   assert.ok(text.split('\n').length <= 10, 'fits in a screenshot');
+});
+
+// ---------------------------------------------------------------------------
+// 6. Per-frame budget
+// ---------------------------------------------------------------------------
+test('Mobile: a phone skips the expensive per-frame work', () => {
+  const phone = frameBudget(detectProfile(PHONE));
+  assert.ok(phone.shadowEvery > 1, 'shadows are a full depth pass');
+  assert.ok(phone.mirrorEvery > 1, 'mirrors are extra scene renders');
+  assert.equal(phone.sideMirrors, false, 'one mirror is enough on a phone');
+
+  const desktop = frameBudget(detectProfile(DESKTOP));
+  assert.deepEqual(desktop, { shadowEvery: 1, mirrorEvery: 1, sideMirrors: true });
+  assert.deepEqual(frameBudget(null), { shadowEvery: 1, mirrorEvery: 1, sideMirrors: true });
+});
+
+test('Mobile: quality only ever falls, and stops at the floor', () => {
+  assert.equal(nextQuality(1.25, 16), 1.25, 'a fast frame changes nothing');
+  assert.equal(nextQuality(1.25, 40), 1, 'a slow frame steps down once');
+  assert.equal(nextQuality(1, 40), 0.85);
+  assert.equal(nextQuality(0.85, 40), 0.7);
+  assert.equal(nextQuality(0.7, 90), 0.7, 'the floor holds even when it is hopeless');
+
+  // never climbs: a fast frame at a reduced scale stays where it is
+  for (const step of QUALITY_STEPS) assert.equal(nextQuality(step, 5) <= step, true);
+
+  assert.equal(nextQuality(99, 16), QUALITY_STEPS[0], 'unknown scale resets to the top');
 });

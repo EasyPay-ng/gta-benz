@@ -47,6 +47,11 @@ export function detectProfile(env = {}) {
     touch,
     touchPoints,
     smallScreen,
+    // The compact layout is for a phone held in a hand, not for a big touch
+    // laptop: it needs both a touchscreen and a screen that is genuinely small
+    // on its short side. This phone reported ~845 CSS px across in landscape,
+    // which a width breakpoint reads as a desktop.
+    phoneLayout: smallScreen,
     // On-screen controls whenever the device can be touched — never only when a
     // media query happens to agree.
     touchControls: touch,
@@ -80,10 +85,11 @@ export function framingForViewport(aspect) {
   if (a < 1.4) {             // square-ish / small tablet
     return { dist: 9.5, pitch: 0.34, fov: 66 };
   }
-  if (a < 2.1) {             // ordinary landscape
-    return { dist: 7.5, pitch: 0.38, fov: 62 };
-  }
-  return { dist: 7.0, pitch: 0.36, fov: 60 }; // very wide (landscape phone)
+  // Ordinary landscape, and anything wider. `fov` is vertical, so a wide window
+  // already shows as much of the world top-to-bottom as a monitor; bringing the
+  // camera closer only makes the character bigger, which is the opposite of
+  // what a phone needs.
+  return { dist: 7.5, pitch: 0.38, fov: 62 };
 }
 
 /**
@@ -139,4 +145,27 @@ export function describeEnvironment(env = {}, profile = detectProfile(env), size
     `fullscreen ${yes(env.fullscreenSupported)}`,
     `orientation ${env.orientation || '?'}`,
   ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Adaptive quality
+// ---------------------------------------------------------------------------
+// One-way degradation: a phone that cannot hold 30 fps steps the render scale
+// down and never climbs back. Recovering upward would oscillate between two
+// rates, which looks worse than simply running a little softer.
+export const QUALITY_STEPS = [1.25, 1, 0.85, 0.7];
+
+export function nextQuality(current, avgFrameMs) {
+  const i = QUALITY_STEPS.indexOf(current);
+  if (i < 0) return QUALITY_STEPS[0];
+  // Below ~30 fps is the point where input starts to feel detached.
+  if (avgFrameMs > 33 && i < QUALITY_STEPS.length - 1) return QUALITY_STEPS[i + 1];
+  return current;
+}
+
+// How often the expensive per-frame work may run, given the device.
+// Mirrors are extra full scene renders; shadows are a full depth pass.
+export function frameBudget(profile) {
+  if (!profile || !profile.lowPower) return { shadowEvery: 1, mirrorEvery: 1, sideMirrors: true };
+  return { shadowEvery: 3, mirrorEvery: 4, sideMirrors: false };
 }
