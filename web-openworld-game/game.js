@@ -1323,6 +1323,8 @@ function refreshDiagnostics() {
   };
   const size = Mobile.canvasSize(window.innerWidth, window.innerHeight, window.visualViewport);
   body.textContent = Mobile.describeEnvironment(env, device, size)
+    + `\nfps              ${game.perfAvgMs ? Math.round(1000 / game.perfAvgMs) : '—'}`
+    + `\nrender scale     ${qualityScale}`
     + `\ntouch controls   ${touchVisible ? 'shown' : 'hidden'}`
     + `\nfullscreen now   ${isFullscreen() ? 'yes' : 'no'}`
     + `\ncanvas buffer    ${renderer.domElement.width}×${renderer.domElement.height}`
@@ -5422,6 +5424,7 @@ function frame() {
     game.perfFrames = (game.perfFrames || 0) + 1;
     if (game.perfFrames >= 45) {
       const avg = game.perfMs / game.perfFrames;
+      game.perfAvgMs = avg;          // shown in the ⓘ panel
       game.perfMs = 0;
       game.perfFrames = 0;
       const next = Mobile.nextQuality(qualityScale, avg);
