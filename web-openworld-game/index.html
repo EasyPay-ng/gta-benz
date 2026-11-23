@@ -40,7 +40,7 @@
       <div class="stat hidden" id="hud-tv-row"><span class="label">Screen</span><span id="hud-tv">📺 Off</span></div>
       <div class="stat heat-stat hidden" id="hud-heat-row"><span class="label">Police Heat</span><span id="hud-heat">★☆☆</span></div>
       <div class="stat small"><span class="label" id="hud-day">Day 1 · 08:00</span><span id="hud-payday">Shift in 30s</span></div>
-      <div class="stat small"><span class="label">Network</span><span id="hud-net">Single-player</span></div>
+
     </div>
 
     <div id="task-banner" class="glass hidden">
@@ -53,7 +53,6 @@
       <canvas id="minimap" width="200" height="200" class="glass"></canvas>
       <div class="side-buttons">
         <!-- Everything else lives in the phone (O). Only in-the-moment controls stay here. -->
-        <button id="btn-account" class="hidden" title="Sign in / switch player">🪪 Account</button>
         <button id="btn-phone" title="MetroPhone — garage, uni, jobs, messages, wallet, save &amp; settings (O)">📱 Phone</button>
         <button id="btn-camera" title="Toggle 1st / 3rd person &amp; car cockpit view (X / P)">🎥 3rd View</button>
         <button id="btn-build" title="3D Architect — build walls, floors, stairs, roofs &amp; furniture (Y)">🏗 Build</button>
@@ -133,49 +132,6 @@
         <button id="t-camera" type="button" title="Toggle 1st / 3rd person camera">🎥</button>
         <button id="t-build" type="button" title="Build mode">🏗</button>
         <button id="t-emote" type="button">✋</button>
-      </div>
-    </div>
-
-    <!-- ===== Sign in (display name + PIN) ===== -->
-    <div id="login" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="login-title">
-      <div class="modal-card glass login-card">
-        <h2 id="login-title">Who are you, <span class="accent">citizen</span>?</h2>
-        <p class="sub">Your name belongs to you. A PIN keeps it yours — and keeps your cash, cars and startups with you when you come back.</p>
-        <form id="login-form" autocomplete="on">
-          <label class="field">Display name
-            <input id="login-name" name="username" maxlength="16" autocomplete="username" spellcheck="false" placeholder="e.g. Benz" />
-          </label>
-          <label class="field">PIN
-            <input id="login-pin" name="pin" type="password" maxlength="32" autocomplete="current-password" placeholder="4–32 letters or numbers" />
-          </label>
-          <p id="login-error" class="login-error hidden"></p>
-          <p id="cloud-status" class="hint hidden"></p>
-          <div class="row">
-            <button id="login-go" class="primary" type="submit">Continue</button>
-            <button id="login-guest" type="button">Play as guest</button>
-          </div>
-        </form>
-        <div class="row login-alt">
-          <button id="login-server" class="ghost" type="button">Server settings</button>
-        </div>
-        <p class="hint">This city lives on the server. <b>Continue</b> creates your account with that PIN, and your wallet, cars, groceries and builds follow the name to any device. Guests can walk around, but nothing they do is kept — and a city started offline is replaced the moment the server is reachable.</p>
-      </div>
-    </div>
-
-    <!-- ===== No server, no city (online-only build) ===== -->
-    <div id="offline-gate" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="offline-title">
-      <div class="modal-card glass login-card">
-        <h2 id="offline-title">The city is <span class="accent">offline</span></h2>
-        <p class="sub">MetroVenture has no offline copy any more — your wallet, cars and streets live on the city server. Point the game at one and it will remember it on this device.</p>
-        <label class="field">Server address
-          <input id="offline-server" spellcheck="false" autocomplete="off" placeholder="wss://your-worker.workers.dev/ws?room=metro-1" />
-        </label>
-        <p id="offline-error" class="login-error hidden"></p>
-        <div class="row">
-          <button id="offline-connect" class="primary" type="button">Connect</button>
-          <button id="offline-retry" class="ghost" type="button">Retry</button>
-        </div>
-        <p class="hint">Running it yourself? <code>npm run dev</code> serves the game and the city server on one port. Deployed Worker? Use <code>wss://&lt;worker&gt;.workers.dev/ws?room=metro-1</code>.</p>
       </div>
     </div>
 

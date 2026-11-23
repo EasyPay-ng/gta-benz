@@ -1,62 +1,22 @@
 # MetroVenture 3D (gta-benz)
 
-A GTA-style **3D open-world occupation & startup tycoon** that runs in the browser. Built with Three.js and plain HTML/CSS/JS — no build step, no npm packages, no framework. It is an **online world**: accounts and saves live on a small free-tier Cloudflare Worker, and the game will not start without it.
+A GTA-style **3D open-world occupation & startup tycoon** that runs in the browser. Built with Three.js and plain HTML/CSS/JS — no build step, no npm packages, no framework.
 
 **Work jobs → buy vacant lots → launch startups → hire unemployed citizens → raise city employment → drive it all in your own cars.**
 
 ## Play locally
 
 ```bash
-npm run dev          # game + city server on http://localhost:8080
+npm run dev          # http://localhost:8080
 ```
 
-`localhost` is the only place the game will run without a server (`npm run dev:offline`, or `?offline=1`),
-because that is the development harness. Anywhere else, opening the game without a reachable city server
-shows a single card: **the city is offline** — paste a `wss://…/ws?room=metro-1` address, and it is
-remembered on that device.
-
-If the city server is not running, the dev server says so and the game shows the "city is offline"
-card instead of hanging on a connection. **Server settings** on the sign-in card opens the same card
-at any time.
-
-ES modules don't load from `file://`, so you can't just double-click `index.html`.
-
-## Multiplayer (optional, free)
-
-The game is **online-only** when served anywhere but a development machine.
+Or serve the game directory with any static file server:
 
 ```bash
-npm run dev          # game + city server on http://localhost:8080
-npm run dev:offline  # game only
+python3 -m http.server 8080 --bind 0.0.0.0 --directory web-openworld-game
 ```
 
-Players sign in with a **display name and a PIN** (no email), so a name stays theirs
-across sessions and devices; guests can play without one. Accounts and cloud saves live
-in a single global **AccountHub** Durable Object, so your wallet, cars, pantry and builds
-follow you to any device — and will still find you once the world is split into districts.
-
-**Online is authoritative.** When the game can reach a server it does not read a local save
-at all: any offline city left on that device is deleted on boot, guests play without keeping
-progress, and the cloud copy is the only one that counts. On a public host there is no offline fallback:
-no server, no city. Open two tabs on the same
-machine — use two browsers or a private window, since one browser holds one session —
-and you will see each other walking, driving and on the minimap. The server is a Cloudflare Worker + Durable Object that fits inside the
-Workers free plan (no card, no bill); `npm run deploy`-style instructions, the protocol,
-the cost maths and the honest list of what is *not* synced yet are in
-[`MULTIPLAYER.md`](MULTIPLAYER.md).
-
-A deployed static build finds its server through `net.json` (the dev server serves one for you). To make
-the GitHub Pages build connect by itself, copy `web-openworld-game/net.example.json` to
-`web-openworld-game/net.json` and put your Worker's URL in it — then the gate never appears.
-
-The server is deployed with a button, not a terminal:
-[`DEPLOY.md`](DEPLOY.md) walks through it in four stages (~8 minutes, free tier, no card).
-
-Point a deployed game at a deployed server once:
-
-```
-https://easypay-ng.github.io/gta-benz/?server=wss%3A%2F%2F<worker>.<subdomain>.workers.dev%2Fws%3Froom%3Dmetro-1
-```
+ES modules don't load from `file://`, so you can't just double-click `index.html`.
 
 ## Controls
 
@@ -120,10 +80,10 @@ Rendering is scaled down on phones and other small screens: pixel ratio is cappe
 
 - **The city never ends — streamed districts (`src/streaming.js`, `src/world.js`).** Drive out past the old edge and the metropolis keeps building itself around you, forever and in every direction: the same 75 m street grid continues, and each 300 m cell is generated deterministically (name boards, themed shopfronts and office towers, trees, street lamps, and a walkable ground-floor interior with a working swing door for every building). A cell is only ever built when you get near it and is torn down — geometry, textures, colliders, doors, furniture and address labels — once you are two cells clear, so memory stays flat no matter how far you drive. The minimap scrolls with you and draws the generated streets and blocks.
 - **Realistic PBR visuals & atmospheric city.** Procedural diffuse, normal, roughness and emissive PBR maps (`src/textures.js`) with ACES Filmic tone mapping, PMREM environment reflections and a custom atmospheric `SkyDome` shader (dawn/sunset horizon scatter, drifting clouds and twinkling night stars). Features tyre-polished weathered asphalt, irregular flagstone sidewalks, curb storm drains, 6 brick/limestone/glass-curtain architectural facades, multi-cluster avenue trees and soft additive streetlamp & vehicle lens flares.
-- **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night. Online rooms sync to a shared server clock.
+- **Open-world city & 24× day/night cycle.** A 4×4 block grid with named streets, zebra crossings, skyline towers, parks, outskirts and a live minimap. In-game time runs at **24× real time** (`1 real hour = 24 in-game hours`, shown as `Day N · HH:MM`), with an orbiting sun, 25 intersection street lamps, glowing building windows & fuel canopies, and car headlights/taillights at night.
 - **Sculpted 3D humanoids, Maison Verve Boutique, Personal Wardrobe, jumping & emotes.** Anatomically proportioned characters with 2-segment articulated arms and legs (elbows & knees), facial features, 5 hair styles, 3 body builds and automatic job uniforms/headgear.
   - **Maison Verve Boutique (`B` on minimap) & Wardrobe (`C`):** spend cash on unique 3D garments & accessories — *Streetwear Hoodies* (3D hood + kangaroo pocket + drawstrings), *Varsity Bomber Jackets*, *Executive Suits & Silk Ties*, *Royal Senator / Agbada Tunics* (knee-length drape + 24k gold embroidery), *Sleeveless Jerseys*, *Cargo Pants*, *Summer Shorts*, *High-Tops*, *Combat Boots*, *Penny Loafers*, *Snapbacks*, *Bucket Hats*, *Traditional Fila Caps*, *24k Gold Crowns*, *Aviator / Gold / Cyber Shades*, and *Silver & 24k Gold Cuban Chains* (plus discounted Signature Outfit Bundles). Unlocked items stay in your **Look & Wardrobe (`C`)** forever, and citizens across Metro City wear varied streetwear and traditional outfits too.
-  - Supports biomechanical walk/sprint cycles, **vertical jump physics (`Space`)**, and **8 expressive emotes & dances (`B` / `1`–`8`)** — Wave, Respect Greet, Applause, Celebrate, Flex, Afro-Groove, Robot and Street Shuffle — synced live to nearby multiplayer peers.
+  - Supports biomechanical walk/sprint cycles, **vertical jump physics (`Space`)**, and **8 expressive emotes & dances (`B` / `1`–`8`)** — Wave, Respect Greet, Applause, Celebrate, Flex, Afro-Groove, Robot and Street Shuffle.
 - **Occupations with ranks.** Pay rises 15% per rank, from Trainee up to Legend.
   - Starter jobs: *Express Courier* (parcel deliveries), *City Security Officer* (3-checkpoint patrols), *Metro Cab Driver* (needs a car; pick up and drop off passengers; taxis earn +30%).
   - Startup jobs: *Master Mechanic*, *Head Line Chef*, *Fleet Dispatcher* (includes cargo delivery runs), *Software Engineer*.
@@ -133,7 +93,7 @@ Rendering is scaled down on phones and other small screens: pixel ratio is cappe
   - Bevelled `ExtrudeGeometry` car hulls & greenhouses with metallic clearcoat PBR paint, 5-spoke alloy rims, brake rotors, spoilers/hood scoops, xenon headlights and crimson tail-lamp bars.
   - **Street FX (`src/fx.js`):** persistent twin black rubber tyre skid marks & drift smoke, velocity-streaked orange collision sparks, and dramatic wreck explosions with expanding fireballs, ground scorch decals, flickering flames and towering dark smoke plumes.
   - **Wanted Street Heat & Police Interceptors (`src/heat.js`):** reckless high-speed traffic crashes, pedestrian scares or car explosions raise **Police Heat (`★☆☆`–`★★★`)** and dispatch pursuing **Metro Police Interceptors** with flashing red/blue LED lightbars and wail sirens. Break line-of-sight to cool down and evade, or pay a ticket fine if boxed in and busted.
-  - **Metro Motors Exotic Wing & Custom Mod Shop (`src/customization.js`):** alongside the daily fleet (*Rusty Hatchback*, *City Sedan*, *Metro Cab*, *Workhorse Pickup*, *Cargo Van*, *Benz V12 Sport*), Metro Motors showcases 4 custom-sculpted signature vehicles — the ***'69 Stallion GT*** (fastback muscle coupe with towering chrome blower scoop & ducktail), ***Aero Spider Convertible*** (open-top roadster with frameless windshield, leather bucket cockpit, roll-hoops & visible driver), ***Benz G-Wagen 4×4*** (upright luxury off-roader with chrome bullbar, expedition roof LEDs, side-exit pipes & rear tailgate spare wheel), and ***Valkyrie X12 Hypercar*** (mid-engine wedge with fighter canopy, V12 side scoops, quad cannons & swan-neck carbon GT wing). Open **Metro Customs** (at Metro Motors, from Garage `T`, or with a **25% owner discount** at your **Apex Auto Garage**) to customize clearcoat paint, *Twin Racing Stripes / 24k Gold Stripes / Carbon Aero Hoods*, *Silver / Stealth Black / 24k Gold / Cyber Cyan* 5-spoke rims, and *Street Neon Underglow* — persisted per car and synced live in multiplayer.
+  - **Metro Motors Exotic Wing & Custom Mod Shop (`src/customization.js`):** alongside the daily fleet (*Rusty Hatchback*, *City Sedan*, *Metro Cab*, *Workhorse Pickup*, *Cargo Van*, *Benz V12 Sport*), Metro Motors showcases 4 custom-sculpted signature vehicles — the ***'69 Stallion GT*** (fastback muscle coupe with towering chrome blower scoop & ducktail), ***Aero Spider Convertible*** (open-top roadster with frameless windshield, leather bucket cockpit, roll-hoops & visible driver), ***Benz G-Wagen 4×4*** (upright luxury off-roader with chrome bullbar, expedition roof LEDs, side-exit pipes & rear tailgate spare wheel), and ***Valkyrie X12 Hypercar*** (mid-engine wedge with fighter canopy, V12 side scoops, quad cannons & swan-neck carbon GT wing). Open **Metro Customs** (at Metro Motors, from Garage `T`, or with a **25% owner discount** at your **Apex Auto Garage**) to customize clearcoat paint, *Twin Racing Stripes / 24k Gold Stripes / Carbon Aero Hoods*, *Silver / Stealth Black / 24k Gold / Cyber Cyan* 5-spoke rims, and *Street Neon Underglow* — persisted per car.
 - **Live vehicle telemetry, wear & roadside assist.** Every car tracks body `HP`, `FUEL`, `TIRES` and `ENGINE` on a live 4-bar dashboard HUD (`green → amber <50% → pulsing red <25%`).
   - Impacts above 30 km/h dent the body (harder hits hurt more, up to 40 HP per crash); slow scrapes nick it.
   - Fuel drains as you drive — below 10% the fuel icon blinks with a soft reserve tick; run dry and the engine stalls. Top up at **Lagoon Fuels**, **Harbor Fuels** or **Metro Fuels** (`F` on the minimap).
@@ -142,7 +102,6 @@ Rendering is scaled down on phones and other small screens: pixel ratio is cappe
   - **Shop & Roadside service:** visit **Metro Motors' mechanic** (+20% city rates) or your **Apex Auto Garage** (house rates), OR press **`T`** anywhere (or **`E`** beside a wrecked/stalled car) to open **Garage & Roadside Assist** and call a tow ($250), dispatch a mobile mechanic ($150 call-out + parts), or buy an emergency +35% fuel can ($95).
 - **AI traffic.** 12 cars drive right-hand lanes across the grid and brake for pedestrians, cars and you. They honk if you block them.
 - **Save system.** `localStorage` key `metroventure_openworld_save_v1` (v10). Stores cash, look, job XP, startups, employees, vehicles, positions, every 3D piece you have built (`state.builds`), your **wellbeing & hotel stay** (`state.leisure`) and your **groceries** — pantry, trolley and shopping list (`state.groceries`). Old v2–v9 saves migrate automatically with an empty build plot, a fresh wellbeing meter, no booked room and a brand-new pantry.
-
 ## Project layout
 
 ```
@@ -160,7 +119,7 @@ web-openworld-game/
   src/groceries.js    pure FreshMart catalogue, trolley, self-checkout, pantry & shopping list
   src/time.js         pure 24× city clock, day/night lighting & shift boundaries
   src/economy.js      pure game-state logic & save migrations (unit-tested, no DOM)
-  src/customization.js pure Boutique wardrobe, outfit bundles, vehicle mods & multiplayer vehicle codec
+  src/customization.js pure Boutique wardrobe, outfit bundles & vehicle mods
   src/vehicleCond.js  pure vehicle wear, damage, shop & roadside repair quotes
   src/vehCard.js      telemetry tiering, warning ladder & shared vehicle card renderer
   src/heat.js         pure wanted street-heat stars, pursuit escalation, evasion & bust logic
@@ -171,11 +130,8 @@ web-openworld-game/
   src/streaming.js    pure endless-city cells: deterministic block/road/building layouts & street names
   src/vehicles.js     sculpted clearcoat cars, 5-spoke rims, light flares, AI traffic & PoliceCar
   vendor/three.module.min.js   Three.js r170 (vendored, MIT)
-  src/net.js          multiplayer transport (reconnect, 10 Hz send, 5 Hz playback, clock & emote sync)
-  src/cloud.js        accounts & cloud saves client: HTTP origin, bearer token, revisions, offline mirror
-  tests/              Node unit + Three.js scene-graph tests (economy, time, vehicleCond, vehCard, heat, realism, streaming, groceries, cloud)
-server/               free multiplayer server (Cloudflare Worker + Durable Object)
-tools/                dev server + /ws proxy used by `npm run dev`
+  tests/              Node unit + Three.js scene-graph tests
+tools/                local dev server used by `npm run dev`
 .github/workflows/pages.yml   test + deploy to GitHub Pages on push to main
 ```
 
@@ -192,11 +148,7 @@ including build order (milestones M1–M7) and a decision log.
 npm test
 ```
 
-The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming, FreshMart shopping & pantry, cloud-save client & revision rules) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required):
-
-- **127 client tests** — `npm test`
-- **100 server tests** — `npm --prefix server run test:all` (smoke, accounts, NetClient E2E, AccountHub),
-  where the AccountHub tests run without wrangler against an in-memory storage stub
+The suite covers the pure game logic (economy, clock, telemetry, heat, university, build mode, interiors, furniture/doors, public places, seat geometry & prop animations, MetroPhone apps & screen markup, endless-world cell streaming, FreshMart shopping & pantry) plus Three.js scene-graph integration tests for the 11 car cockpits, the walk-in university halls and every walk-in building/lift (headless, no browser required).
 
 ## Deploy to GitHub Pages
 

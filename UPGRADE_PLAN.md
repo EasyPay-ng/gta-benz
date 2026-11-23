@@ -13,7 +13,6 @@ Feature number ≠ build order. The recommended build order is at the bottom (§
 
 - **Stack**: Three.js r170 (vendored at `web-openworld-game/vendor/three.module.min.js`),
   vanilla ES modules, **no build step, no new dependencies**, deploys to GitHub Pages.
-  Single-player must keep working with no server; multiplayer is optional.
 - **Files** (as of this commit):
   - `web-openworld-game/index.html` (165 ln) — HUD, `#modal`/`#modal-body` generic modal,
     `#prompt` E-interaction, `#toasts`, `#vehicle-hud`, login, character creator, touch controls.
@@ -37,8 +36,6 @@ Feature number ≠ build order. The recommended build order is at the bottom (§
     interiors, rooms or enterable geometry.
   - `src/vehicles.js` (419 ln) — `buildCarMesh`, `Vehicle` (player arcade physics),
     `TrafficCar` (lane AI). No HP, fuel or wear.
-  - `src/net.js` (474 ln) — multiplayer transport (reconnect, 10 Hz send, 5 Hz playback).
-  - `server/src/` — Cloudflare Worker + Durable Object `city-room.js` (440 ln) + `accounts.js`
     (name+PIN accounts, `playerId`, 24-byte session tokens). Protocol v1 table is in
     `MULTIPLAYER.md` §3.
 - **Save**: `localStorage` key `metroventure_openworld_save_v1`, `SAVE_VERSION = 2`.
@@ -57,8 +54,6 @@ Feature number ≠ build order. The recommended build order is at the bottom (§
    `web-openworld-game/tests/` (run via `npm test`, `node --test`).
 4. Save migration: bump `SAVE_VERSION` per feature; extend `createInitialState()` and
    `migrateState()`; every previous save version must load without data loss.
-5. Multiplayer: extend the protocol with backward-compatible optional fields where possible;
-   new message types need both `net.js` and `server/src/city-room.js`, plus an updated row in
    the `MULTIPLAYER.md` protocol table. Keep interest culling (160 m), 10 Hz/5 Hz
    coalescing, and server-side clamps. Anything with cross-player effect must be
    **server-authoritative** (Durable Object state), never client-only.
@@ -67,7 +62,7 @@ Feature number ≠ build order. The recommended build order is at the bottom (§
 7. Every feature must leave the offline single-player path working (`npm run dev:offline`).
 8. Every feature updates `README.md` (Features + Controls if keys change) and exposes its
    live state on `window.__mv`.
-9. Tests: `npm test` and `server/test/smoke.mjs` pass before a feature is done.
+9. Tests: `npm test` passes before a feature is done.
 
 ### Time scale (feature 11, but used by features 1, 3, 4, 10)
 
@@ -108,7 +103,7 @@ combat system anywhere in the game, no wage accrual.
   so guards do *security response*, not fights: on aggro they advance, raise a hand
   (`point` emote), play an alarm SFX, show a threat toast, and apply a slow 1.5 s to the
   offending player. **Real damage combat is explicitly out of scope** and re-opened as its
-  own feature. This keeps multiplayer friendly on the free server.
+  own feature.
 - **D2 — Aggro is proximity-based** (threat inside the protected zone / touching the
   employer), not hostility-based, because there is no hostility signal.
 - **D3 — AI guards are per-client simulations in v1** (like citizens). Player-employer
@@ -164,7 +159,7 @@ D. Wages on the in-game clock (feature 11):
    - Wages accrue continuously on the clock: owed = wage/day × days since lastPaid.
    - HUD chip "💲 Guard wages due: $X" appears when owed > 0; HQ modal shows the ledger.
    - Paying deducts cash (economy.js pure helper + test). While the employer is offline
-     in multiplayer, the server keeps the clock (that is the M7b server pass); in
+     in
      single-player, the client clock (feature 11) fast-forwards on load, which is the
      documented approximation.
    - window.__mv.security exposes { state.security, guards: [live entities] }.
@@ -194,7 +189,7 @@ migration · `window.__mv.security` · offline single-player intact · tests gre
 
 **What ships**: jumping; dance/expressive emotes (wave, clap, greet, celebrate, 3 dance
 styles); an on-screen **Actions & Emotes** menu plus hotkeys; emotes are visible to all
-nearby players in multiplayer.
+nearby characters.
 
 **Current state**: `src/character.js` has procedural poses `stand | sit | work | dive`
 driven in `update(dt)` — no assets, no jump, no emotes. `MULTIPLAYER.md` §8 already
@@ -216,7 +211,7 @@ plans the net side: an `emote` field on the `pos` message.
 Context: MetroVenture 3D — see UPGRADE_PLAN.md §0. This is feature 2.
 
 Task: add jumping and an emote system to the shared character rig, with a UI panel,
-hotkeys and multiplayer broadcast.
+hotkeys.
 
 A. src/character.js:
    - Extend the pose system: setEmote(id, durationMs = 0) — id ∈
@@ -242,7 +237,7 @@ B. game.js:
    - Citizens flavour (optional, cheap): a hired citizen occasionally (≤ 1 per 90 s per
      citizen, probability-gated) plays 'wave' or 'clap' when the player is within 6 m.
 
-C. Multiplayer (src/net.js + server/src/city-room.js + MULTIPLAYER.md table):
+C. (removed)
    - Optional field on the client 'pos' message: { emote: '<id>', until: <ts> } — only
      present while an emote is active (server must not require it). Server forwards it
      unchanged in 'snap' entries as an optional 6th element after veh (append at the
@@ -412,7 +407,7 @@ Auto Garage startup lot and the Metro Motors dealership exist as exteriors.
 
 ```
 Context: MetroVenture 3D — see UPGRADE_PLAN.md §0. This is feature 4, milestone M2.
-No multiplayer changes in this feature (condition is local; syncing a 'wrecked' flag
+No network sync in this feature (condition is local; syncing a 'wrecked' flag
 is a later optional step).
 
 A. Data (src/data.js):
@@ -488,7 +483,7 @@ tow · HUD data flow · tests green.
 inventory system (item kinds: vehicle keys, property keys, food, drinks) that is the
 foundation for key transfer (feature 6), property keys (feature 10) and food (feature 3).
 
-**Current state**: single-player — anything is drivable. Multiplayer — vehicle
+**Current state**: anything is drivable.
 ownership is per-client, not synced (MULTIPLAYER.md §6). No inventory exists.
 
 **Decisions**:
@@ -496,7 +491,7 @@ ownership is per-client, not synced (MULTIPLAYER.md §6). No inventory exists.
 - **D1 — `ownerId` on every vehicle**: the account `playerId` (server-issued on
   `join`). Single-player/guest: `ownerId: 'local'`. Pre-existing save vehicles get
   `ownerId: 'local'` via migration.
-- **D2 — Server is the ownership authority in multiplayer.** The DO stores
+- **D2 — (removed; single-player only).**
   `{ vehicles: { [vehId]: { ownerId, keys: [playerId, …], wrecked } } }` in its
   durable storage (compact JSON — free-tier storage is small, see MULTIPLAYER.md §1).
   The `welcome` message gains an optional `vehicles` field so each client learns the
@@ -525,11 +520,11 @@ A. Pure logic (src/inventory.js, tests/inventory.test.mjs):
 B. Ownership (client):
    - state.vehicles[*].ownerId (D1). game.js enter-car logic: allow if
      ownerId === myId (local or my playerId) OR I hold a vkey for that vehId
-     (single-player) OR server says keys contains myId (multiplayer — read from the
+     (single-player) ownership/key checks apply (read from the
      room registry). Lock UX per D4.
    - Buying a car sets ownerId to the buyer. Valet (V) only works on owned/keyed cars.
 
-C. Server (server/src/city-room.js + src/net.js + MULTIPLAYER.md):
+C. (removed)
    - DO state: vehicles registry (D2). On 'join' → include `vehicles` in welcome.
    - New client messages:
        'veh_owned' {vehId, ownerId}   — client announces a purchase (validated: must
@@ -548,14 +543,13 @@ D. UI:
      item icons + tooltips). Keys show the car they open.
    - HUD: a small inventory counter chip when non-empty.
 
-E. Debug: window.__mv.inventory, window.__mv.vehiclesRoom (multiplayer).
+E. Debug: window.__mv.inventory.
 
 Acceptance:
    - Single-player: all owned cars enterable; console-set another ownerId → lock UX.
    - Two tabs (npm run dev): player A buys a car (veh_owned broadcast), B sees it in
      the room registry, B gets lock UX at A's car, A enters freely.
    - Inventory: add/remove/cap 24 enforced; vkey appears when a car is bought.
-   - grant_key by non-owner rejected with 'not_owner' (test in server/test/smoke.mjs).
    - Old save loads: every vehicle has a key in inventory.
    - npm test + server smoke pass.
 ```
@@ -569,7 +563,7 @@ Inventory modal · smoke tests for the server rules.
 ## 6. Transferable Vehicle Keys
 
 **What ships**: pull a vehicle key out of your inventory and hand it to another player
-in multiplayer so trusted friends can drive your car; revokeable; persisted on the
+so trusted friends can drive your car; revokeable; persisted on the
 server.
 
 **Current state**: builds directly on feature 5 (vkey items + server registry).
@@ -618,7 +612,7 @@ B. Server (city-room.js + smoke test):
      guest rejoin loses keys (documented: keys are tied to accounts for durability).
 
 C. MULTIPLAYER.md: protocol rows for grant_key / revoke_key / key_event; update §6
-   "not multiplayer yet" — vehicle keys are now synced.
+   vehicle keys are persisted locally.
 
 D. Debug: window.__mv.sendGrant(vehId, to) for two-tab QA.
 
@@ -836,7 +830,7 @@ clock as the next server step).
 - **D1 — Clock ownership.** Single-player: client clock with
   `state.clock = { realBase (epoch ms), inGameBase (in-game ms), speed: 24 }`;
   `inGameNow = inGameBase + (Date.now() - realBase) × 24` → offline time passes on
-  load (documented approximation). Multiplayer: the **clock is the first server
+  load (documented approximation).
   authoritative service** — a Durable Object alarm (`city-clock` in the same worker,
   or a second DO) ticks every 30 real seconds, broadcasts `clock { inGameMs, day,
   hhmm }`; clients render from it and reconcile on `welcome.clock` + `restore`.
@@ -911,11 +905,11 @@ Acceptance:
 ```
 
 ```
-TASK 11B — Server clock (multiplayer)
+TASK 11B — (removed)
 
 Context: same as above. Milestone M1b, after 11A.
 
-A. server/src/city-clock.js (new Durable Object class in the same worker) or a second
+A. (removed)
    alarm on city-room: alarm every 30 real s → advance the room clock by 12 in-game
    minutes (30 real s × 24) → broadcast clock { inGameMs, day, hhmm } to the room;
    hibernates when empty (sockets survive, per the existing pattern).
@@ -956,7 +950,7 @@ D. Agency modal (game.js): listings grid — label, kind, price, rent/week, stat
    bed sleep, fridge, shower — home base!).
 E. Unit doors: pkey required (feature 5 lock UX, kind 'pkey'); agent issues keys on
    buy/lease start, reclaims on sell/eviction; tenant eviction → toast + lock.
-F. Server (multiplayer pass, after the single-player core works): listings + leases
+F. (removed)
    move to the DO (compact JSON, ≤ ~2 KB for the seed table), new messages
    'listing_action' {id, action, to?} validated like feature 5/6; welcome.realty in
    the payload. Single-player stays fully offline-functional.
@@ -977,7 +971,7 @@ Acceptance:
 **Acceptance checklist (11)**: 24× clock (client + server DO) · offline fast-forward
 · day/night visuals with perf budget · payday cadence unchanged · one `getClock()`
 source. **(10)**: agency building + interior · seed listings + premium unlock ·
-buy/sell/rent/eviction on the clock · pkey lock · server sync for multiplayer ·
+buy/sell/rent/eviction on the clock · pkey lock ·
 tests.
 
 ---

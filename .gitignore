@@ -1,7 +1,3 @@
 node_modules/
 .DS_Store
 *.log
-
-# Cloudflare wrangler local state
-server/.wrangler/
-.wrangler/
