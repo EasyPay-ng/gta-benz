@@ -87,23 +87,4 @@ test('Vehicle Mod Shop: paint, racing stripes, gold rims, neon underglow & Apex 
   assert.equal(Cust.applyVehicleMod(s, buyTaxi.vehicle.id, 'underglow', 'gold').ok, true);
 });
 
-test('Multiplayer vehicle wire token encodes & decodes custom mods within 48 chars', () => {
-  const token = Cust.encodeNetVehicle({
-    model: 'gwagen',
-    color: '#111827',
-    livery: 'gold_trim',
-    rims: 'gold',
-    underglow: 'cyan',
-  });
-  assert.ok(token.length <= 48, `token length ${token.length} <= 48`);
-  const decoded = Cust.decodeNetVehicle(token);
-  assert.deepEqual(decoded, {
-    model: 'gwagen',
-    color: '#111827',
-    livery: 'gold_trim',
-    rims: 'gold',
-    underglow: 'cyan',
-  });
-  // Legacy plain model string still decodes cleanly
-  assert.equal(Cust.decodeNetVehicle('sedan').model, 'sedan');
-});
+

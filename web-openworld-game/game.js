@@ -25,13 +25,11 @@ import * as Interiors from './src/interiors.js';
 import * as Props from './src/props.js';
 import * as Places from './src/publicPlaces.js';
 import * as Groceries from './src/groceries.js';
-import { CloudClient, saveEnvelope, bootPolicy, offlineAllowed, probeServer, classifyServerAddress, NO_SERVER_HINT } from './src/cloud.js';
 import { Character } from './src/character.js';
 import { City, resolveCircle, makeTextTexture, CURB_Y } from './src/world.js';
 import { Vehicle, TrafficCar, PoliceCar, buildCarMesh, setVehicleNightFactor } from './src/vehicles.js';
 import { setupRealisticAtmosphere } from './src/textures.js';
 import { StreetFX } from './src/fx.js';
-import { NetClient, discoverServerUrl } from './src/net.js';
 import * as Mobile from './src/mobile.js';
 
 const $ = (id) => document.getElementById(id);
@@ -358,7 +356,6 @@ const game = {
   modalShop: null, // { name, markup, x, z } — set while the mechanic modal is open
   creatorOpen: false,
   helpOpen: false,
-  loginOpen: false,
   elapsed: 0,
   time: null,      // window.__mv.time = { now(), set(inGameMs), fastForwardTo(inGameMs), phase(), label() }
   telemetry: null, // window.__mv.telemetry = () => snapshot of all owned vehicles' cond
@@ -397,11 +394,9 @@ let clockHudTimer = 0;
 let telemetryTimer = 0;
 let fuelTickTimer = 0;
 
-/** Single authoritative clock source (server-sourced when online, local fallback offline). */
+/** Single authoritative in-game clock source. */
 function getClock() {
   if (debugClockOverride) return Time.inGameNowMs(debugClockOverride, Date.now());
-  const srv = net?.clockNow?.();
-  if (srv != null) return srv;
   return Time.inGameNowMs(game.state?.clock, Date.now());
 }
 
@@ -478,7 +473,7 @@ game.time = {
   set(inGameMs) {
     const target = Math.max(0, Number(inGameMs) || 0);
     if (game.state?.clock) Time.setClock(game.state.clock, target, Date.now());
-    debugClockOverride = net?.connected ? Time.createClock(Date.now(), target, Time.CLOCK_SPEED) : null;
+    debugClockOverride = Time.createClock(Date.now(), target, Time.CLOCK_SPEED);
     lastShiftIndex = Time.shiftIndex(target);
     if (game.state?.stats) {
       game.state.stats.day = Time.dayOf(target);
@@ -736,18 +731,8 @@ function snapshotState() {
 function saveGame(silent = false) {
   try {
     snapshotState();
-    if (cityServerUrl) {
-      // Online: never write a local save. A guest has no account to keep it, and
-      // an offline copy would only be deleted on the next boot anyway.
-      if (!net?.account) {
-        if (!silent) toast('👤 Guests start fresh next visit — sign in to keep this city.', 'warn');
-        return false;
-      }
-      queueCloudSave(0);
-    } else {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(game.state));
-      try { localStorage.setItem(SAVE_AT_KEY, String(Date.now())); } catch { /* private mode */ }
-    }
+    localStorage.setItem(SAVE_KEY, JSON.stringify(game.state));
+    try { localStorage.setItem(SAVE_AT_KEY, String(Date.now())); } catch { /* private mode */ }
     if (!silent) toast('💾 Game saved', 'good');
     return true;
   } catch (err) {
@@ -757,11 +742,6 @@ function saveGame(silent = false) {
 }
 
 function loadGame(silent = false) {
-  if (cityServerUrl) {
-    // the cloud copy loads on sign-in; there is no local save to fall back on
-    if (!silent) toast('☁️ Your city loads from the server when you sign in.', '');
-    return false;
-  }
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) { if (!silent) toast('No save found yet. Press F5 to save.', 'bad'); return false; }
   try {
@@ -775,7 +755,6 @@ function loadGame(silent = false) {
   }
 }
 
-/** Delete whatever this device still holds from the offline era. */
 function clearLocalSave() {
   try {
     localStorage.removeItem(SAVE_KEY);
@@ -786,10 +765,6 @@ function clearLocalSave() {
 function resetGame() {
   if (!window.confirm('Delete your save and start a brand new city?')) return;
   clearLocalSave();
-  // the cloud copy is the real one now, so wipe it too when the player resets
-  if (cloud) {
-    cloud.deleteSave().then((res) => { if (res.ok) cloudRevision = 0; });
-  }
   game.state = Eco.createInitialState();
   applyState();
   closeModal();
@@ -828,7 +803,7 @@ function triggerEmote(id) {
 const keys = new Set();
 const touchInput = { x: 0, y: 0, sprint: false, handbrake: false };
 const isTyping = () => document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
-const anyOverlay = () => !!game.modal || game.helpOpen || game.loginOpen || game.phoneOpen;
+const anyOverlay = () => !!game.modal || game.helpOpen || game.phoneOpen;
 
 window.addEventListener('keydown', (e) => {
   sfx.ensure();
@@ -1415,18 +1390,7 @@ function updateHUD(force = false) {
     $('hud-day').textContent = Time.clockLabel(getClock());
   }
   $('hud-payday').textContent = Eco.builtCount(s) ? `Shift in ${Math.ceil(s.stats.payrollTimer)}s` : 'No startups yet';
-  const netEl = $('hud-net');
-  if (netEl) {
-    if (!net) netEl.textContent = 'Single-player';
-    else if (net.connected) {
-      const name = net.name || 'Guest';
-      netEl.textContent = `${name}${net.account ? '' : ' (guest)'} · ${net.visiblePeers().length} nearby${net.rtt != null ? ` · ${net.rtt}ms` : ''}`;
-    } else if (net.status === 'auth_required' || net.status === 'authenticating') netEl.textContent = 'Signing in…';
-    else if (net.status === 'reconnecting') netEl.textContent = 'Reconnecting…';
-    else netEl.textContent = 'Connecting…';
-  }
-  const acctBtn = $('btn-account');
-  if (acctBtn) acctBtn.classList.toggle('hidden', !net);
+
 }
 
 const modalEl = $('modal');
@@ -2413,7 +2377,6 @@ const modalActions = {
     toast(res.msg, res.bought ? 'money' : 'good');
     game.player.char.setAppearance(game.state.appearance);
     game.player.char.setOccupation(null);
-    if (net) net.setAppearance(game.state.appearance);
     saveGame(true);
   },
   buyBundle: ({ bundle }) => {
@@ -2423,14 +2386,12 @@ const modalActions = {
     toast(res.msg, res.bought ? 'money' : 'good');
     game.player.char.setAppearance(game.state.appearance);
     game.player.char.setOccupation(null);
-    if (net) net.setAppearance(game.state.appearance);
     saveGame(true);
   },
   wardrobeColor: ({ key, val }) => {
     game.state.appearance[key] = val;
     game.player.char.setAppearance(game.state.appearance);
     game.player.char.setOccupation(null);
-    if (net) net.setAppearance(game.state.appearance);
     sfx.click();
     saveGame(true);
   },
@@ -2501,7 +2462,6 @@ const modalActions = {
     if (Cust.ownsClothing(s, 'hat', 'mortarboard')) Cust.equipClothing(s, 'hat', 'mortarboard');
     game.player.char.setAppearance(s.appearance);
     game.player.char.setOccupation(null);
-    if (net) net.setAppearance(s.appearance);
     sfx.cash();
     toast('🎓 Wearing your Academic Convocation Gown & Mortarboard Cap!', 'good');
     saveGame(true);
@@ -2758,7 +2718,6 @@ function closeCreator() {
   syncCameraViewMode();
   document.activeElement?.blur?.();
   saveGame(true);
-  if (net) net.setAppearance(game.state.appearance);
 }
 // The side rail only carries in-the-moment controls; everything else is in the phone.
 $('btn-camera')?.addEventListener('click', () => toggleCameraMode());
@@ -2767,13 +2726,11 @@ $('btn-emotes')?.addEventListener('click', () => (game.modal ? closeModal() : op
 
 // Help
 function showHelp() { game.helpOpen = true; $('help').classList.remove('hidden'); }
-let pendingLogin = false;
 function hideHelp() {
   if (!game.helpOpen) return;
   game.helpOpen = false;
   $('help').classList.add('hidden');
   if (!game.state.seenHelp) { game.state.seenHelp = true; saveGame(true); }
-  if (pendingLogin) { pendingLogin = false; showLogin(); }
 }
 $('help-close').addEventListener('click', () => { sfx.ensure(); hideHelp(); });
 function toggleMute() {
@@ -4732,547 +4689,6 @@ function updateCamera(dt) {
   sun.target.position.set(target.x, 0, target.z);
 }
 
-// ===========================================================================
-// Multiplayer (optional — only active when a server URL is configured)
-//
-//   ?server=wss://metroventure-city.you.workers.dev/ws?room=metro-1
-//
-// Remote players are a render-only projection of what the server tells us. We do
-// not simulate them, own their state, or resolve collisions against them.
-// ===========================================================================
-const remotes = new Map();
-let net = null;
-
-function remoteLabel(title, sub) {
-  const tex = makeTextTexture([title, sub], { width: 320, height: 96, bg: 'rgba(15,23,42,0.82)', fg: '#38bdf8', font: 'bold 38px system-ui, sans-serif' });
-  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
-  const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(2.4, 0.72, 1);
-  sprite.position.y = 2.45;
-  sprite.renderOrder = 10;
-  return { sprite, mat, tex };
-}
-
-function ensureRemote(peer) {
-  let r = remotes.get(peer.id);
-  if (r) {
-    if (peer.app) r.char.setAppearance({ ...DEFAULT_APPEARANCE, ...peer.app });
-    return r;
-  }
-  const app = { ...DEFAULT_APPEARANCE, ...(peer.app || {}) };
-  const char = new Character(app);
-  const label = remoteLabel(peer.name || 'Citizen', 'Online');
-  char.group.add(label.sprite);
-  char.group.position.set(peer.x ?? 0, city.groundY(peer.x ?? 0, peer.z ?? 0), peer.z ?? 0);
-  scene.add(char.group);
-  r = {
-    id: peer.id,
-    name: peer.name || 'Citizen',
-    char,
-    label,
-    x: peer.x ?? 0,
-    z: peer.z ?? 0,
-    yaw: peer.yaw ?? 0,
-    car: null,
-    carModel: null,
-    carColor: null,
-  };
-  remotes.set(peer.id, r);
-  return r;
-}
-
-function disposeCarParts(parts) {
-  if (!parts) return;
-  parts.paint?.dispose?.();
-  parts.rimMat?.dispose?.();
-  parts.brakeMat?.dispose?.();
-  parts.headFlareMat?.dispose?.();
-  parts.tailFlareMat?.dispose?.();
-  parts.leftMirrorLiveMat?.dispose?.();
-  parts.rightMirrorLiveMat?.dispose?.();
-  parts.cockpit?.dispose?.();
-}
-
-function removeRemote(id) {
-  const r = remotes.get(id);
-  if (!r) return;
-  r.char.group.parent?.remove(r.char.group);
-  r.char.dispose();
-  r.label.mat.dispose();
-  r.label.tex.dispose?.();
-  if (r.car) {
-    scene.remove(r.car);
-    disposeCarParts(r.carParts);
-  }
-  remotes.delete(id);
-}
-
-function updateRemotes(dt) {
-  for (const r of remotes.values()) {
-    const peer = net?.peers.get(r.id);
-    const visible = !!(peer && peer.visible);
-    if (!visible) {
-      r.char.group.visible = false;
-      if (r.car) r.car.visible = false;
-      continue;
-    }
-    // Dumb interpolation: enough to hide a 5 Hz snapshot rate, no prediction.
-    const k = Math.min(1, dt * 9);
-    r.x += (peer.tx - r.x) * k;
-    r.z += (peer.tz - r.z) * k;
-    r.yaw = lerpAngle(r.yaw, peer.tyaw, Math.min(1, dt * 10));
-
-    const spec = Cust.decodeNetVehicle(peer.veh, peer.app?.shirt || '#38bdf8');
-    if (spec) {
-      if (!r.car || r.carModel !== spec.model) {
-        if (r.car) {
-          if (r.char.group.parent === r.car) scene.add(r.char.group);
-          scene.remove(r.car);
-          disposeCarParts(r.carParts);
-        }
-        r.carParts = buildCarMesh(spec.model, spec.color, spec);
-        r.car = r.carParts.group;
-        r.carModel = spec.model;
-        r.carToken = peer.veh;
-        scene.add(r.car);
-      } else if (r.carToken !== peer.veh && r.carParts) {
-        r.carParts.applyMods(spec);
-        r.carToken = peer.veh;
-      }
-      r.car.visible = true;
-      if (r.carParts) r.carParts.headBeams.visible = currentNightFactor > 0.08;
-      r.car.position.set(r.x, city.groundY(r.x, r.z), r.z);
-      r.car.rotation.y = r.yaw;
-      // Open-top roadster shows the remote driver's full outfit, shades & gold chain!
-      if (spec.model === 'roadster' && r.carParts) {
-        if (r.char.group.parent !== r.car) r.car.add(r.char.group);
-        r.char.group.visible = true;
-        r.char.group.position.copy(r.carParts.seat);
-        r.char.group.rotation.set(0, 0, 0);
-        r.char.group.scale.setScalar(r.carParts.seatScale);
-        r.char.setPose('sit');
-        r.char.animate(dt, 0);
-      } else {
-        r.char.group.visible = false;
-      }
-    } else {
-      if (r.car) r.car.visible = false;
-      if (r.char.group.parent !== scene) {
-        scene.add(r.char.group);
-        r.char.group.scale.setScalar(1);
-        r.char.setPose('stand');
-      }
-      r.char.group.visible = true;
-      r.char.group.position.set(r.x, city.groundY(r.x, r.z), r.z);
-      r.char.group.rotation.y = r.yaw;
-      if (peer.emote && EMOTE_BY_ID[peer.emote]) {
-        if (r.char.emote !== peer.emote) r.char.setEmote(peer.emote);
-      } else if (r.char.emote) {
-        r.char.clearEmote();
-      }
-      r.char.animate(dt, peer.mv ? 4.2 : 0);
-    }
-  }
-}
-
-// --- identity (name + PIN) -------------------------------------------------
-// The PIN is only sent to the server; the browser keeps a session token instead.
-const IDENTITY_KEY = 'metroventure_identity';
-const SAVE_AT_KEY = `${SAVE_KEY}:at`;
-let cityServerUrl = null;
-
-// ---- cloud saves (server-owned wallet & progress) --------------------------
-let cloud = null;
-let cloudRevision = 0;
-let cloudBusy = false;
-let cloudLoaded = false;
-let cloudQuota = false;
-let cloudTimer = null;
-
-function loadIdentity() {
-  try { return JSON.parse(localStorage.getItem(IDENTITY_KEY) || 'null'); } catch { return null; }
-}
-function saveIdentity(identity) {
-  try { localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity)); } catch { /* private mode */ }
-}
-function forgetIdentity() {
-  try { localStorage.removeItem(IDENTITY_KEY); } catch { /* private mode */ }
-}
-
-// ===========================================================================
-// Cloud saves — the server owns the wallet, the browser keeps a mirror
-// ===========================================================================
-function initCloud(token, saveMeta = null) {
-  if (!cityServerUrl || !token) return;
-  cloud = new CloudClient({ serverUrl: cityServerUrl, token });
-  cloudRevision = Number(saveMeta?.revision) || 0;
-  cloudQuota = false;
-  cloudLoaded = false;   // a new sign-in always re-reads the cloud copy
-  pullCloudSave();
-}
-
-function cloudStatus(text, bad = false) {
-  const el = document.getElementById('cloud-status');
-  if (!el) return;
-  el.textContent = text;
-  el.classList.toggle('hidden', !text);
-  el.classList.toggle('login-error', !!bad);
-  el.classList.toggle('hint', !bad);
-}
-
-async function pullCloudSave() {
-  if (!cloud || cloudLoaded) return;
-  cloudLoaded = true;
-  const res = await cloud.loadSave();
-  if (!res.ok) {
-    if (res.error?.quota) cloudQuota = true;
-    return;
-  }
-  const meta = res.body.meta;
-  const save = res.body.save;
-  cloudRevision = Number(meta?.revision) || 0;
-  cloudStatus(meta ? `☁️ Cloud save ready · revision ${meta.revision} · ${(meta.bytes / 1024).toFixed(1)} KB` : '☁️ Cloud save ready — nothing saved yet');
-  if (!save) {
-    // Brand-new account: this city is the first one. Nothing is imported from
-    // whatever was played offline before the server existed.
-    cloudStatus('☁️ New account — this city starts here');
-    if (!game.state.seenHelp) showHelp();
-    queueCloudSave(1200); // seed revision 1 so the next device has something to load
-    return;
-  }
-  // The server always wins: there is no local save to compare against.
-  try {
-    game.state = Eco.migrateState(save);
-    applyState();
-    toast(`☁️ Cloud save loaded — revision ${meta.revision} · ${money(game.state.cash)}`, 'good');
-  } catch {
-    toast('☁️ The cloud save could not be read — keeping this device\'s copy.', 'bad');
-  }
-}
-
-/** Push the current state up, debounced so a busy session is one request. */
-function queueCloudSave(delayMs = 4000) {
-  if (!cloud || cloudQuota) return;
-  if (cloudTimer) clearTimeout(cloudTimer);
-  cloudTimer = setTimeout(() => { cloudTimer = null; pushCloudSave(); }, delayMs);
-}
-
-/** Last-chance upload when the tab closes: keepalive survives the unload. */
-function flushCloudSave() {
-  if (!cloud || cloudBusy || cloudQuota || !net?.account) return;
-  if (cloudTimer) { clearTimeout(cloudTimer); cloudTimer = null; }
-  try { snapshotState(); } catch { return; }
-  cloud.save(saveEnvelope(game.state), { baseRevision: cloudRevision, keepalive: true });
-}
-
-async function pushCloudSave(retryOnConflict = true) {
-  if (!cloud || cloudBusy || cloudQuota) return;
-  cloudBusy = true;
-  const res = await cloud.save(saveEnvelope(game.state), { baseRevision: cloudRevision });
-  cloudBusy = false;
-  if (res.ok) {
-    cloudRevision = Number(res.body?.meta?.revision) || cloudRevision + 1;
-    cloudStatus(`☁️ Saved to the cloud · revision ${cloudRevision}`);
-    return;
-  }
-  if (res.error?.code === 'revision_conflict' && retryOnConflict) {
-    // Another device wrote while we were playing: adopt its revision and try once
-    // more, so nothing is silently lost and the newest session still wins.
-    cloudRevision = Number(res.error.revision) || cloudRevision;
-    return pushCloudSave(false);
-  }
-  if (res.error?.quota) {
-    cloudQuota = true;
-    cloudStatus('☁️ Daily server quota used up — progress is on this device until 00:00 UTC.', true);
-    toast('☁️ The free daily server quota is used up — progress is saved on this device until 00:00 UTC.', 'warn');
-  } else {
-    cloudStatus(`☁️ Cloud save failed: ${res.error?.message || 'unknown error'}`, true);
-  }
-}
-
-const AUTH_MESSAGES = {
-  bad_name: 'Names are 3–16 characters: letters, numbers, spaces, dots, dashes or underscores.',
-  bad_pin: 'PINs are 4–32 letters or numbers.',
-  name_taken: 'That name already belongs to someone. Try another, or use their PIN if it is yours.',
-  bad_credential: 'Wrong name or PIN.',
-  locked: 'Too many wrong PINs. Wait a minute and try again.',
-  slow_down: 'Slow down a moment, then try again.',
-  session_expired: 'Your session expired. Please sign in again.',
-  already_online: 'That account is already playing in this city. Close the other tab first.',
-  logged_out: 'Signed out.',
-  connect_failed: 'Could not reach the city server. Playing offline instead.',
-};
-
-function showLogin(message) {
-  game.loginOpen = true;
-  const saved = loadIdentity();
-  $('login-name').value = saved?.name || game.state.appearance.name || '';
-  $('login-pin').value = '';
-  loginError(message || '');
-  $('login').classList.remove('hidden');
-  setTimeout(() => { ($('login-name').value ? $('login-pin') : $('login-name')).focus(); }, 30);
-}
-function showOfflineGate() {
-  const gate = $('offline-gate');
-  if (!gate) return;
-  gate.classList.remove('hidden');
-  let remembered = '';
-  try { remembered = localStorage.getItem('metroventure_server') || ''; } catch { /* private mode */ }
-  // Guess the page's own address: when a dev server is serving this page, that is
-  // almost always the right answer, and the probe below will confirm it either way.
-  const guess = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=metro-1`;
-  $('offline-server').value = remembered || guess;
-  $('offline-server').placeholder = NO_SERVER_HINT;
-  const err = $('offline-error');
-  if (remembered) {
-    err.textContent = `The server saved on this device (${remembered}) did not answer. Retry, or point the game at another one.`;
-    err.classList.remove('hidden');
-  } else {
-    err.classList.add('hidden');
-  }
-  updateHUD(true);
-}
-
-function gateSay(message, isError = true) {
-  const el = $('offline-error');
-  if (!el) return;
-  el.textContent = message;
-  el.classList.toggle('hidden', !message);
-  el.classList.toggle('login-error', !!message && isError);
-}
-
-function gateBusy(busy, message = '') {
-  const connect = $('offline-connect');
-  const retry = $('offline-retry');
-  connect.disabled = busy;
-  retry.disabled = busy;
-  connect.textContent = busy ? 'Checking…' : 'Connect';
-  if (busy && message) gateSay(message, false);
-}
-
-function hideLogin() {
-  game.loginOpen = false;
-  $('login').classList.add('hidden');
-}
-const CONNECT_DOWN = 'The city server is not answering. It may have stopped — use Server settings, then Retry.';
-let loginWatchdog = null;
-let netDown = false;
-
-/** If the server never answers, say so instead of spinning forever. */
-function armLoginWatchdog() {
-  clearTimeout(loginWatchdog);
-  loginWatchdog = setTimeout(() => {
-    loginWatchdog = null;
-    if (!game.loginOpen) return;
-    loginError(CONNECT_DOWN, 'info');
-  }, 9000);
-}
-function clearLoginWatchdog() {
-  if (loginWatchdog) clearTimeout(loginWatchdog);
-  loginWatchdog = null;
-}
-
-function loginError(message, kind = '') {
-  const el = $('login-error');
-  el.textContent = message || '';
-  el.classList.toggle('hidden', !message);
-  el.classList.toggle('info', kind === 'info');
-}
-function applyPlayerName(name) {
-  if (!name) return;
-  game.state.appearance.name = name;
-  const field = $('cc-name');
-  if (field && document.activeElement !== field) field.value = name;
-  updateHUD(true);
-}
-
-function startNet(identity = null) {
-  if (!cityServerUrl) return;
-  if (net) { net.disconnect(); net = null; }
-  net = new NetClient({
-    url: cityServerUrl,
-    identity,
-    appearance: game.state.appearance,
-    handlers: {
-      onStatus(status) {
-        if (status === 'online') {
-          if (netDown) toast('🌐 Reconnected to the city server', 'good');
-          netDown = false;
-          if (game.loginOpen) loginError('');
-        } else if (status === 'reconnecting' || status === 'offline') {
-          // Only complain once per outage, and never leave "Connecting…" on screen
-          // pretending something is still in flight.
-          if (!netDown && status === 'reconnecting') toast('🌐 Connection lost — retrying…', 'bad');
-          netDown = true;
-          if (game.loginOpen) loginError(CONNECT_DOWN, 'info');
-        }
-        updateHUD(true);
-      },
-      onAuth(auth) {
-        clearLoginWatchdog();
-        saveIdentity({ name: auth.name, token: auth.token });
-        applyPlayerName(auth.name);
-        loginError('');
-        $('btn-account').classList.add('on');
-        toast(auth.created ? `🪪 Account created — welcome, ${auth.name}` : `🪪 Signed in as ${auth.name}`, 'good');
-        initCloud(auth.token, auth.save);
-      },
-      onAuthError(code, msg) {
-        clearLoginWatchdog();
-        if (code === 'session_expired' || code === 'logged_out') forgetIdentity();
-        if (code === 'session_expired') return; // onAuthRequired will ask again
-        loginError(AUTH_MESSAGES[code] || `Sign-in failed (${code}).`);
-        if (!game.loginOpen) showLogin(AUTH_MESSAGES[code] || `Sign-in failed (${code}).`);
-        if (code === 'connect_failed') { /* handled below */ }
-        updateHUD(true);
-      },
-      onAuthRequired() { if (!game.loginOpen) showLogin(); },
-      onWelcome(msg) {
-        for (const p of msg.peers) ensureRemote(p);
-        hideLogin();
-        applyPlayerName(msg.you?.name);
-        if (msg.clock) {
-          debugClockOverride = null;
-          if (game.state?.clock) Time.setClock(game.state.clock, msg.clock.inGameMs, Date.now());
-          lastShiftIndex = Time.shiftIndex(msg.clock.inGameMs);
-          if (game.state?.stats) {
-            game.state.stats.day = Time.dayOf(msg.clock.inGameMs);
-            game.state.stats.payrollTimer = Time.secondsToNextShift(msg.clock.inGameMs);
-          }
-          updateDayNight(msg.clock.inGameMs, true);
-        }
-        if (msg.restore && !game.player.vehicle) {
-          game.player.x = msg.restore.x; game.player.z = msg.restore.z;
-          game.player.yaw = msg.restore.yaw;
-          game.player.vx = game.player.vz = 0;
-          game.player.char.group.position.set(msg.restore.x, city.groundY(msg.restore.x, msg.restore.z), msg.restore.z);
-          cam.yaw = msg.restore.yaw;
-        }
-        toast(`🌐 ${msg.room} · ${msg.peers.length + 1} ${msg.peers.length ? 'players' : 'player'} online`, 'good');
-        updateHUD(true);
-      },
-      onClock(clockMsg) {
-        if (!debugClockOverride && game.state?.clock) {
-          Time.setClock(game.state.clock, clockMsg.inGameMs, Date.now());
-          updateDayNight(clockMsg.inGameMs, true);
-          updateHUD(true);
-        }
-      },
-      onJoin(peer) { ensureRemote(peer); },
-      onLeave(id) { removeRemote(id); },
-      onChat(msg) { toast(`${msg.name}: ${msg.m}`, ''); },
-      onError(err) {
-        if (err.code === 'rate_limited') return;
-        console.warn('[net]', err);
-        if (err.code === 'connect_failed') toast('City server unreachable — still playable offline.', 'bad');
-      },
-    },
-  });
-  net.connect();
-  window.__mv.net = net;
-  window.__mv.remotes = remotes;
-  window.__mv.identity = () => loadIdentity();
-}
-
-// Sign-in card controls
-$('login-form').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const name = $('login-name').value.trim();
-  const pin = $('login-pin').value;
-  if (name.length < 3) return loginError(AUTH_MESSAGES.bad_name);
-  if (pin.length < 4) return loginError(AUTH_MESSAGES.bad_pin);
-  loginError('Connecting…', 'info');
-  armLoginWatchdog();
-  applyPlayerName(name);
-  if (net) {
-    net.signIn(name, pin);
-    if (!net.connected && net.status !== 'connecting') net.connect();
-  } else startNet({ mode: 'credential', name, pin });
-});
-$('login-guest').addEventListener('click', () => {
-  const name = $('login-name').value.trim() || game.state.appearance.name || 'Guest';
-  hideLogin();
-  if (!game.state.seenHelp) showHelp();   // guests start fresh every visit
-  if (net) net.playAsGuest(name);
-  else startNet({ mode: 'guest', name });
-});
-// Server settings: the same card the online-only build uses, reachable any time
-// so a dead server is never a modal you cannot escape.
-$('login-server').addEventListener('click', () => {
-  hideLogin();
-  if (net) { net.disconnect(); net = null; }
-  showOfflineGate();
-});
-
-// --- offline gate (online-only build) --------------------------------------
-async function connectFromGate() {
-  const typed = $('offline-server').value.trim();
-  if (!typed) {
-    gateSay('Type a server address first — for example wss://your-worker.workers.dev/ws?room=metro-1');
-    $('offline-server').focus();
-    return;
-  }
-  // Say what kind of address this actually is before trying to dial it: pasting the
-  // game's own link into the server box is the single most common mistake here.
-  const verdict = classifyServerAddress(typed);
-  if (verdict.kind !== 'server') {
-    gateSay(verdict.message);
-    return;
-  }
-  const url = verdict.url;
-  gateBusy(true, 'Checking the server…');
-  const probe = await probeServer(url);
-  gateBusy(false);
-  if (!probe.ok) {
-    gateSay(probe.code === 'timeout'
-      ? 'That server did not answer in time. Check the address, and that the Worker is running.'
-      : 'Nothing answered at that address. Check it, and that the Worker is deployed and awake.');
-    return;
-  }
-  try { localStorage.setItem('metroventure_server', url); } catch { /* private mode */ }
-  location.reload();
-}
-
-async function retryFromGate() {
-  let stored = '';
-  try { stored = localStorage.getItem('metroventure_server') || ''; } catch { /* private mode */ }
-  gateBusy(true, 'Looking for a city server…');
-  if (stored) {
-    const probe = await probeServer(stored);
-    gateBusy(false);
-    if (probe.ok) { location.reload(); return; }
-    try { localStorage.removeItem('metroventure_server'); } catch { /* private mode */ }
-  }
-  const found = await discoverServerUrl();
-  gateBusy(false);
-  if (found) { location.reload(); return; }
-  gateSay(`No city server answered at ${location.host}. Start it, then Retry.`);
-}
-$('offline-connect').addEventListener('click', connectFromGate);
-$('offline-retry').addEventListener('click', retryFromGate);
-$('offline-server').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); connectFromGate(); }
-});
-$('btn-account').addEventListener('click', () => {
-  if (game.loginOpen) return hideLogin();
-  if (cloud) cloudStatus(`☁️ Signed in — cloud revision ${cloudRevision}`);
-  showLogin(net?.account ? `Signed in as ${net.name}. Enter a PIN to sign in as someone else.` : '');
-});
-
-function netLocalState() {
-  const p = game.player;
-  const v = p.vehicle;
-  return {
-    x: p.x,
-    z: p.z,
-    yaw: p.yaw,
-    moving: v ? Math.abs(v.speed) > 0.4 : Math.hypot(p.vx, p.vz) > 0.3,
-    vehicle: v ? Cust.encodeNetVehicle(v.data) : null,
-    emote: !v && p.char?.emote ? p.char.emote : null,
-  };
-}
-
-// ===========================================================================
 // Minimap
 // ===========================================================================
 const mm = $('minimap');
@@ -5379,7 +4795,6 @@ function drawMinimap() {
     g.beginPath(); g.arc(mx(st.x), mz(st.z), pulse + 2, 0, Math.PI * 2); g.stroke();
     dot(st.x, st.z, 2.5, '#f43f5e');
   }
-  if (net) for (const r of remotes.values()) if (net.peers.get(r.id)?.visible) dot(r.x, r.z, 2.4, '#38bdf8');
   // player arrow (the map scrolls under it, so it sits dead centre)
   g.save();
   g.translate(mx(p.x), mz(p.z));
@@ -5442,7 +4857,6 @@ function frame() {
   updatePlayer(dt);
   updateInteriorState();
   updateBuildGhost();
-  if (net) { net.update(dt, netLocalState()); updateRemotes(dt); }
 
   // owned parked vehicles coast to a stop & stay out of walls (wrecks animate smoke)
   for (const v of game.vehicles) {
@@ -5561,37 +4975,11 @@ function frame() {
 // Boot
 // ===========================================================================
 async function boot() {
-  // Decide online-vs-offline *before* reading a save: if a city server answers,
-  // that server owns the save and anything this device played offline is dropped.
-  const serverUrl = await discoverServerUrl();
-  let hasLocal = false;
-  try { hasLocal = !!localStorage.getItem(SAVE_KEY); } catch { /* private mode */ }
-  const policy = bootPolicy(serverUrl, hasLocal, { allowOffline: offlineAllowed(location.href) });
-
   game.state = Eco.createInitialState();
-  if (policy.blocked) {
-    // The public build has no offline mode: no server, no city.
-    applyState();
-    showOfflineGate();
-    return;
-  }
-  if (policy.online) {
-    cityServerUrl = policy.serverUrl;
-    if (policy.purgeLocalSave) clearLocalSave();
-    applyState();                       // a fresh city until the cloud copy arrives
-    if (policy.purgeLocalSave) {
-      toast('🌐 Online world — offline progress was cleared. Sign in to keep a city.', 'warn');
-    }
-    const saved = loadIdentity();
-    if (saved?.token) startNet({ mode: 'token', token: saved.token, name: saved.name });
-    else if (game.helpOpen) pendingLogin = true; // ask once the welcome card is dismissed
-    else showLogin();
-  } else {
-    const loaded = hasLocal ? loadGame(true) : false;
-    if (!loaded) applyState();
-    if (!game.state.seenHelp) showHelp();
-    else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
-  }
+  const loaded = loadGame(true);
+  if (!loaded) applyState();
+  if (!game.state.seenHelp) showHelp();
+  else toast(`Welcome back, ${game.state.appearance.name}!`, 'good');
 
   camera.position.set(game.player.x - 6, 5, game.player.z - 6);
   frame();
@@ -5599,7 +4987,6 @@ async function boot() {
 
 window.addEventListener('beforeunload', () => {
   if (!game.state) return;
-  if (cityServerUrl) flushCloudSave();   // online: the cloud is the save
-  else saveGame(true);
+  saveGame(true);
 });
 boot();

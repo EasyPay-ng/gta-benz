@@ -187,27 +187,4 @@ export function applyVehicleMod(state, vehId, kind, value) {
   return { ok: false, msg: 'Unknown mod category.' };
 }
 
-/** Encode vehicle model + custom appearance into a <=48-char multiplayer wire token. */
-export function encodeNetVehicle(vehData) {
-  if (!vehData || !vehData.model) return null;
-  const color = vehData.color || '';
-  const livery = vehData.livery && vehData.livery !== 'clean' ? vehData.livery : '';
-  const rims = vehData.rims && vehData.rims !== 'silver' ? vehData.rims : '';
-  const glow = vehData.underglow && vehData.underglow !== 'none' ? vehData.underglow : '';
-  if (!color && !livery && !rims && !glow) return vehData.model;
-  return `${vehData.model}|${color}|${livery}|${rims}|${glow}`;
-}
 
-/** Decode a multiplayer vehicle token back into `{ model, color, livery, rims, underglow }`. */
-export function decodeNetVehicle(raw, fallbackColor = '#38bdf8') {
-  if (!raw || typeof raw !== 'string') return null;
-  const [model, color, livery, rims, underglow] = raw.split('|');
-  if (!VEHICLE_MODELS[model]) return null;
-  return {
-    model,
-    color: /^#[0-9a-fA-F]{3,8}$/.test(color || '') ? color : (VEHICLE_MODELS[model].fixedColor || fallbackColor),
-    livery: CAR_LIVERIES[livery] ? livery : (VEHICLE_MODELS[model].defaultLivery || 'clean'),
-    rims: RIM_FINISHES[rims] ? rims : 'silver',
-    underglow: UNDERGLOW_OPTIONS[underglow] ? underglow : 'none',
-  };
-}
